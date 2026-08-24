@@ -6,6 +6,57 @@ on:
 env:
   GH_TOKEN: ${{ github.token }}
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      tag: ${{ steps.create-tag.outputs.tag }}
+      version: ${{ steps.create-tag.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0' # Fetch all history for tags
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'latest'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create tag and release
+        id: create-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          # Most recent tag, or bootstrap from package.json when none exist yet.
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            BASE_VERSION="${PREVIOUS_TAG#v}"
+          else
+            BASE_VERSION="$(node -p "require('./package.json').version")"
+          fi
+          NEXT_VERSION="$(node .github/scripts/generate-version "$BASE_VERSION" patch)"
+          TAG="v${NEXT_VERSION}"
+          echo "Bumping $BASE_VERSION -> $TAG at commit $COMMIT_SHA"
+          git tag "$TAG" "$COMMIT_SHA"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        shell: bash
+        run: |
+          gh release create "${{ steps.create-tag.outputs.tag }}" \
+            --title "${{ steps.create-tag.outputs.tag }}" \
+            --notes "Automated release for latest commit after merge"
   build-and-test:
     runs-on: ubuntu-latest
     permissions:
@@ -38,7 +89,10 @@ jobs:
           CODECRAWLER_DB="$(mktemp -u).db" node dist/index.js status
   build-and-publish:
     runs-on: ubuntu-latest
-    needs: build-and-test
+    if: github.actor != 'dependabot[bot]'
+    needs:
+      - create-release
+      - build-and-test
     environment:
       name: npmjs-publish
       url: https://www.npmjs.com/package/@nithin554/code-crawler
@@ -48,6 +102,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: '0' # Fetch all history for tags
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -67,38 +123,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create tag
-        id: tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          COMMIT_SHA="$(git rev-parse HEAD)"
-          # Most recent tag, or bootstrap from package.json when none exist yet.
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-          if [ -n "$PREVIOUS_TAG" ]; then
-            BASE_VERSION="${PREVIOUS_TAG#v}"
-          else
-            BASE_VERSION="$(node -p "require('./package.json').version")"
-          fi
-          NEXT_VERSION="$(node .github/scripts/generate-version "$BASE_VERSION" patch)"
-          TAG="v${NEXT_VERSION}"
-          echo "Bumping $BASE_VERSION -> $TAG at commit $COMMIT_SHA"
-          git tag "$TAG" "$COMMIT_SHA"
-          git push origin "$TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Create release
-        shell: bash
-        run: |
-          gh release create "${{ steps.tag.outputs.tag }}" \
-            --title "${{ steps.tag.outputs.tag }}" \
-            --notes "Automated release for latest commit after merge"
-
       - name: Set package version
         shell: bash
-        run: npm version "${{ steps.tag.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ needs.create-release.outputs.version }}" --no-git-tag-version
 
       - name: Publish to registry
         shell: bash
