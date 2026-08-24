@@ -16,7 +16,7 @@ jobs:
       version: ${{ steps.create-tag.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: '0' # Fetch all history for tags
 
@@ -63,7 +63,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -101,7 +101,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: '0' # Fetch all history for tags
 
