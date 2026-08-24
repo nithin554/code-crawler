@@ -78,6 +78,25 @@ Environment variables:
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap |
 
+## CI & publishing
+
+GitHub Actions runs on every pull request (`pull-request.yml`): `npm ci` →
+typecheck → tests → build → smoke-test of the built CLI.
+
+Merges to `main` trigger `publish.yml`, which re-runs the same checks and then,
+if green, **auto-releases**:
+
+1. Reads the most recent `v*` tag (or `package.json` version on the first run),
+   computes the next patch version, and pushes a `vX.Y.Z` tag.
+2. Creates a matching GitHub release.
+3. Publishes the package to the npm registry with **provenance** (OIDC
+   trusted publishing) — no token or repository secret is needed.
+
+To enable npm publishing, enable **Trusted Publishing** for the package on
+npmjs.com (npmjs.com/settings → Packages → your package → "Trusted Publishing"),
+pointing at this repository and the `npmjs-publish` environment. Optionally add
+approval rules to that environment to gate releases.
+
 ## Using as an MCP server
 
 ### Claude Desktop

@@ -1,16 +1,26 @@
 {
-  "name": "code-crawler",
+  "name": "@nithin554/code-crawler",
   "version": "0.1.0",
   "description": "Static call tracing MCP server backed by a SQLite property graph of your codebase",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/nithin554/code-crawler#readme",
+  "bugs": {
+    "url": "https://github.com/nithin554/code-crawler/issues"
+  },
   "bin": {
     "codecrawler": "dist/index.js"
   },
   "files": [
-    "dist",
-    "wasm"
+    "dist"
   ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nithin554/code-crawler.git"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
@@ -18,7 +28,8 @@
     "serve": "tsx src/index.ts serve",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

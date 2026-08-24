@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { GraphStore } from "../src/graph/store.js";
 import { crawlProject } from "../src/crawler.js";
@@ -68,18 +69,20 @@ describe("crawlProject", () => {
   });
 
   it("removes stale files on re-crawl", async () => {
-    await crawlProject(store, FIXTURES, loadConfig().excludeDirs, {});
-    const fileNode = store.getNode(path.join(FIXTURES, "com", "acme", "Order.java"));
-    expect(fileNode).not.toBeNull();
-
-    // Delete the file, re-crawl, and confirm it disappears from the index.
-    const orderFile = path.join(FIXTURES, "com", "acme", "Order.java");
-    fsRenameAway(orderFile);
+    // Work on a temp copy so parallel test workers never see a mutated fixture.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-crawl-"));
+    fs.cpSync(FIXTURES, tmp, { recursive: true });
     try {
-      await crawlProject(store, FIXTURES, loadConfig().excludeDirs, {});
+      await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+      const orderFile = path.join(tmp, "com", "acme", "Order.java");
+      expect(store.getNode(orderFile)).not.toBeNull();
+
+      // Delete the file, re-crawl, and confirm it disappears from the index.
+      fs.rmSync(orderFile);
+      await crawlProject(store, tmp, loadConfig().excludeDirs, {});
       expect(store.getNode(orderFile)).toBeNull();
     } finally {
-      restore(orderFile);
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 
@@ -89,18 +92,3 @@ describe("crawlProject", () => {
     ).rejects.toThrow(/not a directory/);
   });
 });
-
-// -- helpers to temporarily move a fixture away ---------------------------------
-
-const moved: { from: string; to: string }[] = [];
-
-function fsRenameAway(file: string): void {
-  const to = `${file}.bak`;
-  fs.renameSync(file, to);
-  moved.push({ from: file, to });
-}
-
-function restore(file: string): void {
-  const entry = moved.find((m) => m.from === file);
-  if (entry) fs.renameSync(entry.to, entry.from);
-}
