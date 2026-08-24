@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# IDEs
+.idea/
+.vscode/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# OS
+.DS_Store

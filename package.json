@@ -1,0 +1,36 @@
+{
+  "name": "code-crawler",
+  "version": "0.1.0",
+  "description": "Static call tracing MCP server backed by a SQLite property graph of your codebase",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "codecrawler": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "serve": "tsx src/index.ts serve",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^13.0.3",
+    "tree-sitter-java": "^0.23.5",
+    "web-tree-sitter": "^0.26.12"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
