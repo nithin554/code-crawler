@@ -92,11 +92,6 @@ if green, **auto-releases**:
 3. Publishes the package to the npm registry with **provenance** (OIDC
    trusted publishing) — no token or repository secret is needed.
 
-To enable npm publishing, enable **Trusted Publishing** for the package on
-npmjs.com (npmjs.com/settings → Packages → your package → "Trusted Publishing"),
-pointing at this repository and the `npmjs-publish` environment. Optionally add
-approval rules to that environment to gate releases.
-
 ## Using as an MCP server
 
 ### Claude Desktop
