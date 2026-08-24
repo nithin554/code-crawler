@@ -38,7 +38,7 @@
     "web-tree-sitter": "^0.26.12"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
     "typescript": "^7.0.2",
