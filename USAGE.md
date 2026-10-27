@@ -198,7 +198,7 @@ get_callers(symbol: "app.repository.OrderRepository#find", depth: 3)
 
 Incoming `CALLS` edges answer the static case; incoming `DYNAMIC_DISPATCH` edges answer
 the "called through an interface" case. Check both — a method with zero callers can still
-have twenty dispatchers.
+be reached through dispatch.
 
 ### "Who implements this interface?"
 

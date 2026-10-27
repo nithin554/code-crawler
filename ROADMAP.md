@@ -43,7 +43,7 @@ fails if the conformance suite regresses.
 
 ## Phase 1 — Resolution quality
 
-Highest leverage per hour of work; every unresolved edge today is a question an agent
+Highest value per hour of work; every unresolved edge today is a question an agent
 cannot answer.
 
 - **Monorepo roots.** `tsconfig` `paths`/`baseUrl`, `package.json` workspaces,
@@ -83,7 +83,7 @@ Ordered by value ÷ modelling cost.
 | **Ruby** | `tree-sitter-ruby` | `method_missing`, `send`, `require`, open classes — reflection is the default | Rails routes, ActiveRecord, `Concern` | M–L |
 | **Rust** | `tree-sitter-rust` | traits and `impl` blocks, modules, best-effort macro handling | axum, actix | L |
 | **PHP** | `tree-sitter-php` | traits, namespaces, magic methods | Laravel container and facades, Symfony | M–L |
-| Swift / C / C++ | — | — | Vapor / — | L–XL |
+| Swift / C / C++ | not yet scoped | not yet scoped | Vapor (Swift only) | L–XL |
 
 Two rules for every language added:
 
@@ -142,7 +142,7 @@ flowchart LR
   P1 --> P6["Phase 6<br/>quality"]
 ```
 
-Effort key: **S** ≤ 1 day · **M** 1–3 days · **L** 1–2 weeks.
+Effort key: **S** ≤ 1 day · **M** 1–3 days · **L** 1–2 weeks · **XL** > 2 weeks.
 
 ## Non-goals
 
