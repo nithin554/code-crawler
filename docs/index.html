@@ -35,12 +35,14 @@
       <section class="hero">
         <div class="wrap">
           <div>
-            <span class="eyebrow">MCP server · Java-first · SQLite graph</span>
+            <span class="eyebrow">MCP server · Java · Python · TypeScript · SQLite graph</span>
             <h1>Give your AI a <span>real map</span> of the codebase.</h1>
             <p class="lead">
-              Code-Crawler turns a project into a queryable property graph of files, types,
-              methods, annotations, calls, virtual dispatch, and aspect advice — then exposes
-              it to Claude, Cursor, Copilot, and any MCP client as 22 precise tools.
+              Code-Crawler turns a project into a queryable property graph of modules,
+              types, methods, annotations, calls, virtual dispatch, and the wiring
+              frameworks add — routes, injected dependencies, and reflective lookups —
+              then exposes it to Claude, Cursor, Copilot, and any MCP client as 22 precise
+              tools.
             </p>
             <div class="hero-actions">
               <a class="btn btn-primary" href="usage.html">Get started →</a>
@@ -57,21 +59,19 @@
           <div class="code-card">
             <div class="code-title">
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span>trace_execution · com.acme.Checkout#checkout</span>
+              <span>one graph · python + typescript</span>
             </div>
-            <pre><code><span class="c-com">// static source says: payment.pay(total)</span>
-<span class="c-com">// Code-Crawler shows what really runs:</span>
+            <pre><code><span class="c-com">// routes found across two languages, one index</span>
+<span class="c-edge">GET</span>  <span class="c-fn">/orders/:id</span>   <span class="c-type">OrderController#read</span>   <span class="c-com">nestjs · controller.ts:7</span>
+<span class="c-edge">GET</span>  <span class="c-fn">/orders/{id}</span>  <span class="c-fn">read_order</span>             <span class="c-com">fastapi · api.py:13</span>
 
-<span class="c-fn">Checkout#checkout</span>
-  <span class="c-edge">INTERCEPT</span>       <span class="c-type">AuditAspect#beforeCheckout</span>
-  <span class="c-edge">CALLS</span>           <span class="c-fn">Payment#pay</span>
-    <span class="c-edge">INTERCEPT</span>       <span class="c-type">AuditAspect#auditPayment</span>
-    <span class="c-edge">DYNAMIC_DISPATCH</span> <span class="c-type">CardPayment#pay</span>
-      <span class="c-edge">CALLS</span>           <span class="c-fn">Gateway#authorize</span>
-    <span class="c-edge">DYNAMIC_DISPATCH</span> <span class="c-type">UpiPayment#pay</span>
-      <span class="c-edge">CALLS</span>           <span class="c-fn">Gateway#settle</span>
+<span class="c-com">// trace_execution · OrderService#place</span>
+<span class="c-fn">OrderService#place</span>
+  <span class="c-edge">CALLS</span>      <span class="c-type">OrderRepository#create</span>   <span class="c-com">repository.py:19</span>
+  <span class="c-edge">CALLS</span>      <span class="c-type">OrderService#audit</span>        <span class="c-com">service.py:20</span>
+  <span class="c-edge">INJECTS</span>    <span class="c-type">OrderRepository</span>          <span class="c-com">fastapi · Depends()</span>
 
-<span class="c-good">3 runtime paths</span> <span class="c-com">· 2 advice hops · 1 interface</span></code></pre>
+<span class="c-good">2 languages</span> <span class="c-com">· 2 routes · 1 injection graph · 1 SQLite file</span></code></pre>
           </div>
         </div>
       </section>
@@ -83,9 +83,9 @@
             <h2>Grep can find a string. It can't answer a graph question.</h2>
             <p class="lead">
               “Who transitively calls this method?” “What breaks if I change this
-              interface?” “Which advice wraps this endpoint?” Those are traversals, not
-              searches. Code-Crawler builds the graph once and answers them with bounded
-              recursive SQL.
+              interface?” “What does the framework invoke that no source line calls?”
+              Those are traversals, not searches. Code-Crawler builds the graph once and
+              answers them with bounded recursive SQL.
             </p>
           </div>
 
@@ -105,10 +105,11 @@
               </p>
             </article>
             <article class="card">
-              <h3><span class="icon green" aria-hidden="true">⚡</span> Aspect advice</h3>
+              <h3><span class="icon green" aria-hidden="true">⚡</span> Run-time wiring</h3>
               <p>
-                AspectJ and Spring AOP pointcuts are matched and woven into traces as
-                <code>INTERCEPT</code> hops — before, after, around, and named pointcuts.
+                Routes, injected dependencies, and reflective lookups become first-class
+                edges — including AspectJ and Spring AOP pointcuts woven into traces as
+                <code>INTERCEPT</code> hops.
               </p>
             </article>
             <article class="card">
@@ -153,8 +154,9 @@
             <div class="arch-box">
               <h4>1 · Discover &amp; parse</h4>
               <p>
-                <code>tree-sitter-java</code> WASM grammar extracts packages, types,
-                methods, constructors, fields, imports, modifiers, and annotations.
+                Tree-sitter WASM grammars for Java, Python, TypeScript and JavaScript
+                extract modules, types, methods, constructors, fields, imports, modifiers,
+                annotations and decorators.
               </p>
             </div>
             <div class="arch-box">
@@ -225,7 +227,7 @@ npm run build</code></pre>
             <div class="step">
               <h3>Index a project</h3>
               <p>Re-run any time; the crawl is idempotent and refreshes changed files.</p>
-              <pre><code>node dist/index.js crawl /absolute/path/to/your-java-project
+              <pre><code>node dist/index.js crawl /absolute/path/to/your-project
 node dist/index.js status</code></pre>
             </div>
             <div class="step">
@@ -263,7 +265,7 @@ List the aspects that intercept Payment#pay.</code></pre>
         <div class="wrap">
           <div class="section-head">
             <span class="eyebrow">Tool surface</span>
-            <h2>Seventeen tools, grouped by question.</h2>
+            <h2>Twenty-two tools, grouped by question.</h2>
             <p class="lead">
               Every tool returns structured JSON. Unknown symbols return fuzzy suggestions
               instead of a bare error.
@@ -311,6 +313,15 @@ List the aspects that intercept Payment#pay.</code></pre>
                   <td>What actually executes, and what intercepts it?</td>
                 </tr>
                 <tr>
+                  <td>Run-time wiring</td>
+                  <td>
+                    <code>find_entry_points</code> <code>find_routes</code>
+                    <code>find_injections</code> <code>find_reflections</code>
+                    <code>find_external_dependencies</code>
+                  </td>
+                  <td>What does a framework invoke, inject, or reflect on?</td>
+                </tr>
+                <tr>
                   <td>Analytics</td>
                   <td><code>find_hotspots</code> <code>find_dead_code</code></td>
                   <td>Where is the risk and the unused code?</td>
@@ -331,7 +342,7 @@ List the aspects that intercept Payment#pay.</code></pre>
       <h2>Stop guessing what the code does.</h2>
       <p>
         Build the graph once, then let your assistant trace callers, runtime dispatch,
-        advice, and decorators with exact file and line references.
+        routes, injections, and reflective lookups with exact file and line references.
       </p>
       <a class="btn btn-primary" href="usage.html">Read the quickstart →</a>
     </section>
@@ -342,6 +353,7 @@ List the aspects that intercept Payment#pay.</code></pre>
         <span>
           <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
           <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> ·
           <a href="tools.html">Tools</a>
         </span>
       </div>

@@ -410,6 +410,10 @@ pre code {
   color: #34d399;
 }
 
+.c-warn {
+  color: #f87171;
+}
+
 .c-key {
   color: #7dd3fc;
 }

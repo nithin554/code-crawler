@@ -37,11 +37,12 @@
           <span class="eyebrow">Walkthroughs</span>
           <h1>Examples</h1>
           <p class="lead">
-            Five questions a static search cannot answer, and the exact tool calls that do.
-            All examples use the small fixture project below.
+            Five questions a static search cannot answer, answered on real fixtures in
+            Java, Python, and TypeScript. Every response below is actual tool output.
           </p>
           <div class="toc">
-            <a href="#fixture">Fixture</a>
+            <a href="#fixture">Fixtures</a>
+            <a href="#languages">Per-language examples</a>
             <a href="#impact">Impact analysis</a>
             <a href="#runtime">Runtime trace</a>
             <a href="#aspects">Aspect audit</a>
@@ -54,10 +55,50 @@
       <section class="section" id="fixture">
         <div class="wrap">
           <span class="eyebrow">Setting</span>
-          <h2>The fixture project</h2>
+          <h2>Three fixtures, one schema</h2>
           <p class="lead">
-            An interface with two implementations, a service that calls it, an aspect that
-            intercepts it, and a class carrying framework decorators.
+            Each language ships a six-file fixture built from the same shapes — a service,
+            a repository, a route, an injected dependency, and one run-time lookup. The
+            Java fixture goes deepest on dispatch and advice; the Python and TypeScript
+            fixtures cover framework wiring.
+          </p>
+
+          <div class="table-wrap" style="margin-top: 24px">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fixture</th>
+                  <th>Path</th>
+                  <th>Crawl result</th>
+                  <th>Exercises</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Java</strong></td>
+                  <td><code>tests/fixtures/java/dynamic</code></td>
+                  <td>6 files · 43 nodes · 61 edges</td>
+                  <td>interface dispatch, AspectJ advice, decorators</td>
+                </tr>
+                <tr>
+                  <td><strong>Python</strong></td>
+                  <td><code>tests/fixtures/python/sample</code></td>
+                  <td>6 files · 49 nodes · 65 edges</td>
+                  <td>FastAPI routes, <code>Depends()</code> DI, <code>importlib</code></td>
+                </tr>
+                <tr>
+                  <td><strong>TypeScript</strong></td>
+                  <td><code>tests/fixtures/typescript/sample</code></td>
+                  <td>6 files · 62 nodes · 81 edges</td>
+                  <td>NestJS + Express routes, DI, dynamic <code>import()</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="muted" style="margin-top: 24px">
+            The Java fixture is reproduced below and drives examples 1–5. The Python and
+            TypeScript equivalents appear in the per-language section that follows.
           </p>
 
           <div class="grid grid-2" style="margin-top: 28px">
@@ -117,6 +158,205 @@
               advice edges. Response bodies below are trimmed to the fields that matter.
             </p>
           </div>
+        </div>
+      </section>
+
+      <section class="section" id="languages">
+        <div class="wrap">
+          <span class="eyebrow">Same tools, any language</span>
+          <h2>Per-language examples</h2>
+          <p class="lead">
+            Tool names and response shapes do not change with the language. What changes is
+            what each grammar lets the parser see — so these three fixtures are chosen to
+            show different surfaces. Responses are actual output with
+            <code>filePath</code> values trimmed.
+          </p>
+
+          <h3 style="margin-top: 40px">Python · FastAPI routes and <code>Depends()</code> wiring</h3>
+          <div class="grid grid-2" style="margin-top: 20px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>app/api.py · app/service.py</span>
+              </div>
+              <pre><code>router = <span class="c-type">APIRouter</span>()
+
+<span class="c-type">@router.get</span>(<span class="c-str">"/orders/{order_id}"</span>)
+<span class="c-kw">def</span> <span class="c-fn">read_order</span>(order_id: <span class="c-type">str</span>,
+               service: <span class="c-type">OrderService</span> = <span class="c-type">Depends</span>(get_service)):
+    <span class="c-kw">return</span> service.repo.<span class="c-fn">find</span>(order_id)
+
+<span class="c-type">@router.post</span>(<span class="c-str">"/orders"</span>)
+<span class="c-kw">def</span> <span class="c-fn">create_order</span>(...):
+    <span class="c-kw">return</span> {<span class="c-str">"id"</span>: service.<span class="c-fn">place</span>(order_id, amount)}
+
+<span class="c-type">@injectable</span>
+<span class="c-kw">class</span> <span class="c-type">OrderService</span>:
+    <span class="c-kw">def</span> <span class="c-fn">__init__</span>(self, repo: <span class="c-type">OrderRepository</span>) -> <span class="c-kw">None</span>:
+        self.repo = repo</code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_routes()</span>
+              </div>
+              <pre><code>{
+  <span class="c-str">"source"</span>: { <span class="c-str">"id"</span>: <span class="c-str">"module:app.api"</span>, <span class="c-str">"kind"</span>: <span class="c-str">"module"</span> },
+  <span class="c-str">"target"</span>: { <span class="c-str">"id"</span>: <span class="c-str">"module:app.api#read_order"</span> },
+  <span class="c-str">"framework"</span>: <span class="c-str">"router"</span>,
+  <span class="c-str">"httpMethod"</span>: <span class="c-str">"GET"</span>,
+  <span class="c-str">"path"</span>: <span class="c-str">"/orders/{order_id}"</span>,
+  <span class="c-str">"line"</span>: 13
+},
+{
+  <span class="c-str">"source"</span>: { <span class="c-str">"id"</span>: <span class="c-str">"module:app.api"</span> },
+  <span class="c-str">"target"</span>: { <span class="c-str">"id"</span>: <span class="c-str">"module:app.api#create_order"</span> },
+  <span class="c-str">"framework"</span>: <span class="c-str">"router"</span>,
+  <span class="c-str">"httpMethod"</span>: <span class="c-str">"POST"</span>,
+  <span class="c-str">"path"</span>: <span class="c-str">"/orders"</span>,
+  <span class="c-str">"line"</span>: 18
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_injections()</span>
+              </div>
+              <pre><code><span class="c-com">// constructor injection</span>
+app.service.OrderService
+  <span class="c-edge">INJECTS</span> app.repository.OrderRepository
+  <span class="c-str">framework: "dependency-injector"</span>
+  <span class="c-str">injectedName: "repo"</span> · line 15
+
+<span class="c-com">// framework-supplied parameter</span>
+module:app.api
+  <span class="c-edge">INJECTS</span> app.service.OrderService
+  <span class="c-str">framework: "fastapi"</span>
+  <span class="c-str">injectedName: "service"</span> · line 19</code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_reflections() · find_entry_points()</span>
+              </div>
+              <pre><code><span class="c-com">// importlib.import_module("app.plugins." + name)</span>
+module:app.dynamic#load_plugin
+  <span class="c-edge">REFLECTS</span> __reflect__:app.plugins.
+  <span class="c-str">mechanism: "importlib.import_module"</span> · line 6
+
+<span class="c-com">// entry points — CLI and HTTP in one index</span>
+module:app.main            <span class="c-good">cli</span>   __main__
+module:app.main#main       <span class="c-good">cli</span>   main
+module:app.api#create_order <span class="c-good">http</span> POST /orders
+module:app.api#read_order   <span class="c-good">http</span> GET /orders/{order_id}</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              <code>trace_execution("app.service.OrderService#place")</code> reaches
+              <code>app.repository.OrderRepository#create</code> (line 19) and
+              <code>app.service.OrderService#audit</code> (line 20) at depth 1, then stops at
+              the boundary <code>ext:builtins</code>. The <code>framework</code> field on a
+              route reports the decorator receiver — <code>router</code> here, because the
+              handler hangs off an <code>APIRouter</code> instance — while a
+              <code>Depends()</code> parameter reports <code>fastapi</code>.
+            </p>
+          </div>
+
+          <h3 style="margin-top: 48px">TypeScript · one endpoint, two frameworks</h3>
+          <div class="grid grid-2" style="margin-top: 20px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>src/routes.ts · src/controller.ts</span>
+              </div>
+              <pre><code><span class="c-kw">const</span> app = <span class="c-fn">express</span>();
+app.<span class="c-fn">get</span>(<span class="c-str">"/orders/:id"</span>, (req, res) => {
+  res.<span class="c-fn">json</span>(service.<span class="c-fn">place</span>(req.params.id));
+});
+
+<span class="c-type">@Controller</span>(<span class="c-str">"orders"</span>)
+<span class="c-kw">export class</span> <span class="c-type">OrderController</span> {
+  <span class="c-kw">constructor</span>(<span class="c-kw">private readonly</span> service: <span class="c-type">OrderService</span>) {}
+
+  <span class="c-type">@Get</span>(<span class="c-str">":id"</span>)
+  <span class="c-fn">read</span>(<span class="c-type">@Param</span>(<span class="c-str">"id"</span>) id: <span class="c-type">string</span>) {
+    <span class="c-kw">return</span> <span class="c-kw">this</span>.service.<span class="c-fn">place</span>(id);
+  }
+}</code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_routes()</span>
+              </div>
+              <pre><code><span class="c-com">// Express — inline handlers get synthetic ids</span>
+module:src.routes
+  <span class="c-edge">ROUTES</span> module:src.routes#&lt;anonymous@7&gt;
+  <span class="c-str">framework: "express"</span> · GET /orders/:id · line 6
+
+<span class="c-com">// NestJS — decorators fold controller + method paths</span>
+src.controller.OrderController
+  <span class="c-edge">ROUTES</span> #read    <span class="c-str">framework: "nestjs"</span>
+  GET /orders/:id · line 7
+src.controller.OrderController
+  <span class="c-edge">ROUTES</span> #create  <span class="c-str">framework: "nestjs"</span>
+  POST /orders · line 12
+
+<span class="c-good">4 routes</span> <span class="c-com">· 2 frameworks · 1 logical resource</span></code></pre>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_injections() · find_reflections()</span>
+              </div>
+              <pre><code>src.controller.OrderController
+  <span class="c-edge">INJECTS</span> src.service.OrderService
+  <span class="c-str">framework: "ts-di" · injectedName: "service"</span>
+
+src.service.OrderService
+  <span class="c-edge">INJECTS</span> src.repository.OrderRepository
+  <span class="c-str">framework: "ts-di" · injectedName: "repo"</span>
+
+<span class="c-com">// await import(`./plugins/${name}`)</span>
+module:src.dynamic#loadPlugin
+  <span class="c-edge">REFLECTS</span> __reflect__:./plugins/${name}
+  <span class="c-str">mechanism: "import()" · line 1</span></code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>trace_execution("src.service.OrderService#place")</span>
+              </div>
+              <pre><code>depth 1  <span class="c-type">OrderRepository#create</span>  <span class="c-com">repository.ts:8</span>
+depth 1  <span class="c-type">OrderService#audit</span>       <span class="c-com">service.ts:9</span>
+depth 2  <span class="c-type">OrderRepository#find</span>     <span class="c-com">repository.ts:9</span>
+depth 2  <span class="c-type">ext:console</span>              <span class="c-com">external boundary</span>
+depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-com">receiver type unknown</span>
+
+<span class="c-com">// unresolved calls stay visible instead of vanishing —</span>
+<span class="c-com">// widen the call with get_node() and try again.</span></code></pre>
+            </div>
+          </div>
+
+          <h3 style="margin-top: 48px">Java · dispatch and advice</h3>
+          <p class="lead">
+            The Java fixture registers no HTTP routes and no DI container — it targets the
+            harder problem instead: which override actually runs, and which advice wraps it.
+            <code>find_routes()</code> and <code>find_injections()</code> return empty for it,
+            which is the honest answer. The five walkthroughs below are that fixture.
+          </p>
         </div>
       </section>
 
@@ -473,7 +713,7 @@
 
     <section class="cta">
       <h2>Every tool, every argument.</h2>
-      <p>The reference lists the complete input schema and response shape for all 17 tools.</p>
+      <p>The reference lists the complete input schema and response shape for all 22 tools.</p>
       <a class="btn btn-primary" href="tools.html">Tool reference →</a>
     </section>
 
@@ -483,6 +723,7 @@
         <span>
           <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
           <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> ·
           <a href="tools.html">Tools</a>
         </span>
       </div>
