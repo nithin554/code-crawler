@@ -1,5 +1,7 @@
 import type { LanguageConfig } from "../language.js";
 import { javaConfig } from "./java.js";
+import { pythonConfig } from "./python.js";
+import { typescriptConfig } from "./typescript.js";
 
 /**
  * Registry of supported languages. Adding a language means:
@@ -10,6 +12,8 @@ import { javaConfig } from "./java.js";
 
 const registry = new Map<string, LanguageConfig>([
   ["java", javaConfig],
+  ["python", pythonConfig],
+  ["typescript", typescriptConfig],
 ]);
 
 export function getLanguageConfig(name: string): LanguageConfig | null {

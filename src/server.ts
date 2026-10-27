@@ -18,6 +18,11 @@ import {
   findAnnotated,
   hotspots,
   deadCode,
+  findEntryPoints,
+  findInjections,
+  findReflections,
+  findRoutes,
+  externalDependencies,
   type SymbolRef,
 } from "./graph/queries.js";
 import { loadConfig } from "./config.js";
@@ -67,13 +72,15 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "crawl_project",
-    "Index a project directory into the codebase graph. Idempotent: re-crawling refreshes the index; files that disappeared are removed. Returns counts of files, nodes, edges, and resolved/unresolved call sites.",
+    "Index a project directory into the codebase graph. Supports Java, Python, TypeScript, and JavaScript. Idempotent: re-crawling refreshes the index; files that disappeared are removed. Returns counts of files, nodes, edges, resolved/unresolved call sites, entry points, injections, reflections, and external dependencies.",
     {
       path: z.string().describe("Absolute path to the project root directory to index."),
       language: z
         .string()
         .optional()
-        .describe("Force a parser language (e.g. 'java'). Defaults to file-extension detection."),
+        .describe(
+          "Force a parser language: 'java', 'python', 'typescript', or 'javascript'. Defaults to file-extension detection."
+        ),
       fileFilter: z
         .string()
         .optional()
@@ -438,7 +445,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "find_dead_code",
-    "Find methods/constructors with no incoming calls, dispatch, or advice edges. Excludes entry points (`main`) and tests by default; framework-invoked code may be reported false-positively.",
+    "Find methods/constructors with no incoming calls, dispatch, or advice edges. Excludes framework-invoked entry points (routes, listeners, schedulers, event handlers, `main`) and test sources by default; code invoked purely through reflection may still be reported.",
     {
       limit: z.number().int().min(1).max(500).optional().describe("Max symbols returned."),
       include_constructors: z.boolean().optional().describe("Include constructors (default false)."),
@@ -493,6 +500,125 @@ export function createServer(store: GraphStore, config: Config): McpServer {
   );
 
   server.tool(
+    "find_entry_points",
+    "List framework-invoked roots (HTTP routes/controllers, message listeners, schedulers, event handlers, CLI entry points, tests). Root set for a runtime trace: nothing in source needs to call these.",
+    {
+      kind: z
+        .string()
+        .optional()
+        .describe("Filter by entry-point kind: http, messaging, scheduler, event, cli, test, route."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+    },
+    async ({ kind, limit }) => {
+      const results = findEntryPoints(store, { kind, limit });
+      return text({
+        count: results.length,
+        entryPoints: results.map((e) => ({
+          symbol: ref(e.symbol),
+          entryPointKind: e.entryPointKind,
+          ...(e.detail ? { detail: e.detail } : {}),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_injections",
+    "Find dependencies supplied by a DI container or framework rather than by an explicit `new`/import — Spring `@Autowired`, NestJS constructor injection, FastAPI `Depends`, and similar. Each result carries the injecting symbol, the injected type, and the framework.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Restrict to a single injecting or injected symbol id/qualified name."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+    },
+    async ({ symbol, limit }) => {
+      const results = findInjections(store, { symbol, limit });
+      return text({
+        count: results.length,
+        injections: results.map((e) => ({
+          source: ref(e.source),
+          target: ref(e.target),
+          ...(e.injectedName ? { injectedName: e.injectedName } : {}),
+          ...(e.framework ? { framework: e.framework } : {}),
+          ...(e.line !== undefined ? { line: line(e.line) } : {}),
+          ...(e.external ? { external: true } : {}),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_reflections",
+    "Find run-time indirection the static call graph cannot see through: Java reflection and `ServiceLoader`, Python `getattr`/`importlib`, JavaScript `require`/dynamic `import()`. The target is the resolved symbol when it could be determined statically.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Restrict to a single looking-up or looked-up symbol id/qualified name."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+    },
+    async ({ symbol, limit }) => {
+      const results = findReflections(store, { symbol, limit });
+      return text({
+        count: results.length,
+        reflections: results.map((e) => ({
+          source: ref(e.source),
+          target: ref(e.target),
+          ...(e.mechanism ? { mechanism: e.mechanism } : {}),
+          ...(e.line !== undefined ? { line: line(e.line) } : {}),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_routes",
+    "Map HTTP route registrations (`app.get`, `@GetMapping`, FastAPI decorators, Express routers) to the handler they invoke. Bridges framework configuration to source symbols.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Restrict to a single registering or handling symbol id/qualified name."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+    },
+    async ({ symbol, limit }) => {
+      const results = findRoutes(store, { symbol, limit });
+      return text({
+        count: results.length,
+        routes: results.map((e) => ({
+          source: ref(e.source),
+          handler: ref(e.target),
+          ...(e.httpMethod ? { httpMethod: e.httpMethod } : {}),
+          ...(e.path ? { path: e.path } : {}),
+          ...(e.framework ? { framework: e.framework } : {}),
+          ...(e.line !== undefined ? { line: line(e.line) } : {}),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_external_dependencies",
+    "Summarize third-party packages the crawled source imports, with reference and file counts. External libraries are modelled as package-level nodes: the crawler records the dependency, not the library's internals.",
+    {
+      limit: z.number().int().min(1).max(500).optional().describe("Max packages (default 50)."),
+    },
+    async ({ limit }) => {
+      const results = externalDependencies(store, { limit });
+      return text({
+        count: results.length,
+        packages: results.map((p) => ({
+          package: p.package,
+          references: p.references,
+          files: p.files,
+          kinds: p.kinds,
+        })),
+      });
+    }
+  );
+
+  server.tool(
     "get_schema",
     "Describe the property-graph model: node kinds, edge kinds, and the id scheme (including annotations, aspects, and dynamic edges).",
     {},
@@ -506,14 +632,27 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           constructor: "com.acme.Foo#<init>",
           field: "com.acme.Foo$repo",
           annotation: "@Transactional",
+          module: "module:app/services/orders",
+          external: "ext:requests",
           import: "__import__:com.acme.Foo",
           unknown: "__unknown__:System.out.println",
         },
+        languages: ["java", "python", "typescript", "javascript"],
+        entryPoints:
+          "Nodes carry `entryPoint: 1`, `entryPointKind`, and `entryPointDetail` when a framework or runtime invokes them without a source-level call (HTTP routes, message listeners, schedulers, event handlers, CLI mains, tests).",
         dynamicModel: {
           DYNAMIC_DISPATCH:
             "caller -> concrete override/implementation; inferred from the type hierarchy and virtual/interface dispatch.",
           ADVISES: "advice method -> advised method; matched from @Before/@After/@Around pointcuts.",
-          ANNOTATED_WITH: "symbol -> annotation node; carries arguments and source line.",
+          INJECTS:
+            "injecting symbol -> injected type; DI/framework wiring such as @Autowired, NestJS constructor params, FastAPI Depends.",
+          REFLECTS:
+            "looking-up symbol -> resolved target; Class.forName, ServiceLoader, getattr, importlib, require, dynamic import().",
+          ROUTES: "registering symbol -> handler symbol; HTTP route/verb/path recorded on the edge.",
+          ANNOTATED_WITH:
+            "symbol -> annotation/decorator node; carries arguments and source line.",
+          CARRIES_CONTROL_FLOW:
+            "CALLS edges carry `conditional` and `controlFlow` (branch/loop/exception/predicate) plus the enclosing guard text.",
         },
         lineNumbers: "1-based in tool output",
       });
@@ -549,13 +688,19 @@ export function createServer(store: GraphStore, config: Config): McpServer {
               constructor: "com.acme.Foo#<init>",
               field: "com.acme.Foo$repo",
               annotation: "@Transactional",
+              module: "module:app/services/orders",
+              external: "ext:requests",
               import: "__import__:com.acme.Foo",
               unknown: "__unknown__:System.out.println",
             },
+            languages: ["java", "python", "typescript", "javascript"],
             dynamicModel: {
               DYNAMIC_DISPATCH:
                 "caller -> concrete override/implementation, inferred from the type hierarchy.",
               ADVISES: "advice method -> advised method, matched from AspectJ pointcuts.",
+              INJECTS: "injecting symbol -> injected type, from DI/framework wiring.",
+              REFLECTS: "looking-up symbol -> resolved target, from reflection/dynamic import.",
+              ROUTES: "registering symbol -> handler symbol, with HTTP verb and path.",
               ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
             },
           },

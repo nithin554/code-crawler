@@ -2,11 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { GraphStore } from "./graph/store.js";
 import type { GraphEdge, GraphNode, NodeKind } from "./graph/schema.js";
-import { annotationNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
+import { annotationNodeId, externalNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
 import { languageForFile } from "./parser/languages/index.js";
-import type { AnnotationInfo, ParsedFile } from "./parser/language.js";
+import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
 import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
 import { resolveJavaFile } from "./resolver/javaResolver.js";
+import { resolveGenericFile, resolveInjectionTarget, resolveReflectiveTarget, resolveRouteHandler } from "./resolver/genericResolver.js";
+import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import type { JavaParsedFile } from "./parser/languages/java.js";
 
@@ -39,6 +41,16 @@ export interface CrawlResult {
   aspects: number;
   /** Number of annotation/decorator usages indexed. */
   decorators: number;
+  /** Framework-invoked roots (routes, listeners, schedulers, CLI, tests). */
+  entryPoints: number;
+  /** Framework-supplied dependency edges. */
+  injections: number;
+  /** Run-time lookup edges (reflection, dynamic import, getattr). */
+  reflections: number;
+  /** Distinct external packages/specifiers referenced by the project. */
+  externalDependencies: number;
+  /** Route registrations mapped to handler methods. */
+  routes: number;
   languages: string[];
   durationMs: number;
 }
@@ -164,6 +176,14 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
         endLine: t.endLine,
         annotations: t.annotations.map((a) => a.name),
         ...(t.isAspect ? { aspect: true } : {}),
+        ...(t.exported === false ? { exported: false } : {}),
+        ...(t.kind === "module" && parsed.entryPoint
+          ? {
+              entryPoint: true,
+              entryPointKind: parsed.entryPoint.kind,
+              entryPointDetail: parsed.entryPoint.detail ?? parsed.entryPoint.kind,
+            }
+          : {}),
       },
     });
     edges.push({ source: fileId, target: t.id, kind: "CONTAINS", properties: {} });
@@ -195,6 +215,13 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
         annotations: m.annotations.map((a) => a.name),
         ...(m.adviceKind ? { adviceKind: m.adviceKind } : {}),
         ...(m.pointcut ? { pointcut: m.pointcut } : {}),
+        ...(m.entryPoint
+          ? {
+              entryPoint: true,
+              entryPointKind: m.entryPoint.kind,
+              entryPointDetail: m.entryPoint.detail ?? m.entryPoint.kind,
+            }
+          : {}),
       },
     });
     edges.push({
@@ -255,20 +282,60 @@ export function buildCallEdges(
   parsed: ParsedFile,
   index: ReturnType<typeof buildTypeIndex>,
   knownNodeIds: Set<string>
-): { edges: GraphEdge[]; phantomNodes: GraphNode[]; resolved: number; unresolved: number } {
+): {
+  edges: GraphEdge[];
+  phantomNodes: GraphNode[];
+  resolved: number;
+  unresolved: number;
+  external: number;
+  externalPackages: Set<string>;
+} {
   const edges: GraphEdge[] = [];
   const phantomNodes: GraphNode[] = [];
+  const externalPackages = new Set<string>();
   let resolved = 0;
   let unresolved = 0;
+  let external = 0;
 
   const javaParsed = parsed as JavaParsedFile;
   const resolvedCalls =
-    parsed.language === "java" ? resolveJavaFile(javaParsed, index) : [];
+    parsed.language === "java" ? resolveJavaFile(javaParsed, index) : resolveGenericFile(parsed, index);
 
   for (const rc of resolvedCalls) {
     // Calls in field/static initializers have no enclosing method; attribute
     // them to the enclosing type so the edge always has a valid source.
     const source = rc.callSite.enclosingMethodId || rc.callSite.enclosingTypeId;
+    const flowProps = rc.callSite.controlFlow
+      ? {
+          conditional:
+            rc.callSite.controlFlow.kinds.includes("branch") ||
+            rc.callSite.controlFlow.kinds.includes("exception"),
+          ...(rc.callSite.controlFlow.guards.length > 0
+            ? { guards: rc.callSite.controlFlow.guards }
+            : {}),
+        }
+      : {};
+    const flowKind = rc.callSite.controlFlow
+      ? { controlFlow: rc.callSite.controlFlow.kinds }
+      : {};
+
+    if (rc.external) {
+      external++;
+      const pkg = rc.externalModule ?? "unknown";
+      externalPackages.add(pkg);
+      const extId = externalNodeId(pkg);
+      if (!knownNodeIds.has(extId)) {
+        phantomNodes.push({
+          id: extId,
+          kind: "external_symbol",
+          qualifiedName: extId,
+          filePath: null,
+          properties: { name: pkg, package: pkg, external: true },
+        });
+        knownNodeIds.add(extId);
+      }
+    }
+
     if (rc.resolved) {
       resolved++;
       // Targets can reference synthetic methods (e.g. implicit default
@@ -297,6 +364,8 @@ export function buildCallEdges(
           resolved: true,
           confidence: Math.round(rc.confidence * 100) / 100,
           reason: rc.reason,
+          ...flowProps,
+          ...flowKind,
         },
       });
     } else {
@@ -321,12 +390,267 @@ export function buildCallEdges(
           resolved: false,
           confidence: 0,
           reason: rc.reason,
+          ...flowProps,
+          ...flowKind,
         },
       });
     }
   }
 
-  return { edges, phantomNodes, resolved, unresolved };
+  return { edges, phantomNodes, resolved, unresolved, external, externalPackages };
+}
+
+/**
+ * Framework wiring that the language parsers surface but the plain call
+ * resolver cannot see: external dependencies, dependency injection,
+ * reflective lookups and route registrations.
+ */
+export function buildDependencyGraph(
+  parsed: ParsedFile,
+  index: ReturnType<typeof buildTypeIndex>,
+  knownNodeIds: Set<string>
+): {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  entryPointMarks: Map<string, EntryPointInfo>;
+  injections: number;
+  reflections: number;
+  routes: number;
+  externalDependencies: Set<string>;
+} {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const entryPointMarks = new Map<string, EntryPointInfo>();
+  const externalDependencies = new Set<string>();
+  let injections = 0;
+  let reflections = 0;
+  let routes = 0;
+
+  const externalNode = (pkg: string): string => {
+    const id = externalNodeId(pkg);
+    if (!knownNodeIds.has(id)) {
+      nodes.push({
+        id,
+        kind: "external_symbol",
+        qualifiedName: id,
+        filePath: null,
+        properties: { name: pkg, package: pkg, external: true },
+      });
+      knownNodeIds.add(id);
+    }
+    externalDependencies.add(pkg);
+    return id;
+  };
+
+  const unknownNode = (id: string, name: string, props: Record<string, unknown>): string => {
+    if (!knownNodeIds.has(id)) {
+      nodes.push({
+        id,
+        kind: "unknown_symbol",
+        qualifiedName: id,
+        filePath: parsed.filePath,
+        properties: { name, ...props },
+      });
+      knownNodeIds.add(id);
+    }
+    return id;
+  };
+
+  // External imports become first-class nodes so unused third-party surface
+  // is queryable instead of silently dropped.
+  for (const imp of parsed.imports) {
+    if (!imp.module || isRelativeSpecifier(imp.module)) continue;
+    const candidate = imp.module.replace(/^\?suffix:/, "");
+    if (index.moduleExists(candidate) || index.matchModuleSuffix(candidate).length > 0) continue;
+    const pkg = externalPackageOf(imp.module);
+    if (!pkg) continue;
+    const target = externalNode(pkg);
+    edges.push({
+      source: importNodeId(imp.fqn),
+      target,
+      kind: "REFERENCES",
+      properties: {
+        external: true,
+        member: imp.importedName ?? imp.simpleName,
+      },
+    });
+  }
+
+  for (const inj of parsed.injections ?? []) {
+    const owner = inj.ownerId;
+    if (!owner) continue;
+    injections++;
+    // Primitive/structural types carry no dependency identity, so they get a
+    // count but no target edge (`@Body() body: { id: string }`).
+    if (isBuiltinTypeText(inj.type)) continue;
+    const scoped = resolveTypeCandidates(parsed, index, inj.type);
+    let target: string | undefined = scoped.length === 1 ? scoped[0] : undefined;
+    let isExternal = false;
+    if (!target && parsed.language !== "java") {
+      const resolved = resolveInjectionTarget(parsed, index, inj.type);
+      if (resolved?.targetId) {
+        target = resolved.targetId.startsWith("ext:") ? externalNode(resolved.external ?? inj.type) : resolved.targetId;
+        isExternal = Boolean(resolved.external);
+      }
+    }
+    if (!target) target = unknownNode(`__inject__:${inj.type || inj.name}`, inj.type || inj.name, { reason: "unresolved injected type" });
+    edges.push({
+      source: owner,
+      target,
+      kind: "INJECTS",
+      properties: {
+        line: inj.line,
+        injectedName: inj.name,
+        framework: inj.framework,
+        ...(isExternal ? { external: true } : {}),
+      },
+    });
+  }
+
+  for (const ref of parsed.reflectiveRefs ?? []) {
+    const owner = ref.enclosingMethodId || ref.enclosingTypeId;
+    if (!owner) continue;
+    const resolved = resolveReflectiveTarget(parsed, index, ref);
+    let target = resolved?.targetId;
+    let isExternal = false;
+    const targetLabel = ref.target || ref.receiver || ref.mechanism;
+    if (target && target.startsWith("ext:") && !isRelativeSpecifier(ref.target) && !isProjectInternalTarget(ref.target, index)) {
+      target = externalNode(resolved?.external ?? targetLabel);
+      isExternal = true;
+    } else if (!target || target.startsWith("ext:")) {
+      // Relative specifiers (`./plugins/${name}`) stay inside the project but
+      // cannot be named statically, so they are recorded, not externalised.
+      target = unknownNode(`__reflect__:${targetLabel}`, targetLabel, {
+        reason: "unresolved reflective target",
+        mechanism: ref.mechanism,
+      });
+    }
+    reflections++;
+    edges.push({
+      source: owner,
+      target,
+      kind: "REFLECTS",
+      properties: {
+        line: ref.line,
+        mechanism: ref.mechanism,
+        ...(isExternal ? { external: true } : {}),
+      },
+    });
+  }
+
+  for (const route of parsed.routes ?? []) {
+    const owner = route.enclosingTypeId;
+    if (!owner) continue;
+    const handlerId = resolveRouteHandler(parsed, index, route.handlerName, route.moduleId);
+    if (!handlerId) continue;
+    routes++;
+    edges.push({
+      source: owner,
+      target: handlerId,
+      kind: "ROUTES",
+      properties: {
+        line: route.line,
+        framework: route.framework,
+        httpMethod: route.httpMethod,
+        path: route.path,
+      },
+    });
+    entryPointMarks.set(handlerId, {
+      kind: "http",
+      detail: `${route.httpMethod} ${route.path}`,
+    });
+  }
+
+  if (parsed.entryPoint) {
+    const moduleType = parsed.types.find((t) => t.kind === "module");
+    if (moduleType) entryPointMarks.set(moduleType.id, parsed.entryPoint);
+  }
+
+  return {
+    nodes,
+    edges,
+    entryPointMarks,
+    injections,
+    reflections,
+    routes,
+    externalDependencies,
+  };
+}
+
+/** Type texts that name no project entity: primitives and inline structures. */
+const BUILTIN_TYPE_NAMES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "any",
+  "unknown",
+  "void",
+  "never",
+  "object",
+  "symbol",
+  "bigint",
+  "null",
+  "undefined",
+  "str",
+  "int",
+  "float",
+  "bool",
+  "bytes",
+  "bytearray",
+  "list",
+  "dict",
+  "set",
+  "tuple",
+  "frozenset",
+  "None",
+  "Any",
+  "Optional",
+]);
+
+function isBuiltinTypeText(raw: string): boolean {
+  const text = normalizeTypeText(raw);
+  if (!text) return false;
+  if (BUILTIN_TYPE_NAMES.has(text)) return true;
+  // Inline object/function types (`{ id: string }`, `() => void`).
+  return /[{}()=>]/.test(text);
+}
+
+/** True for `./x`, `../y` and `?suffix:` specifiers that stay in-project. */
+function isRelativeSpecifier(specifier: string): boolean {
+  const text = (specifier ?? "").trim();
+  return text.startsWith(".") || text.startsWith("?suffix:");
+}
+
+/**
+ * True when a run-time module lookup names a package the project itself owns.
+ * `importlib.import_module("app.plugins." + name)` yields the prefix
+ * `app.plugins.` — that is a project namespace, not a third-party library, so
+ * it must not be reported as an external dependency.
+ */
+function isProjectInternalTarget(specifier: string, index: ReturnType<typeof buildTypeIndex>): boolean {
+  const dotted = (specifier ?? "")
+    .replace(/^\?suffix:/, "")
+    .replace(/^\.+\//, "")
+    .replace(/[/\\]/g, ".")
+    .replace(/\.+$/, "")
+    .trim();
+  const root = dotted.split(".")[0];
+  if (!root) return false;
+  for (const moduleId of index.moduleIds) {
+    if (moduleId === root || moduleId.startsWith(`${root}.`)) return true;
+  }
+  return false;
+}
+
+/** First package/specifier segment of an import target. */
+function externalPackageOf(specifier: string): string {
+  const text = specifier.replace(/^\?suffix:/, "").trim();
+  if (!text) return "";
+  if (text.startsWith("@")) {
+    const parts = text.split("/");
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : text;
+  }
+  return text.split("/")[0]?.split(".")[0] ?? text;
 }
 
 /**
@@ -365,7 +689,7 @@ export async function crawlProject(
       const source = fs.readFileSync(file, "utf8");
       const config = languageForFile(file, options.language);
       if (!config) continue;
-      parsedFiles.push(await config.parseFile(source, file));
+      parsedFiles.push(await config.parseFile(source, file, { projectRoot: absPath }));
     } catch (err) {
       parseErrors.push(`${file}: ${(err as Error).message}`);
     }
@@ -398,16 +722,53 @@ export async function crawlProject(
   // to external types can be dropped instead of violating FK constraints.
   const allNodeIds = new Set<string>();
   const declarations = new Map<string, ReturnType<typeof buildDeclarationGraph>>();
+  const dependencyGraphs = new Map<string, ReturnType<typeof buildDependencyGraph>>();
+  const entryPointMarks = new Map<string, EntryPointInfo>();
+  const externalDeps = new Set<string>();
+  let totalInjections = 0;
+  let totalReflections = 0;
+  let totalRoutes = 0;
+
   for (const parsed of parsedFiles) {
     const decl = buildDeclarationGraph(parsed);
     declarations.set(parsed.filePath, decl);
     for (const n of decl.nodes) allNodeIds.add(n.id);
+
+    const deps = buildDependencyGraph(parsed, index, allNodeIds);
+    dependencyGraphs.set(parsed.filePath, deps);
+    for (const n of deps.nodes) allNodeIds.add(n.id);
+    for (const [id, info] of deps.entryPointMarks) entryPointMarks.set(id, info);
+    totalInjections += deps.injections;
+    totalReflections += deps.reflections;
+    totalRoutes += deps.routes;
+    for (const pkg of deps.externalDependencies) externalDeps.add(pkg);
+  }
+
+  // Route handlers can live in a different file from the registration site,
+  // so entry-point markers are applied once every declaration exists.
+  for (const decl of declarations.values()) {
+    for (const node of decl.nodes) {
+      const mark = entryPointMarks.get(node.id);
+      if (!mark || node.properties.entryPoint) continue;
+      node.properties = {
+        ...node.properties,
+        entryPoint: true,
+        entryPointKind: mark.kind,
+        entryPointDetail: mark.detail ?? mark.kind,
+      };
+    }
+  }
+
+  const entryPointIds = new Set<string>();
+  for (const decl of declarations.values()) {
+    for (const node of decl.nodes) {
+      if (node.properties.entryPoint) entryPointIds.add(node.id);
+    }
   }
 
   // Hierarchy metadata is emitted with whatever name the source used
   // (`implements Payment`), which is not always the fully-qualified node id.
-  // Resolve unique simple names so EXTENDS/IMPLEMENTS edges survive the
-  // project-membership filter below.
+  // Resolve imports first, then fall back to unique simple names.
   const typeIdsByName = new Map<string, string[]>();
   for (const parsed of parsedFiles) {
     for (const t of parsed.types) {
@@ -416,10 +777,20 @@ export async function crawlProject(
       typeIdsByName.set(t.name, ids);
     }
   }
-  const normalizeHierarchyTarget = (edge: GraphEdge): GraphEdge => {
+  const byFilePath = new Map(parsedFiles.map((p) => [p.filePath, p]));
+  const normalizeHierarchyTarget = (edge: GraphEdge, filePath: string): GraphEdge => {
     if (edge.kind !== "EXTENDS" && edge.kind !== "IMPLEMENTS") return edge;
     if (allNodeIds.has(edge.target)) return edge;
-    const candidates = typeIdsByName.get(edge.target);
+    const parsed = byFilePath.get(filePath);
+    if (parsed) {
+      const scoped = resolveTypeCandidates(parsed, index, edge.target).filter((id) =>
+        allNodeIds.has(id)
+      );
+      const only = scoped[0];
+      if (scoped.length === 1 && only) return { ...edge, target: only };
+    }
+    const simple = edge.target.includes(".") ? edge.target.split(".").pop() ?? edge.target : edge.target;
+    const candidates = typeIdsByName.get(simple);
     const resolved = candidates?.length === 1 ? candidates[0] : undefined;
     return resolved ? { ...edge, target: resolved } : edge;
   };
@@ -427,7 +798,10 @@ export async function crawlProject(
   store.withTransaction(() => {
     for (const parsed of parsedFiles) {
       const decl = declarations.get(parsed.filePath)!;
+      const deps = dependencyGraphs.get(parsed.filePath)!;
       const calls = buildCallEdges(parsed, index, allNodeIds);
+
+      for (const pkg of calls.externalPackages) externalDeps.add(pkg);
 
       for (const p of calls.phantomNodes) allNodeIds.add(p.id);
 
@@ -437,10 +811,10 @@ export async function crawlProject(
       // Drop edges whose endpoints aren't part of the indexed project
       // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
       const edges = decl.edges
-        .map(normalizeHierarchyTarget)
-        .concat(calls.edges)
+        .map((edge) => normalizeHierarchyTarget(edge, parsed.filePath))
+        .concat(calls.edges, deps.edges)
         .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
-      const nodes = decl.nodes.concat(calls.phantomNodes);
+      const nodes = decl.nodes.concat(calls.phantomNodes, deps.nodes);
       store.replaceFile(parsed.filePath, nodes, edges);
 
       for (const edge of calls.edges) {
@@ -491,6 +865,11 @@ export async function crawlProject(
     adviceEdges: adviceCount,
     aspects: aspectCount,
     decorators: totalDecorators,
+    entryPoints: entryPointIds.size,
+    injections: totalInjections,
+    reflections: totalReflections,
+    externalDependencies: externalDeps.size,
+    routes: totalRoutes,
     languages: [...new Set(parsedFiles.map((p) => p.language))],
     durationMs: Date.now() - started,
   };

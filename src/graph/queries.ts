@@ -28,6 +28,16 @@ export interface CallerInfo {
   edgeKind?: EdgeKind;
 }
 
+/** Syntactic control-flow context recorded on a call/route edge. */
+export interface FlowEdgeInfo {
+  /** True when the call only runs inside a branch, loop or handler. */
+  conditional?: boolean;
+  /** Enclosing control-flow categories: branch, loop, exception, predicate. */
+  controlFlow?: string[];
+  /** Compact source text of the enclosing conditions. */
+  guards?: string[];
+}
+
 function nodeToRef(node: GraphNode): SymbolRef {
   return {
     id: node.id,
@@ -82,7 +92,7 @@ export function getCallers(
   opts: CallerQueryOptions = {}
 ): {
   target: SymbolRef;
-  callers: { caller: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind }[];
+  callers: ({ caller: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind } & FlowEdgeInfo)[];
 } | null {
   const target = resolveNode(store, symbol);
   if (!target) return null;
@@ -111,6 +121,7 @@ export function getCallers(
         depth: 1,
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
+        ...edgeFlow(r.edge_props),
       })),
     };
   }
@@ -146,6 +157,7 @@ export function getCallers(
       depth: r.depth,
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
+      ...edgeFlow(r.edge_props),
     })),
   };
 }
@@ -166,7 +178,7 @@ export function getCallees(
   opts: CalleeQueryOptions = {}
 ): {
   source: SymbolRef;
-  callees: { callee: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind }[];
+  callees: ({ callee: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind } & FlowEdgeInfo)[];
 } | null {
   const source = resolveNode(store, symbol);
   if (!source) return null;
@@ -195,6 +207,7 @@ export function getCallees(
         depth: 1,
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
+        ...edgeFlow(r.edge_props),
       })),
     };
   }
@@ -230,6 +243,7 @@ export function getCallees(
       depth: r.depth,
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
+      ...edgeFlow(r.edge_props),
     })),
   };
 }
@@ -454,6 +468,9 @@ export function getSubgraph(
       "ANNOTATED_WITH",
       "REFERENCES",
       "IMPORTS",
+      "REFLECTS",
+      "INJECTS",
+      "ROUTES",
     ];
   const limit = opts.limit ?? 500;
 
@@ -905,12 +922,24 @@ export function deadCode(
        WHERE e.target = n.id AND e.kind IN (${kinds}, 'ADVISES')
      )`,
     "COALESCE(json_extract(n.properties, '$.name'), '') <> 'main'",
+    // Framework-invoked roots are not dead even without an incoming edge.
+    "COALESCE(json_extract(n.properties, '$.entryPoint'), 0) <> 1",
   ];
   if (!opts.includeConstructors) conditions.push("n.kind <> 'constructor'");
   if (!opts.includeTests) {
     conditions.push(
       "REPLACE(n.file_path, '\\', '/') NOT LIKE '%/test/%'",
       "REPLACE(n.file_path, '\\', '/') NOT LIKE '%/tests/%'",
+      "REPLACE(n.file_path, '\\', '/') NOT LIKE '%/__tests__/%'",
+      "n.file_path NOT LIKE '%test\\_%.py' ESCAPE '\\'",
+      "n.file_path NOT LIKE '%\\_test.py' ESCAPE '\\'",
+      "n.file_path NOT LIKE '%conftest.py'",
+      "n.file_path NOT LIKE '%.test.ts'",
+      "n.file_path NOT LIKE '%.spec.ts'",
+      "n.file_path NOT LIKE '%.test.tsx'",
+      "n.file_path NOT LIKE '%.spec.tsx'",
+      "n.file_path NOT LIKE '%.test.js'",
+      "n.file_path NOT LIKE '%.spec.js'",
       "n.qualified_name NOT LIKE '%Test#%'",
       "n.qualified_name NOT LIKE '%Tests#%'",
       "n.qualified_name NOT LIKE '%IT#%'"
@@ -930,6 +959,199 @@ export function deadCode(
     symbol: rowToRef(r),
     reason: "no incoming call, dynamic-dispatch or advice edge",
   }));
+}
+
+/** A framework-invoked root: nothing in source needs to call it. */
+export interface EntryPointRef {
+  symbol: SymbolRef;
+  entryPointKind: string;
+  detail?: string;
+}
+
+/**
+ * List framework-invoked roots (HTTP routes, listeners, schedulers, events,
+ * CLI entry points, tests). These are the seeds a runtime trace starts from.
+ */
+export function findEntryPoints(
+  store: GraphStore,
+  opts: { kind?: string; limit?: number } = {}
+): EntryPointRef[] {
+  const limit = opts.limit ?? store.defaultLimit ?? 50;
+  const conditions = ["json_extract(n.properties, '$.entryPoint') = 1"];
+  const params: unknown[] = [];
+  if (opts.kind) {
+    conditions.push("json_extract(n.properties, '$.entryPointKind') = ?");
+    params.push(opts.kind);
+  }
+  const rows = store.raw(
+    `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
+     FROM nodes n
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY json_extract(n.properties, '$.entryPointKind'), n.qualified_name
+     LIMIT ?`,
+    ...params,
+    limit
+  ) as Row[];
+
+  return rows.map((r) => {
+    const props = JSON.parse(r.properties) as { entryPointKind?: string; entryPointDetail?: string };
+    return {
+      symbol: rowToRef(r),
+      entryPointKind: props.entryPointKind ?? "unknown",
+      ...(props.entryPointDetail ? { detail: props.entryPointDetail } : {}),
+    };
+  });
+}
+
+/** An edge representing framework wiring rather than a source-level call. */
+export interface WiringEdge {
+  source: SymbolRef;
+  target: SymbolRef;
+  line?: number;
+  framework?: string;
+  external?: boolean;
+  /** INJECTS: injected field/parameter name. */
+  injectedName?: string;
+  /** REFLECTS: the run-time lookup mechanism. */
+  mechanism?: string;
+  /** ROUTES: HTTP verb and path. */
+  httpMethod?: string;
+  path?: string;
+}
+
+function wiringEdges(
+  store: GraphStore,
+  kind: EdgeKind,
+  symbol: string | undefined,
+  limit: number
+): WiringEdge[] {
+  const anchor = symbol ? resolveNode(store, symbol) : null;
+  if (symbol && !anchor) return [];
+  const rows = store.raw(
+    `SELECT e.properties AS edge_props, e.source AS source_id, e.target AS target_id,
+            s.id AS s_id, s.qualified_name AS s_qn, s.kind AS s_kind, s.file_path AS s_file, s.properties AS s_props,
+            t.id AS t_id, t.qualified_name AS t_qn, t.kind AS t_kind, t.file_path AS t_file, t.properties AS t_props
+     FROM edges e
+     JOIN nodes s ON s.id = e.source
+     JOIN nodes t ON t.id = e.target
+     WHERE e.kind = ?
+       ${anchor ? "AND (e.source = ? OR e.target = ?)" : ""}
+     ORDER BY s.qualified_name, t.qualified_name
+     LIMIT ?`,
+    ...(anchor ? [kind, anchor.id, anchor.id, limit] : [kind, limit])
+  ) as WiringRow[];
+
+  return rows.map((r) => {
+    const props = JSON.parse(r.edge_props ?? "{}") as {
+      line?: number;
+      framework?: string;
+      external?: boolean;
+      injectedName?: string;
+      mechanism?: string;
+      httpMethod?: string;
+      path?: string;
+    };
+    return {
+      source: rowToRef({
+        id: r.s_id,
+        qualified_name: r.s_qn,
+        kind: r.s_kind,
+        file_path: r.s_file,
+        properties: r.s_props,
+      }),
+      target: rowToRef({
+        id: r.t_id,
+        qualified_name: r.t_qn,
+        kind: r.t_kind,
+        file_path: r.t_file,
+        properties: r.t_props,
+      }),
+      ...(typeof props.line === "number" ? { line: props.line } : {}),
+      ...(props.framework ? { framework: props.framework } : {}),
+      ...(props.external ? { external: props.external } : {}),
+      ...(props.injectedName ? { injectedName: props.injectedName } : {}),
+      ...(props.mechanism ? { mechanism: props.mechanism } : {}),
+      ...(props.httpMethod ? { httpMethod: props.httpMethod } : {}),
+      ...(props.path ? { path: props.path } : {}),
+    };
+  });
+}
+
+/** Dependencies supplied by a DI container (Spring, NestJS, FastAPI, ...). */
+export function findInjections(
+  store: GraphStore,
+  opts: { symbol?: string; limit?: number } = {}
+): WiringEdge[] {
+  return wiringEdges(store, "INJECTS", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
+}
+
+/** Run-time lookups: reflection, `getattr`, dynamic `import()`, `require`. */
+export function findReflections(
+  store: GraphStore,
+  opts: { symbol?: string; limit?: number } = {}
+): WiringEdge[] {
+  return wiringEdges(store, "REFLECTS", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
+}
+
+/** Route registrations mapped to the handler they invoke. */
+export function findRoutes(
+  store: GraphStore,
+  opts: { symbol?: string; limit?: number } = {}
+): WiringEdge[] {
+  return wiringEdges(store, "ROUTES", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
+}
+
+export interface ExternalDependency {
+  package: string;
+  /** Number of edges pointing at the external package. */
+  references: number;
+  /** Number of distinct project files using it. */
+  files: number;
+  /** Edge kinds that reference it. */
+  kinds: string[];
+}
+
+/** Third-party packages the crawled source depends on. */
+export function externalDependencies(
+  store: GraphStore,
+  opts: { limit?: number } = {}
+): ExternalDependency[] {
+  const limit = opts.limit ?? store.defaultLimit ?? 50;
+  const rows = store.raw(
+    `SELECT t.qualified_name AS package,
+            COUNT(*) AS "references",
+            COUNT(DISTINCT s.file_path) AS "files",
+            GROUP_CONCAT(DISTINCT e.kind) AS kinds
+     FROM edges e
+     JOIN nodes s ON s.id = e.source
+     JOIN nodes t ON t.id = e.target
+     WHERE t.kind = 'external_symbol'
+     GROUP BY t.id
+     ORDER BY "references" DESC, package
+     LIMIT ?`,
+    limit
+  ) as { package: string; references: number; files: number; kinds: string }[];
+
+  return rows.map((r) => ({
+    package: r.package.replace(/^ext:/, ""),
+    references: r.references,
+    files: r.files,
+    kinds: (r.kinds ?? "").split(",").filter((k) => k.length > 0),
+  }));
+}
+
+interface WiringRow {
+  edge_props: string | null;
+  s_id: string;
+  s_qn: string;
+  s_kind: NodeKind;
+  s_file: string | null;
+  s_props: string;
+  t_id: string;
+  t_qn: string;
+  t_kind: NodeKind;
+  t_file: string | null;
+  t_props: string;
 }
 
 interface Row {
@@ -959,4 +1181,21 @@ function edgeLine(props: string | undefined): number | undefined {
   if (!props) return undefined;
   const line = (JSON.parse(props) as { line?: number }).line;
   return typeof line === "number" ? line : undefined;
+}
+
+/** Extract the control-flow context recorded on an edge, if any. */
+function edgeFlow(props: string | undefined): FlowEdgeInfo {
+  if (!props) return {};
+  const parsed = JSON.parse(props) as {
+    conditional?: boolean;
+    controlFlow?: string[];
+    guards?: string[];
+  };
+  const out: FlowEdgeInfo = {};
+  if (typeof parsed.conditional === "boolean") out.conditional = parsed.conditional;
+  if (Array.isArray(parsed.controlFlow) && parsed.controlFlow.length > 0) {
+    out.controlFlow = parsed.controlFlow;
+  }
+  if (Array.isArray(parsed.guards) && parsed.guards.length > 0) out.guards = parsed.guards;
+  return out;
 }

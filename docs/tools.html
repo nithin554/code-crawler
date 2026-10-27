@@ -6,7 +6,7 @@
     <title>Tool reference — Code-Crawler</title>
     <meta
       name="description"
-      content="Complete reference for all 17 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 22 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <link rel="stylesheet" href="assets/style.css" />
     <link
@@ -37,7 +37,7 @@
           <span class="eyebrow">Reference</span>
           <h1>Tool reference</h1>
           <p class="lead">
-            All 17 MCP tools with their arguments, response shape, and a working call. Every
+            All 22 MCP tools with their arguments, response shape, and a working call. Every
             tool returns structured JSON.
           </p>
           <div class="toc">
@@ -46,6 +46,7 @@
             <a href="#lookup">Lookup</a>
             <a href="#calls">Call graph</a>
             <a href="#dynamic">Dynamic</a>
+            <a href="#wiring">Run-time wiring</a>
             <a href="#analytics">Analytics</a>
             <a href="#types">Types</a>
           </div>
@@ -504,9 +505,162 @@
         </div>
       </section>
 
-      <section class="section" id="analytics">
+      <section class="section" id="wiring">
         <div class="wrap">
           <span class="eyebrow">Group 5</span>
+          <h2>Run-time wiring</h2>
+          <p class="muted" style="max-width: 52rem">
+            The things a call graph cannot see: what a framework invokes, what a container
+            injects, what reflects at run time, and where your code stops and third-party
+            code starts. All five work across Java, Python, and TypeScript.
+          </p>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_entry_points</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Methods a framework or runtime invokes, with no in-project caller.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>kind</code></td><td>string</td><td>no</td><td>Filter by entry-point kind, e.g. <code>"route"</code>, <code>"main"</code>, <code>"test"</code>.</td></tr>
+                    <tr><td><code>language</code></td><td>string</td><td>no</td><td>Restrict to <code>java</code>, <code>python</code>, <code>typescript</code>, or <code>javascript</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max entries, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>count</code> and <code>entryPoints[]</code> with
+                <code>symbol</code>, <code>kind</code>, <code>detail</code>,
+                <code>framework</code>, and <code>line</code>. Recognised: Spring MVC
+                mappings, <code>@Scheduled</code>/<code>@EventListener</code>, tests,
+                <code>main</code>, FastAPI/Flask decorators, <code>if __name__ == "__main__"</code>,
+                NestJS controllers, Express handlers, and Jest/pytest tests.
+              </p>
+              <pre><code>find_entry_points({ kind: "route", limit: 50 })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_routes</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>HTTP route → handler mappings, across frameworks.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>method</code></td><td>string</td><td>no</td><td>HTTP verb filter, e.g. <code>"GET"</code>, <code>"POST"</code>.</td></tr>
+                    <tr><td><code>path</code></td><td>string</td><td>no</td><td>Substring match on the route path.</td></tr>
+                    <tr><td><code>framework</code></td><td>string</td><td>no</td><td>e.g. <code>"fastapi"</code>, <code>"nestjs"</code>, <code>"express"</code>, <code>"spring"</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max routes, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Each route carries <code>httpMethod</code>, <code>path</code>,
+                <code>handler</code>, <code>framework</code>, and a <code>ROUTES</code> edge.
+                Inline Express handlers get a synthetic node
+                (<code>module:src.routes#&lt;anonymous@7&gt;</code>) so their body is still
+                traceable.
+              </p>
+              <pre><code>find_routes({ method: "POST", framework: "nestjs" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_injections</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Dependencies supplied by a DI container, as <code>INJECTS</code> edges.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>framework</code></td><td>string</td><td>no</td><td>e.g. <code>"spring"</code>, <code>"nestjs"</code>, <code>"fastapi"</code>, <code>"dependency-injector"</code>.</td></tr>
+                    <tr><td><code>target</code></td><td>string</td><td>no</td><td>Only injections into this symbol.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max entries, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Detected from <code>@Autowired</code> members, NestJS constructor
+                parameters, FastAPI <code>Depends(...)</code>, <code>@injectable</code>
+                constructor parameters, and project-class constructor parameters. Primitive
+                and structural parameter types are counted but produce no edge, so
+                <code>@Body() body: { id: string }</code> does not pollute the graph.
+              </p>
+              <pre><code>find_injections({ framework: "nestjs" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_reflections</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Run-time lookups that bypass the static call graph.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>mechanism</code></td><td>string</td><td>no</td><td>e.g. <code>"class.forName"</code>, <code>"getattr"</code>, <code>"importlib"</code>, <code>"import()"</code>, <code>"require"</code>.</td></tr>
+                    <tr><td><code>resolved_only</code></td><td>boolean</td><td>no</td><td>Exclude targets that landed on a <code>__reflect__:</code> marker.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max entries, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>count</code> and <code>reflections[]</code> with
+                <code>source</code>, <code>target</code>, <code>mechanism</code>,
+                <code>resolved</code>, and <code>line</code>. When the target is statically
+                determinable — a literal, or a literal prefix plus a variable — the edge
+                points at the real symbol; otherwise it points at a
+                <code>__reflect__:</code> marker holding the expression.
+              </p>
+              <pre><code>find_reflections({ resolved_only: true })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_external_dependencies</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Third-party packages referenced by the crawled code.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max packages, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>count</code> and <code>dependencies[]</code> with
+                <code>package</code>, <code>references</code>, and <code>files</code>.
+                Packages are normalised to the import root — <code>ext:fastapi</code>,
+                <code>@nestjs/common</code>, <code>express</code>. Project-internal
+                namespaces are never reported as external.
+              </p>
+              <pre><code>find_external_dependencies({ limit: 100 })</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="analytics">
+        <div class="wrap">
+          <span class="eyebrow">Group 6</span>
           <h2>Analytics</h2>
 
           <div class="tool">
@@ -577,10 +731,11 @@
 
           <h3>Node kinds</h3>
           <p class="muted">
-            <code>file</code> <code>package</code> <code>class</code>
-            <code>interface</code> <code>enum</code> <code>method</code>
-            <code>constructor</code> <code>field</code> <code>import</code>
-            <code>aspect</code> <code>annotation_type</code> <code>annotation</code>
+            <code>file</code> <code>package</code> <code>module</code>
+            <code>class</code> <code>interface</code> <code>enum</code>
+            <code>method</code> <code>constructor</code> <code>field</code>
+            <code>import</code> <code>external_symbol</code> <code>aspect</code>
+            <code>annotation_type</code> <code>annotation</code>
             <code>unknown_symbol</code>
           </p>
 
@@ -599,6 +754,9 @@
                 <tr><td><code>DYNAMIC_DISPATCH</code></td><td>callable → override</td><td>Runtime target of a virtual call.</td></tr>
                 <tr><td><code>ADVISES</code></td><td>advice → advised</td><td>Aspect advice intercepting a method.</td></tr>
                 <tr><td><code>ANNOTATED_WITH</code></td><td>symbol → annotation</td><td>Annotation usage with arguments.</td></tr>
+                <tr><td><code>REFLECTS</code></td><td>symbol → symbol / marker</td><td>Run-time lookup (<code>Class.forName</code>, <code>getattr</code>, <code>import()</code>).</td></tr>
+                <tr><td><code>INJECTS</code></td><td>type → type</td><td>Dependency supplied by a DI container.</td></tr>
+                <tr><td><code>ROUTES</code></td><td>route → handler</td><td>HTTP route registration.</td></tr>
               </tbody>
             </table>
           </div>
@@ -612,9 +770,16 @@
                 <tr><td>Method</td><td><code>com.acme.OrderService#place</code></td></tr>
                 <tr><td>Constructor</td><td><code>com.acme.OrderService#&lt;init&gt;</code></td></tr>
                 <tr><td>Field</td><td><code>com.acme.OrderService$repo</code></td></tr>
+                <tr><td>Module</td><td><code>module:app.service</code></td></tr>
+                <tr><td>Module function</td><td><code>module:app.api#read_order</code></td></tr>
+                <tr><td>Module field</td><td><code>module:app.service$AUDIT_LOG</code></td></tr>
+                <tr><td>Inline arrow handler</td><td><code>module:src.routes#&lt;anonymous@7&gt;</code></td></tr>
                 <tr><td>Annotation</td><td><code>@Transactional</code></td></tr>
                 <tr><td>Import</td><td><code>__import__:java.util.List</code></td></tr>
+                <tr><td>External package</td><td><code>ext:fastapi</code></td></tr>
                 <tr><td>Unresolved call</td><td><code>__unknown__:System.out.println</code></td></tr>
+                <tr><td>Reflective marker</td><td><code>__reflect__:./plugins/${name}</code></td></tr>
+                <tr><td>Injection marker</td><td><code>__inject__:Repo</code></td></tr>
               </tbody>
             </table>
           </div>

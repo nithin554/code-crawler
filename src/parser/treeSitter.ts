@@ -54,7 +54,8 @@ function packageRoot(packageName: string): string {
  * Language. Cached across calls.
  */
 export function loadGrammar(packageName: string, wasmFileName: string): Promise<Language> {
-  const cached = grammarCache.get(packageName);
+  const cacheKey = `${packageName}/${wasmFileName}`;
+  const cached = grammarCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = (async () => {
@@ -63,7 +64,7 @@ export function loadGrammar(packageName: string, wasmFileName: string): Promise<
     return Language.load(fs.readFileSync(wasmPath));
   })();
 
-  grammarCache.set(packageName, promise);
+  grammarCache.set(cacheKey, promise);
   return promise;
 }
 
@@ -92,6 +93,16 @@ export function childrenOfType(node: TSNode, type: string): TSNode[] {
 /** Field child, or null. */
 export function fieldChild(node: TSNode, field: string): TSNode | null {
   return node.childForFieldName(field);
+}
+
+/**
+ * Structural node equality. Node wrappers handed out by separate
+ * `namedChildren` accesses are distinct JS objects for the same CST node, so
+ * `===` cannot be used to compare them.
+ */
+export function sameNode(a: TSNode | null | undefined, b: TSNode | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.startIndex === b.startIndex && a.endIndex === b.endIndex && a.type === b.type;
 }
 
 /** Walk the tree depth-first, invoking `visit` on every named node. */

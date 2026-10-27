@@ -57,7 +57,7 @@
         <div class="wrap">
           <span class="eyebrow">01 · Install</span>
           <h2>Requirements and build</h2>
-          <p class="lead">Node.js 20 or newer. No native toolchain is required — the Java grammar ships as WASM.</p>
+          <p class="lead">Node.js 20 or newer. No native toolchain is required — every grammar ships as WASM.</p>
 
           <div class="grid grid-2" style="margin-top: 28px">
             <div>
@@ -245,8 +245,9 @@ npx codecrawler serve</code></pre>
             <div class="step">
               <h3>Parse</h3>
               <p>
-                Each file is parsed with the tree-sitter Java grammar to extract packages,
-                imports, types, members, modifiers, and annotations.
+                Each file is parsed with the tree-sitter grammar for its language —
+                Java, Python, TypeScript, or JavaScript — to extract packages/modules,
+                imports, types, members, modifiers, decorators, and annotations.
               </p>
             </div>
             <div class="step">
@@ -391,31 +392,58 @@ npx codecrawler serve</code></pre>
               <h3>Modelled</h3>
               <ul>
                 <li>Static <code>CALLS</code> edges with call-site lines and confidence.</li>
-                <li>Package, type, member, and import containment.</li>
+                <li>Uniform graph across <strong>Java, Python, TypeScript, and JavaScript</strong>.</li>
+                <li>Package/module, type, member, and import containment.</li>
                 <li><code>IMPLEMENTS</code> / <code>EXTENDS</code> hierarchy edges.</li>
-                <li>Virtual dispatch to project overrides.</li>
-                <li>AspectJ advice and pointcut matching.</li>
-                <li>Annotations on types, methods, constructors, and fields.</li>
+                <li>Virtual dispatch to project overrides (<code>DYNAMIC_DISPATCH</code>).</li>
+                <li>AspectJ/Spring AOP advice and pointcut matching (<code>ADVISES</code>).</li>
+                <li>Annotations and decorators on types, methods, constructors, and fields.</li>
+                <li>Reflection and run-time lookups as <code>REFLECTS</code> edges:
+                  <code>Class.forName</code>, <code>ServiceLoader</code>, <code>getattr</code>,
+                  <code>importlib</code>, <code>require</code>, dynamic <code>import()</code>.</li>
+                <li>Source-visible dependency injection as <code>INJECTS</code> edges:
+                  <code>@Autowired</code>, NestJS constructor injection, FastAPI <code>Depends</code>.</li>
+                <li>Framework entry points and HTTP routes as <code>ROUTES</code> edges:
+                  Spring MVC, FastAPI, Flask, NestJS, Express.</li>
+                <li>Control flow per call edge: conditional flag, control-flow kinds, guard text.</li>
+                <li>External packages as <code>ext:</code> nodes with a dependency summary.</li>
               </ul>
             </div>
             <div>
               <h3>Not modelled</h3>
               <ul>
-                <li>Reflection, <code>Class.forName</code>, and dynamic proxies.</li>
-                <li>Runtime DI wiring; interface dispatch fans out to all overrides.</li>
-                <li>Control flow, branches, or value flow inside a method.</li>
-                <li>Framework-invoked entry points (controllers, listeners) as roots.</li>
-                <li>Libraries outside the crawled source tree.</li>
-                <li>Non-Java languages (the parser layer is pluggable, not implemented).</li>
+                <li><strong>Value flow and branch feasibility.</strong> Edges record
+                  <em>that</em> a call is conditional and the guard text — not which branch
+                  runs, nor what values reach a parameter.</li>
+                <li><strong>Fully dynamic reflection targets.</strong>
+                  <code>getattr(obj, name)</code> with an unknown name and
+                  <code>require(userInput)</code> point at a
+                  <code>__reflect__:</code> marker instead of a symbol. Inventing a target
+                  would be worse than the marker.</li>
+                <li><strong>DI containers configured outside code</strong> — XML, YAML bean
+                  wiring, NestJS dynamic module factories. Only injection visible in source
+                  is reported.</li>
+                <li><strong>Libraries outside the crawled tree.</strong> Third-party code is
+                  summarised as <code>ext:</code> packages and never crawled, so traces stop
+                  at the boundary.</li>
+                <li><strong>Branch-level dead code.</strong> <code>find_dead_code</code> is
+                  whole-method, not per-branch.</li>
+                <li><strong>Cross-language edges.</strong> Python does not call into Java even
+                  when they share a process boundary; the languages share a graph, not a call
+                  edge.</li>
+                <li><strong>Types changed at runtime</strong> — monkey-patching,
+                  <code>__getattr__</code> proxies, <code>Object.defineProperty</code> tricks.</li>
               </ul>
             </div>
           </div>
 
           <div class="note warn">
             <p>
-              Treat <code>find_dead_code</code> as a candidate list, not a verdict.
-              Methods invoked only by frameworks, serialization, or reflection will show up
-              as unused because no source-level caller exists.
+              Treat <code>find_dead_code</code> as a candidate list, not a verdict. Methods
+              invoked only by frameworks, serialization, or reflection will show up as unused
+              unless the crawler recognises the mechanism. Start with
+              <code>find_entry_points</code>, <code>find_routes</code>, and
+              <code>find_reflections</code> before deleting anything.
             </p>
           </div>
         </div>

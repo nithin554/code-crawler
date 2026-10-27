@@ -1,4 +1,5 @@
-import type { CallSite, MethodInfo, ParsedFile, TypeKind } from "../parser/language.js";
+import type { CallSite, FieldInfo, MethodInfo, ParsedFile, TypeKind } from "../parser/language.js";
+import { MODULE_ID_PREFIX } from "../parser/moduleId.js";
 
 /**
  * Shared resolver contract.
@@ -18,6 +19,10 @@ export interface ResolvedCall {
   confidence: number;
   /** Human-readable resolution trace for debugging and tool output. */
   reason: string;
+  /** True when the target lives outside the crawled source tree. */
+  external?: boolean;
+  /** Package/specifier of the external target (also used as node id suffix). */
+  externalModule?: string;
 }
 
 /**
@@ -35,6 +40,14 @@ export class TypeIndex {
   parentsByFqn = new Map<string, string[]>();
   /** Resolved parent FQN -> directly-declared child FQNs. */
   childrenByFqn = new Map<string, string[]>();
+  /** Type id (or module id) -> declared fields. */
+  fieldsByFqn = new Map<string, FieldInfo[]>();
+  /** Module ids of every parsed file that declares a module (Python/TypeScript). */
+  moduleIds = new Set<string>();
+  /** Module id -> type/function id exported as the module default. */
+  defaultExports = new Map<string, string>();
+  /** Module id -> source file path that declares it. */
+  fileByModuleId = new Map<string, string>();
 
   private hierarchyDirty = false;
 
@@ -51,7 +64,50 @@ export class TypeIndex {
       list.push(m);
       this.methodsByFqn.set(m.typeId, list);
     }
+    for (const f of file.fields) {
+      const list = this.fieldsByFqn.get(f.typeId) ?? [];
+      list.push(f);
+      this.fieldsByFqn.set(f.typeId, list);
+    }
+    const moduleId = file.moduleId;
+    if (moduleId && file.filePath) {
+      this.moduleIds.add(moduleId);
+      this.fileByModuleId.set(moduleId, file.filePath);
+      if (file.defaultExportName) {
+        this.defaultExports.set(moduleId, this.symbolId(moduleId, file.defaultExportName));
+      }
+    }
     this.hierarchyDirty = true;
+  }
+
+  /** Candidate ids for a symbol name imported from `moduleId`. */
+  symbolId(moduleId: string, name: string): string {
+    const asType = `${moduleId}.${name}`;
+    if (this.kindByFqn.has(asType)) return asType;
+    return `${MODULE_ID_PREFIX}${moduleId}#${name}`;
+  }
+
+  /** True when `candidate` names a module declared in the project. */
+  moduleExists(candidate: string): boolean {
+    return this.moduleIds.has(candidate);
+  }
+
+  /**
+   * Resolve a module specifier to a single project module, suffix-matching
+   * when the specifier is a path whose tail matches a project module.
+   */
+  resolveModuleId(candidate: string): string | null {
+    const trimmed = candidate.trim().replace(/^\.+/, "").replace(/\.+$/, "");
+    if (!trimmed) return null;
+    const matches = this.matchModuleSuffix(trimmed);
+    return matches.length > 0 ? (matches[0] ?? null) : null;
+  }
+
+  /** Project modules whose id ends with `.path` (or equals it). */
+  matchModuleSuffix(path: string): string[] {
+    const exact = this.moduleIds.has(path) ? [path] : [];
+    const bySuffix = [...this.moduleIds].filter((id) => id.endsWith(`.${path}`));
+    return exact.concat(bySuffix.sort((a, b) => a.length - b.length));
   }
 
   /**

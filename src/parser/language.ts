@@ -10,7 +10,16 @@
  * raw call sites to the language-specific resolver.
  */
 
-export type TypeKind = "class" | "interface" | "enum" | "annotation";
+export type TypeKind = "class" | "interface" | "enum" | "annotation" | "module";
+
+/** How a call site is nested: unconditional, or behind a guard. */
+export type ControlFlowKind = "branch" | "loop" | "exception" | "predicate";
+
+export interface ControlFlowInfo {
+  kinds: ControlFlowKind[];
+  /** Compact source text of the enclosing conditions (max 3). */
+  guards: string[];
+}
 
 /**
  * An annotation (Java) or decorator (Python/TypeScript) applied to a symbol.
@@ -46,6 +55,61 @@ export interface TypeInfo {
   annotations: AnnotationInfo[];
   /** True when the type is an aspect (`@Aspect`). */
   isAspect?: boolean;
+  /** Export visibility. Modules and members default to file-visible. */
+  exported?: boolean;
+}
+
+/**
+ * A call site whose target is only known at run time
+ * (`Class.forName`, `getattr`, `require`, dynamic `import()`, ...).
+ */
+export interface ReflectiveRef {
+  /** Framework/API that performs the lookup, e.g. `Class.forName`, `getattr`. */
+  mechanism: string;
+  /** What the lookup produces. */
+  targetKind: "type" | "module" | "method";
+  /** Raw target text as written (quotes stripped when it is a string literal). */
+  target: string;
+  /** Receiver expression for member lookups, e.g. `this.registry`. */
+  receiver?: string;
+  enclosingTypeId: string;
+  enclosingMethodId: string;
+  line: number;
+}
+
+/** A dependency the framework supplies at run time rather than the call site. */
+export interface InjectionPoint {
+  kind: "field" | "constructor-parameter" | "parameter" | "method";
+  /** Id of the type (or module) that owns the injection point. */
+  ownerId: string;
+  /** Field or parameter name. */
+  name: string;
+  /** Raw declared type text (empty when only a token/decorator was given). */
+  type: string;
+  /** Framework that performs the injection, e.g. `spring`, `nestjs`. */
+  framework: string;
+  line: number;
+  optional?: boolean;
+}
+
+/** Why a method is a root even though nothing in the source calls it. */
+export type EntryPointKind = "http" | "messaging" | "scheduler" | "event" | "cli" | "test" | "route";
+
+export interface EntryPointInfo {
+  kind: EntryPointKind;
+  /** Framework detail, e.g. `GET /orders/{id}` or `@Scheduled`. */
+  detail?: string;
+}
+
+/** Express-style route registration resolved to a handler by name. */
+export interface RouteRegistration {
+  framework: string;
+  httpMethod: string;
+  path: string;
+  handlerName: string;
+  moduleId: string;
+  enclosingTypeId: string;
+  line: number;
 }
 
 export interface MethodInfo {
@@ -73,6 +137,8 @@ export interface MethodInfo {
   adviceKind?: string;
   /** AspectJ pointcut expression carried by advice/pointcut methods. */
   pointcut?: string;
+  /** Why this method is an entry point (framework-invoked root). */
+  entryPoint?: EntryPointInfo;
 }
 
 export interface FieldInfo {
@@ -94,6 +160,16 @@ export interface ImportInfo {
   /** Short name used in source, e.g. `OrderService`. */
   simpleName: string;
   isStatic: boolean;
+  /** Imported module/specifier for Python/TypeScript imports. */
+  module?: string;
+  /** Imported symbol when the import names one (`from x import y`). */
+  importedName?: string;
+  /** True for `import * as ns` / `import x` (the name refers to a module). */
+  isNamespace?: boolean;
+  /** Local alias, when different from the imported name. */
+  alias?: string;
+  /** Known-external module (non-relative TS specifier). */
+  external?: boolean;
 }
 
 export interface CallSite {
@@ -117,6 +193,8 @@ export interface CallSite {
   isConstructorCall: boolean;
   /** True when the receiver looks like a qualified type (e.g. `com.acme.Foo.bar`). */
   qualifiedReceiver: boolean;
+  /** Enclosing branches/loops/handlers and their guard text. */
+  controlFlow?: ControlFlowInfo;
 }
 
 export interface ParsedFile {
@@ -134,6 +212,35 @@ export interface ParsedFile {
    * Used by the resolver for receiver-type inference.
    */
   localsByMethod: Map<string, Map<string, string>>;
+  /** Module id for module-based languages (Python/TypeScript). */
+  moduleId?: string;
+  /**
+   * Local name -> candidate type id (`module.Symbol`), from imports or local
+   * declarations. Values may be unresolved guesses; the resolver validates.
+   */
+  scopeTypes?: Map<string, string>;
+  /**
+   * Local name -> candidate module id (`app.services.order`). Values may not
+   * exist in the index; the resolver treats missing modules as external.
+   */
+  scopeModules?: Map<string, string>;
+  /** Local name -> known-external package (non-relative imports). */
+  externalModules?: Map<string, string>;
+  /** Name exported by `export default` / `__all__`, when present. */
+  defaultExportName?: string;
+  /** Run-time-only targets (reflection, dynamic import, getattr). */
+  reflectiveRefs?: ReflectiveRef[];
+  /** Framework-injected dependencies declared by this file. */
+  injections?: InjectionPoint[];
+  /** Express/Fastify-style route registrations declared by this file. */
+  routes?: RouteRegistration[];
+  /** Entry point when the whole file is one (e.g. `__main__` script). */
+  entryPoint?: EntryPointInfo;
+}
+
+export interface ParseContext {
+  /** Project root, used to derive stable module ids. */
+  projectRoot?: string;
 }
 
 export interface LanguageConfig {
@@ -144,5 +251,5 @@ export interface LanguageConfig {
   /** Load (once) and return the compiled tree-sitter grammar. */
   loadGrammar(): Promise<unknown>;
   /** Extract structural entities + raw call sites from source text. */
-  parseFile(source: string, filePath: string): Promise<ParsedFile>;
+  parseFile(source: string, filePath: string, context?: ParseContext): Promise<ParsedFile>;
 }
