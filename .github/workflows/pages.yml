@@ -27,7 +27,7 @@ jobs:
 
       - name: Verify site files
         run: |
-          for f in index.html usage.html examples.html tools.html assets/style.css; do
+          for f in index.html usage.html examples.html tools.html assets/style.css sitemap.xml robots.txt; do
             test -s "docs/$f" || { echo "missing docs/$f"; exit 1; }
           done
 
