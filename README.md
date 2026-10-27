@@ -9,8 +9,8 @@ edges**, **virtual dispatch**, **aspect advice**, and the wiring frameworks add
 exposes that graph to LLM clients as MCP tools: find callers, trace call paths, explore
 neighborhoods, follow runtime dispatch, and search symbols across the whole codebase.
 
-Supports **Java**, **Python**, and **TypeScript/JavaScript** projects, and can index all
-three into the same graph.
+Supports **Java**, **Python**, **TypeScript**, and **JavaScript** projects, and can index
+all of them into the same graph.
 
 📖 **Documentation site:** <https://nithin554.github.io/code-crawler/>
 📘 **Task-oriented guide:** [`USAGE.md`](USAGE.md)
@@ -43,13 +43,13 @@ Plain-text grep can't answer questions like:
 - *"What is the impact radius of changing `OrderService#place`?"*
 
 These need graph traversal. Code-Crawler builds the graph once (idempotently, file-by-file)
-and answers them instantly with bounded recursive SQL queries.
+and answers them with bounded recursive SQL queries.
 
 ## Features
 
-- **Three languages, one graph**: Java (`tree-sitter-java`), Python
-  (`tree-sitter-python`), and TypeScript/JavaScript (`tree-sitter-typescript`,
-  `tree-sitter-tsx`, `tree-sitter-javascript`) — all WASM, no native build step.
+- **Four languages, one graph**: Java (`tree-sitter-java`), Python
+  (`tree-sitter-python`), TypeScript (`tree-sitter-typescript`, `tree-sitter-tsx`), and
+  JavaScript (`tree-sitter-javascript`) — all WASM, no native build step.
   Language is detected per file, so a polyglot repo lands in a single graph.
 - **Dynamic tracing on a static graph** — `DYNAMIC_DISPATCH` edges connect interface/base
   calls to every override in the project, and `ADVISES` edges weave AspectJ/Spring AOP
@@ -401,7 +401,8 @@ Adding a language requires:
    `src/resolver/genericResolver.ts` and only override language-specific builtins.
 
 The graph schema, store, traversal queries, and MCP surface stay the same for every
-language. Natural next targets: Go, C#, Ruby, Rust.
+language. Candidate next languages, and the modelling each one needs, are ranked in
+[`ROADMAP.md`](ROADMAP.md) Phase 3.
 
 Not yet modelled, by design:
 
@@ -412,6 +413,9 @@ Not yet modelled, by design:
 - Fully dynamic targets (`getattr(obj, name)`, `require(userInput)`) point at a
   `__reflect__:` marker instead of a symbol; there is nothing static to point at.
 - Runtime DI graphs assembled from configuration files rather than code.
+
+The full list, and what is modelled in exchange for each gap, is in
+[`USAGE.md`](USAGE.md#7-what-is-and-is-not-modelled).
 
 ## Architecture
 

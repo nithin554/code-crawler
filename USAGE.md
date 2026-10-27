@@ -160,7 +160,9 @@ flowchart TD
    starting set for "where does this app begin?", because `main` is often not the answer
    in a server-side framework.
 3. **`search_symbols`** — locate a symbol by fuzzy name. Unknown symbols come back with
-   suggestions instead of an error.
+   suggestions instead of an error. Tools that take a `symbol` argument then resolve an
+   exact id or exact qualified name only — pass the `qualifiedName` that `search_symbols`
+   returned, or the call comes back `null`.
 4. **`get_callers` / `get_callees` / `trace_path`** — walk the static call graph. Results
    include `resolved`, `confidence`, and `reason` on each edge.
 5. **`trace_execution`** — follow *runtime* order from a root: virtual dispatch fans out to
@@ -198,7 +200,7 @@ get_callers(symbol: "app.repository.OrderRepository#find", depth: 3)
 
 Incoming `CALLS` edges answer the static case; incoming `DYNAMIC_DISPATCH` edges answer
 the "called through an interface" case. Check both — a method with zero callers can still
-have twenty dispatchers.
+be reached through dispatch.
 
 ### "Who implements this interface?"
 
@@ -384,11 +386,32 @@ untyped field is genuinely unknown) — unresolved is not hidden, it is labelled
 
 `tests/fixtures/java/dynamic` (6 files · 43 nodes · 61 edges, 2 dynamic-dispatch edges,
 4 advice edges) registers no HTTP routes and no DI container, so `find_routes()` and
-`find_injections()` return empty — the honest answer. It targets the harder problem:
-`find_implementations("Payment")`, `find_aspects()` and
-`trace_execution("com.acme.Checkout#checkout")` show which override actually runs and
-which advice wraps it. See the [worked examples](https://nithin554.github.io/code-crawler/examples.html)
-for the full walkthrough.
+`find_injections()` return `[]` — the honest answer. It targets the harder question:
+
+```jsonc
+// find_implementations("com.acme.Payment") — symbol ids are fully qualified
+{
+  "target": { "id": "com.acme.Payment", "qualifiedName": "com.acme.Payment" },
+  "implementations": [
+    { "type": { "id": "com.acme.CardPayment" }, "depth": 1, "via": "IMPLEMENTS" },
+    { "type": { "id": "com.acme.UpiPayment" },  "depth": 1, "via": "IMPLEMENTS" }
+  ]
+}
+
+// find_aspects() — @Around("paymentCall()") resolves through the named @Pointcut
+auditPayment    around    paymentCall()
+  → CardPayment#pay · Payment#pay · UpiPayment#pay
+beforeCheckout  before    execution(* com.acme.Checkout.checkout(..))
+  → Checkout#checkout
+```
+
+`trace_execution("com.acme.Checkout#checkout")` interleaves both mechanisms: an
+`INTERCEPT` hop into `beforeCheckout`, a `CALLS` edge to `Payment#pay`, an `INTERCEPT` hop
+into `auditPayment`, then `DYNAMIC_DISPATCH` edges to both `pay` overrides. The trace also
+passes through `__unknown__:joinPoint.proceed` — the advice target exists only at run time,
+so it is labelled rather than invented. See the
+[worked examples](https://nithin554.github.io/code-crawler/examples.html) for the full
+walkthrough.
 
 ---
 

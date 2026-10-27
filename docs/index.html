@@ -10,11 +10,36 @@
       name="description"
       content="Code-Crawler is an MCP server that indexes Java, Python, TypeScript and JavaScript into a SQLite property graph and exposes call tracing, virtual dispatch, routes, dependency injection, reflection, hotspots and dead-code analysis to LLM clients."
     />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Code-Crawler" />
+    <meta property="og:title" content="Code-Crawler — dynamic call tracing for your AI assistant" />
+    <meta
+      property="og:description"
+      content="An MCP server that indexes Java, Python, TypeScript and JavaScript into a SQLite property graph and answers call-graph questions with bounded recursive SQL."
+    />
+    <meta property="og:url" content="https://nithin554.github.io/code-crawler/" />
+    <meta name="twitter:card" content="summary" />
     <link rel="stylesheet" href="assets/style.css" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
     />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Code-Crawler",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Static analysis",
+        "operatingSystem": "Node.js 20 or newer",
+        "url": "https://nithin554.github.io/code-crawler/",
+        "codeRepository": "https://github.com/nithin554/code-crawler",
+        "license": "https://opensource.org/licenses/MIT",
+        "programmingLanguage": ["Java", "Python", "TypeScript", "JavaScript"],
+        "description": "MCP server that indexes a codebase into a SQLite property graph and answers call-graph questions — callers, callees, paths, runtime dispatch, aspects, routes, injections, reflection, hotspots and dead code.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
   </head>
   <body>
     <header class="site-header">
@@ -37,14 +62,14 @@
       <section class="hero">
         <div class="wrap">
           <div>
-            <span class="eyebrow">MCP server · Java · Python · TypeScript · SQLite graph</span>
+            <span class="eyebrow">MCP server · Java · Python · TypeScript · JavaScript · SQLite graph</span>
             <h1>Give your AI a <span>real map</span> of the codebase.</h1>
             <p class="lead">
               Code-Crawler turns a project into a queryable property graph of modules,
               types, methods, annotations, calls, virtual dispatch, and the wiring
               frameworks add — routes, injected dependencies, and reflective lookups —
-              then exposes it to Claude, Cursor, Copilot, and any MCP client as 22 precise
-              tools.
+              then exposes it to Claude, Cursor, Copilot, and any MCP client through 22
+              tools with typed arguments.
             </p>
             <div class="hero-actions">
               <a class="btn btn-primary" href="usage.html">Get started →</a>
@@ -126,7 +151,8 @@
               <h3><span class="icon green" aria-hidden="true">▲</span> Analytics</h3>
               <p>
                 Rank hotspots by fan-in, fan-out, and advice count. Surface dead-code
-                candidates with the reason each symbol is unreachable.
+                candidates that no call, dispatch, or advice edge reaches, with entry
+                points, tests, and constructors excluded.
               </p>
             </article>
             <article class="card">

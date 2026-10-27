@@ -10,6 +10,15 @@
       name="description"
       content="Worked Code-Crawler examples in Java, Python and TypeScript: impact analysis, runtime execution traces, routes and dependency injection, decorator scans, hotspots and dead-code triage."
     />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Code-Crawler" />
+    <meta property="og:title" content="Examples — Code-Crawler" />
+    <meta
+      property="og:description"
+      content="Worked Code-Crawler examples in Java, Python and TypeScript: impact analysis, runtime execution traces, routes and dependency injection, decorator scans, hotspots and dead-code triage."
+    />
+    <meta property="og:url" content="https://nithin554.github.io/code-crawler/examples.html" />
+    <meta name="twitter:card" content="summary" />
     <link rel="stylesheet" href="assets/style.css" />
     <link
       rel="icon"
@@ -352,12 +361,60 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
             </div>
           </div>
 
-          <h3 style="margin-top: 48px">Java · dispatch and advice</h3>
-          <p class="lead">
-            The Java fixture registers no HTTP routes and no DI container — it targets the
-            harder problem instead: which override actually runs, and which advice wraps it.
-            <code>find_routes()</code> and <code>find_injections()</code> return empty for it,
-            which is the honest answer. The five walkthroughs below are that fixture.
+          <h3 style="margin-top: 48px">Java · which override runs, and what wraps it</h3>
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_implementations("com.acme.Payment")</span>
+              </div>
+              <pre><code><span class="c-type">com.acme.Payment</span>
+  <span class="c-edge">IMPLEMENTS</span> com.acme.CardPayment   <span class="c-com">depth 1</span>
+  <span class="c-edge">IMPLEMENTS</span> com.acme.UpiPayment    <span class="c-com">depth 1</span>
+
+<span class="c-com">// find_routes() · find_injections()</span>
+<span class="c-str">[]</span>  <span class="c-com">no web framework, no DI container</span>
+
+<span class="c-good">2 overrides</span> <span class="c-com">· every target a Payment call can reach</span></code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_aspects()</span>
+              </div>
+              <pre><code><span class="c-type">com.acme.AuditAspect</span>
+  <span class="c-fn">auditPayment</span>    <span class="c-str">around</span>    paymentCall()
+    <span class="c-edge">ADVISES</span> CardPayment#pay · Payment#pay · UpiPayment#pay
+  <span class="c-fn">beforeCheckout</span>  <span class="c-str">before</span>    execution(* com.acme.Checkout.checkout(..))
+    <span class="c-edge">ADVISES</span> Checkout#checkout
+  <span class="c-fn">paymentCall</span>     <span class="c-str">pointcut</span>  execution(* com.acme.*.pay(..))
+    <span class="c-com">named pointcut — resolves to 3 targets, advises none itself</span></code></pre>
+            </div>
+          </div>
+
+          <div class="code-card" style="margin-top: 24px">
+            <div class="code-title">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>trace_execution("com.acme.Checkout#checkout")</span>
+            </div>
+            <pre><code>depth 1  <span class="c-warn">AuditAspect#beforeCheckout</span>   <span class="c-com">INTERCEPT · before</span>
+depth 1  <span class="c-type">Payment#pay</span>                  <span class="c-com">CALLS · Checkout.java:11</span>
+depth 2  <span class="c-warn">AuditAspect#auditPayment</span>     <span class="c-com">INTERCEPT · around</span>
+depth 2  <span class="c-type">CardPayment#pay</span>              <span class="c-com">DYNAMIC_DISPATCH</span>
+depth 2  <span class="c-type">UpiPayment#pay</span>               <span class="c-com">DYNAMIC_DISPATCH</span>
+depth 3  <span class="c-type">CardPayment#authorize</span>        <span class="c-com">CardPayment.java:6</span>
+depth 3  <span class="c-type">UpiPayment#settle</span>            <span class="c-com">UpiPayment.java:6</span>
+depth 3  <span class="c-warn">__unknown__:joinPoint.proceed</span> <span class="c-com">AuditAspect.java:17</span>
+depth 4  <span class="c-warn">__unknown__:System.out.println</span> <span class="c-com">UpiPayment.java:10</span></code></pre>
+          </div>
+
+          <p class="muted" style="margin-top: 20px">
+            No web framework and no DI container in this fixture, so <code>find_routes()</code>
+            and <code>find_injections()</code> return <code>[]</code> — the honest answer
+            rather than a guess. What it exercises is the harder question: which override
+            actually runs, and which advice wraps it. The five walkthroughs below use this
+            fixture.
           </p>
         </div>
       </section>
@@ -410,8 +467,16 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
         "kind": "method"
       },
       "depth": 1,
-      "callSiteLine": 12,
+      "callSiteLine": 11,
       "edgeKind": "CALLS"
+    },
+    {
+      "caller": {
+        "id": "com.acme.AuditAspect#beforeCheckout",
+        "kind": "method"
+      },
+      "depth": 2,
+      "edgeKind": "ADVISES"
     }
   ]
 }</code></pre>
@@ -419,9 +484,10 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
           </div>
 
           <p class="muted" style="margin-top: 20px">
-            The advice caller is the important one: changing the signature also breaks
-            <code>AuditAspect#auditPayment</code>, which never mentions <code>pay</code> in
-            its own body.
+            Both advice callers are the point. <code>AuditAspect#auditPayment</code> never
+            mentions <code>pay</code> in its own body — it inherits the dependency from a
+            named pointcut. <code>beforeCheckout</code> only reaches <code>pay</code> at depth
+            2, through its advised caller. A text search finds neither.
           </p>
         </div>
       </section>
@@ -455,41 +521,60 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
             </div>
             <pre><code>{
   "root": { "id": "com.acme.Checkout#checkout", "kind": "method" },
-  "stepCount": 6,
+              "stepCount": 9,
   "steps": [
     {
-      "symbol": { "id": "com.acme.Checkout#checkout" },
-      "depth": 0
+                  "symbol": { "id": "com.acme.AuditAspect#beforeCheckout" },
+                  "depth": 1,
+                  "via": "INTERCEPT"
+                },
+                {
+                  "symbol": { "id": "com.acme.Payment#pay" },
+                  "depth": 1,
+                  "via": "CALLS",
+                  "callSiteLine": 11
+                },
+                {
+                  "symbol": { "id": "com.acme.AuditAspect#auditPayment" },
+                  "depth": 2,
+                  "via": "INTERCEPT"
     },
     {
-      "symbol": { "id": "com.acme.AuditAspect#beforeCheckout" },
-      "depth": 1,
-      "via": "INTERCEPT",
-      "callSiteLine": 12
-    },
-    {
-      "symbol": { "id": "com.acme.Payment#pay" },
-      "depth": 1,
-      "via": "CALLS",
-      "callSiteLine": 12
-    },
-    {
-      "symbol": { "id": "com.acme.AuditAspect#auditPayment" },
+                  "symbol": { "id": "com.acme.CardPayment#pay" },
       "depth": 2,
-      "via": "INTERCEPT"
+                  "via": "DYNAMIC_DISPATCH"
     },
     {
-      "symbol": { "id": "com.acme.CardPayment#pay" },
-      "depth": 2,
-      "via": "DYNAMIC_DISPATCH"
-    },
-    {
-      "symbol": { "id": "com.acme.UpiPayment#pay" },
+                  "symbol": { "id": "com.acme.UpiPayment#pay" },
       "depth": 2,
       "via": "DYNAMIC_DISPATCH"
-    }
-  ]
-}</code></pre>
+    },
+    {
+                  "symbol": { "id": "__unknown__:joinPoint.proceed" },
+                  "depth": 3,
+                  "via": "CALLS",
+                  "callSiteLine": 17
+                },
+                {
+                  "symbol": { "id": "com.acme.CardPayment#authorize" },
+                  "depth": 3,
+                  "via": "CALLS",
+                  "callSiteLine": 6
+                },
+                {
+                  "symbol": { "id": "com.acme.UpiPayment#settle" },
+                  "depth": 3,
+                  "via": "CALLS",
+                  "callSiteLine": 6
+                },
+                {
+                  "symbol": { "id": "__unknown__:System.out.println" },
+                  "depth": 4,
+                  "via": "CALLS",
+                  "callSiteLine": 10
+                }
+              ]
+            }</code></pre>
           </div>
 
           <div class="note" style="margin-top: 20px">
@@ -549,6 +634,12 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
           "advised": [
             { "id": "com.acme.Checkout#checkout" }
           ]
+        },
+        {
+          "method": { "id": "com.acme.AuditAspect#paymentCall" },
+          "adviceKind": "pointcut",
+          "pointcut": "execution(* com.acme.*.pay(..))",
+          "advised": []
         }
       ]
     }
@@ -558,9 +649,11 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
           </div>
 
           <p class="muted" style="margin-top: 20px">
-            Note that <code>@Around("paymentCall()")</code> is reported with the resolved
-            effect — all three <code>pay</code> methods — not just the pointcut name. This is
-            the difference between indexing an annotation and understanding it.
+            <code>@Around("paymentCall()")</code> is reported with the resolved effect — all
+            three <code>pay</code> methods — not just the pointcut name. The named pointcut
+            itself appears with an empty <code>advised</code> list: it declares a predicate,
+            it does not intercept anything. This is the difference between indexing an
+            annotation and understanding it.
           </p>
         </div>
       </section>
@@ -601,7 +694,7 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
         "filePath": "com/acme/DecoratedService.java"
       },
       "annotation": "Transactional",
-      "line": 11,
+      "line": 9,
       "arguments": ["readOnly = true"]
     }
   ]
@@ -622,8 +715,9 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
 <span class="c-com">// decorators: [ { name: "Service", decorator: false } ]</span>
 <span class="c-com">// members[0].symbol.id: "com.acme.DecoratedService#describe"</span>
 <span class="c-com">// members[0].decorators:</span>
+<span class="c-com">//   { name: "Cacheable",     decorator: true, arguments: ["\"orders\""] }</span>
 <span class="c-com">//   { name: "Transactional", decorator: true, arguments: ["readOnly = true"] }</span>
-<span class="c-com">//   { name: "Cacheable",     decorator: true, arguments: ["orders"] }</span></code></pre>
+<span class="c-com">// string literals keep their quotes — that is the source, not a JSON artifact</span></code></pre>
           </div>
 
           <div class="note" style="margin-top: 20px">
@@ -653,19 +747,37 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
                 <span>find_hotspots · min_fan_in: 1</span>
               </div>
               <pre><code>{
-  "count": 2,
+  "count": 5,
   "hotspots": [
     {
       "symbol": { "id": "com.acme.Payment#pay" },
-      "fanIn": 2,
-      "fanOut": 0,
+      "fanIn": 1,
+      "fanOut": 2,
       "adviceCount": 1
     },
     {
-      "symbol": { "id": "com.acme.Checkout#checkout" },
+      "symbol": { "id": "com.acme.CardPayment#authorize" },
+      "fanIn": 1,
+      "fanOut": 1,
+      "adviceCount": 0
+    },
+    {
+      "symbol": { "id": "com.acme.CardPayment#pay" },
       "fanIn": 1,
       "fanOut": 1,
       "adviceCount": 1
+    },
+    {
+      "symbol": { "id": "com.acme.UpiPayment#pay" },
+      "fanIn": 1,
+      "fanOut": 1,
+      "adviceCount": 1
+    },
+    {
+      "symbol": { "id": "com.acme.UpiPayment#settle" },
+      "fanIn": 1,
+      "fanOut": 1,
+      "adviceCount": 0
     }
   ]
 }</code></pre>
@@ -676,27 +788,21 @@ depth 2  <span class="c-warn">__unknown__:this.rows.push</span> <span class="c-c
                 <span>find_dead_code</span>
               </div>
               <pre><code>{
-  "count": 2,
-  "unused": [
-    {
-      "symbol": { "id": "com.acme.DecoratedService#describe" },
-      "reason": "no incoming call, dispatch, or advice edges"
-    },
-    {
-      "symbol": { "id": "com.acme.DecoratedService#<init>" },
-      "reason": "no incoming call, dispatch, or advice edges"
-    }
-  ]
+  "count": 0,
+  "unused": []
 }</code></pre>
             </div>
           </div>
 
           <div class="note warn" style="margin-top: 20px">
             <p>
-              <code>DecoratedService</code> is reached by Spring, not by source. This is the
-              canonical false positive: no in-project caller exists, so the method looks dead.
-              Use constructors-inclusive output and knowledge of your framework's entry
-              points before deleting anything.
+              That empty result is correct, not a bug: the fixture lives under
+              <code>tests/</code>, and test sources are excluded by default. Re-running with
+              <code>include_tests: true</code> and <code>include_constructors: true</code>
+              surfaces five candidates — including <code>AuditAspect#auditPayment</code>,
+              which is reached by the framework, not by any call. <code>ADVISES</code> edges
+              point <em>from</em> advice <em>to</em> the advised method, so nothing points at
+              the advice itself. Treat every row as a candidate, never a verdict.
             </p>
           </div>
 
