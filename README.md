@@ -4,15 +4,17 @@
 
 Code-Crawler indexes a project into a SQLite-backed property graph — files, packages,
 modules, classes, interfaces, methods, fields, imports, annotations/decorators, **call
-edges**, **virtual dispatch**, and **aspect advice** — then exposes that graph to LLM
-clients as MCP tools: find callers, trace call paths, explore neighborhoods, follow
-runtime dispatch, and search symbols across the whole codebase.
+edges**, **virtual dispatch**, **aspect advice**, and the wiring frameworks add
+(**entry points**, **routes**, **injected dependencies**, **reflective lookups**) — then
+exposes that graph to LLM clients as MCP tools: find callers, trace call paths, explore
+neighborhoods, follow runtime dispatch, and search symbols across the whole codebase.
 
 Supports **Java**, **Python**, and **TypeScript/JavaScript** projects, and can index all
 three into the same graph.
 
 📖 **Documentation site:** <https://nithin554.github.io/code-crawler/>
 📘 **Task-oriented guide:** [`USAGE.md`](USAGE.md)
+🗺️ **Roadmap:** [`ROADMAP.md`](ROADMAP.md)
 
 ```
         ┌───────────────────────  MCP (stdio)  ───────────────────────┐
@@ -432,8 +434,7 @@ src/
 │       ├── index.ts            language registry + per-file language detection
 │       ├── java.ts             Java structural extraction
 │       ├── python.ts           Python structural extraction
-│       ├── typescript.ts       TypeScript/TSX structural extraction
-│       └── javascript.ts       JavaScript structural extraction
+│       └── typescript.ts       TypeScript, TSX and JavaScript extraction
 └── resolver/
     ├── types.ts                TypeIndex (global name/method index) + ResolvedCall
     ├── common.ts               builtin types, external packages, receiver inference
@@ -442,29 +443,11 @@ src/
     └── javaResolver.ts         Java call-target resolution heuristics
 ```
 
-## Architecture
+## Roadmap
 
-```
-src/
-├── index.ts            CLI (crawl | status | query | serve)
-├── server.ts           MCP server: tools, resources, prompt (thin handlers)
-├── crawler.ts          file discovery → parse → index → resolve → persist
-├── config.ts           env-overridable configuration
-├── graph/
-│   ├── schema.ts       node/edge kinds, id scheme, property shapes
-│   ├── store.ts        better-sqlite3 schema + idempotent file-scoped upserts
-│   └── queries.ts      recursive-CTE traversal (callers/callees/path/subgraph)
-├── parser/
-│   ├── language.ts     LanguageConfig contract
-│   ├── treeSitter.ts   WASM runtime + grammar loading + CST walk helpers
-│   └── languages/
-│       ├── index.ts    language registry
-│       └── java.ts     Java structural extraction
-└── resolver/
-    ├── types.ts        TypeIndex (global name/method index) + ResolvedCall
-    ├── dynamic.ts      virtual dispatch + AspectJ pointcut matching/advice edges
-    └── javaResolver.ts Java call-target resolution heuristics
-```
+Language-agnostic architecture, more languages, and better resolution are tracked in
+[`ROADMAP.md`](ROADMAP.md). The near-term focus is making a new language a one-module
+change, then using that to add Go, C#, and Kotlin.
 
 ## Documentation site
 

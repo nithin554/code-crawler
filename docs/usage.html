@@ -483,7 +483,7 @@ npx codecrawler serve</code></pre>
                 <tr>
                   <td>Annotations missing</td>
                   <td>The source uses a language level the grammar does not expose as modifiers.</td>
-                  <td>Annotations are read from the Java <code>modifiers</code> child; verify with <code>get_node</code> and <code>get_decorators</code>.</td>
+                  <td>Annotations and decorators are read from each grammar's own modifier, decorator, or attribute nodes; verify with <code>get_node</code> and <code>get_decorators</code>.</td>
                 </tr>
                 <tr>
                   <td>Stale symbols after a refactor</td>
@@ -516,6 +516,7 @@ npx codecrawler serve</code></pre>
         <span>
           <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
           <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> ·
           <a href="tools.html">Tools</a>
         </span>
       </div>

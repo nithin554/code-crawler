@@ -8,8 +8,9 @@ the [README](README.md); if you want to *do* something, start here.
 - [3. The agent workflow](#3-the-agent-workflow)
 - [4. Recipes](#4-recipes)
 - [5. Reading the results](#5-reading-the-results)
-- [6. What is and is not modelled](#6-what-is-and-is-not-modelled)
-- [7. Troubleshooting](#7-troubleshooting)
+- [6. Per-language examples](#6-per-language-examples)
+- [7. What is and is not modelled](#7-what-is-and-is-not-modelled)
+- [8. Troubleshooting](#8-troubleshooting)
 
 ---
 
@@ -311,7 +312,87 @@ no entry-point mark. If `find_dead_code` reports something you know is live, che
 
 ---
 
-## 6. What is and is not modelled
+## 6. Per-language examples
+
+Every tool returns the same shape whatever the language. What differs is what the grammar
+lets the parser see, so the three fixture projects under `tests/fixtures/` each cover a
+different surface.
+
+### Python — FastAPI routes and `Depends()`
+
+`tests/fixtures/python/sample` (6 files · 49 nodes · 65 edges):
+
+```jsonc
+// find_routes()
+{ "source": { "id": "module:app.api" },
+  "target": { "id": "module:app.api#read_order" },
+  "framework": "router", "httpMethod": "GET",
+  "path": "/orders/{order_id}", "line": 13 }
+
+// find_injections()
+{ "source": { "id": "app.service.OrderService" },
+  "target": { "id": "app.repository.OrderRepository" },
+  "framework": "dependency-injector", "injectedName": "repo", "line": 15 }
+{ "source": { "id": "module:app.api" },
+  "target": { "id": "app.service.OrderService" },
+  "framework": "fastapi", "injectedName": "service", "line": 19 }
+
+// find_reflections()
+{ "source": { "id": "module:app.dynamic#load_plugin" },
+  "target": { "id": "__reflect__:app.plugins." },
+  "line": 6, "mechanism": "importlib.import_module" }
+```
+
+`find_entry_points()` returns both worlds in one list: `module:app.main` and
+`module:app.main#main` as `cli` (`__main__`), plus `module:app.api#read_order` and
+`#create_order` as `http`. `trace_execution("app.service.OrderService#place")` walks to
+`OrderRepository#create` (line 19) and `OrderService#audit` (line 20), then stops at
+`ext:builtins`.
+
+> `framework` on a route names the decorator receiver — `router` here, because the handler
+> hangs off an `APIRouter` instance — while a `Depends()` parameter reports `fastapi`.
+
+### TypeScript — one endpoint, two frameworks
+
+`tests/fixtures/typescript/sample` (6 files · 62 nodes · 81 edges):
+
+```jsonc
+// find_routes() — Express handlers get synthetic ids
+{ "source": { "id": "module:src.routes" },
+  "target": { "id": "module:src.routes#<anonymous@7>" },
+  "framework": "express", "httpMethod": "GET",
+  "path": "/orders/:id", "line": 6 }
+
+// find_routes() — NestJS folds controller + method paths
+{ "source": { "id": "src.controller.OrderController" },
+  "target": { "id": "src.controller.OrderController#read" },
+  "framework": "nestjs", "httpMethod": "GET",
+  "path": "/orders/:id", "line": 7 }
+
+// find_reflections()
+{ "source": { "id": "module:src.dynamic#loadPlugin" },
+  "target": { "id": "__reflect__:./plugins/${name}" },
+  "line": 1, "mechanism": "import()" }
+```
+
+`find_external_dependencies()` ranks `@nestjs/common` (6 references, 2 files), `console`,
+and `express`. `trace_execution("src.service.OrderService#place")` reports resolved calls
+(next to `__unknown__:this.rows.push`, because the receiver type of a `.push` on an
+untyped field is genuinely unknown) — unresolved is not hidden, it is labelled.
+
+### Java — dispatch and advice
+
+`tests/fixtures/java/dynamic` (6 files · 43 nodes · 61 edges, 2 dynamic-dispatch edges,
+4 advice edges) registers no HTTP routes and no DI container, so `find_routes()` and
+`find_injections()` return empty — the honest answer. It targets the harder problem:
+`find_implementations("Payment")`, `find_aspects()` and
+`trace_execution("com.acme.Checkout#checkout")` show which override actually runs and
+which advice wraps it. See the [worked examples](https://nithin554.github.io/code-crawler/examples.html)
+for the full walkthrough.
+
+---
+
+## 7. What is and is not modelled
 
 ### Modelled
 
@@ -356,7 +437,7 @@ no entry-point mark. If `find_dead_code` reports something you know is live, che
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 **The crawl found zero files.**
 Check the path and your excludes. `CODECRAWLER_EXCLUDE_DIRS` replaces nothing — it *adds*
