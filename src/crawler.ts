@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { GraphStore } from "./graph/store.js";
-import type { GraphEdge, GraphNode } from "./graph/schema.js";
-import { fieldNodeId, importNodeId } from "./graph/schema.js";
+import type { GraphEdge, GraphNode, NodeKind } from "./graph/schema.js";
+import { annotationNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
 import { languageForFile } from "./parser/languages/index.js";
-import type { ParsedFile } from "./parser/language.js";
+import type { AnnotationInfo, ParsedFile } from "./parser/language.js";
 import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
 import { resolveJavaFile } from "./resolver/javaResolver.js";
+import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import type { JavaParsedFile } from "./parser/languages/java.js";
 
 /**
@@ -30,6 +31,14 @@ export interface CrawlResult {
   edges: number;
   resolvedCalls: number;
   unresolvedCalls: number;
+  /** Virtual-dispatch edges discovered across the project. */
+  dynamicDispatchEdges: number;
+  /** Aspect advice -> advised-method edges. */
+  adviceEdges: number;
+  /** Number of aspect types that produced advice. */
+  aspects: number;
+  /** Number of annotation/decorator usages indexed. */
+  decorators: number;
   languages: string[];
   durationMs: number;
 }
@@ -80,11 +89,14 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
   });
 
   if (parsed.packageName) {
+    // Package nodes are shared by every file in the package. They are not
+    // owned by one file (filePath: null) so deleting one file cannot cascade
+    // through the package node into unrelated files.
     nodes.push({
       id: parsed.packageName,
       kind: "package",
       qualifiedName: parsed.packageName,
-      filePath: fileId,
+      filePath: null,
       properties: {},
     });
     edges.push({
@@ -107,13 +119,52 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
     edges.push({ source: fileId, target: importId, kind: "IMPORTS", properties: {} });
   }
 
+  const addDecorators = (ownerId: string, annotations: AnnotationInfo[]): void => {
+    for (const annotation of annotations) {
+      const name = annotation.fqn ?? annotation.name;
+      const id = annotationNodeId(name);
+      // Annotation nodes are shared across files and therefore file-less.
+      nodes.push({
+        id,
+        kind: "annotation",
+        qualifiedName: name,
+        filePath: null,
+        properties: {
+          name: annotation.name,
+          ...(annotation.fqn ? { fqn: annotation.fqn } : {}),
+          decorator: isDecoratorAnnotation(annotation.name),
+        },
+      });
+      edges.push({
+        source: ownerId,
+        target: id,
+        kind: "ANNOTATED_WITH",
+        properties: {
+          line: annotation.line,
+          arguments: annotation.arguments,
+        },
+      });
+    }
+  };
+
   for (const t of parsed.types) {
+    const kind: NodeKind = t.isAspect
+      ? "aspect"
+      : t.kind === "annotation"
+        ? "annotation_type"
+        : t.kind;
     nodes.push({
       id: t.id,
-      kind: t.kind,
+      kind,
       qualifiedName: t.id,
       filePath: fileId,
-      properties: { name: t.name, startLine: t.startLine, endLine: t.endLine },
+      properties: {
+        name: t.name,
+        startLine: t.startLine,
+        endLine: t.endLine,
+        annotations: t.annotations.map((a) => a.name),
+        ...(t.isAspect ? { aspect: true } : {}),
+      },
     });
     edges.push({ source: fileId, target: t.id, kind: "CONTAINS", properties: {} });
     if (parsed.packageName) {
@@ -125,6 +176,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
     for (const parent of t.implementsTypes) {
       edges.push({ source: t.id, target: parent, kind: "IMPLEMENTS", properties: {} });
     }
+    addDecorators(t.id, t.annotations);
   }
 
   for (const m of parsed.methods) {
@@ -140,6 +192,9 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
         modifiers: m.modifiers,
         startLine: m.startLine,
         endLine: m.endLine,
+        annotations: m.annotations.map((a) => a.name),
+        ...(m.adviceKind ? { adviceKind: m.adviceKind } : {}),
+        ...(m.pointcut ? { pointcut: m.pointcut } : {}),
       },
     });
     edges.push({
@@ -148,6 +203,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
       kind: "CONTAINS",
       properties: { line: m.startLine },
     });
+    addDecorators(m.id, m.annotations);
   }
 
   for (const f of parsed.fields) {
@@ -156,7 +212,12 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
       kind: "field",
       qualifiedName: f.id,
       filePath: fileId,
-      properties: { name: f.name, type: f.type, startLine: f.startLine },
+      properties: {
+        name: f.name,
+        type: f.type,
+        startLine: f.startLine,
+        annotations: f.annotations.map((a) => a.name),
+      },
     });
     edges.push({
       source: f.typeId,
@@ -164,9 +225,29 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
       kind: "CONTAINS",
       properties: { line: f.startLine },
     });
+    addDecorators(fieldNodeId(f.typeId, f.name), f.annotations);
   }
 
-  return { nodes, edges };
+  return { nodes: dedupeById(nodes), edges: dedupeEdges(edges) };
+}
+
+function dedupeById(nodes: GraphNode[]): GraphNode[] {
+  const seen = new Set<string>();
+  return nodes.filter((node) => {
+    if (seen.has(node.id)) return false;
+    seen.add(node.id);
+    return true;
+  });
+}
+
+function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    const key = `${edge.source}\u0000${edge.target}\u0000${edge.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Resolve call sites for a parsed file into CALLS edges + phantom nodes. */
@@ -301,22 +382,51 @@ export async function crawlProject(
   );
   const currentFiles = new Set(files);
   let filesRemoved = 0;
-  let totalNodes = 0;
-  let totalEdges = 0;
   let totalResolved = 0;
   let totalUnresolved = 0;
+  let totalDecorators = 0;
+  let dynamicDispatchCount = 0;
+  let adviceCount = 0;
+  let aspectCount = 0;
+
+  // Every resolved call edge across the project, used to derive virtual
+  // dispatch edges once the whole type hierarchy is known.
+  const allCallEdges: GraphEdge[] = [];
 
   // Pre-compute every declared node id so synthetic targets (default
   // constructors) can be created on demand, and so EXTENDS/IMPLEMENTS edges
   // to external types can be dropped instead of violating FK constraints.
   const allNodeIds = new Set<string>();
+  const declarations = new Map<string, ReturnType<typeof buildDeclarationGraph>>();
   for (const parsed of parsedFiles) {
-    for (const n of buildDeclarationGraph(parsed).nodes) allNodeIds.add(n.id);
+    const decl = buildDeclarationGraph(parsed);
+    declarations.set(parsed.filePath, decl);
+    for (const n of decl.nodes) allNodeIds.add(n.id);
   }
+
+  // Hierarchy metadata is emitted with whatever name the source used
+  // (`implements Payment`), which is not always the fully-qualified node id.
+  // Resolve unique simple names so EXTENDS/IMPLEMENTS edges survive the
+  // project-membership filter below.
+  const typeIdsByName = new Map<string, string[]>();
+  for (const parsed of parsedFiles) {
+    for (const t of parsed.types) {
+      const ids = typeIdsByName.get(t.name) ?? [];
+      if (!ids.includes(t.id)) ids.push(t.id);
+      typeIdsByName.set(t.name, ids);
+    }
+  }
+  const normalizeHierarchyTarget = (edge: GraphEdge): GraphEdge => {
+    if (edge.kind !== "EXTENDS" && edge.kind !== "IMPLEMENTS") return edge;
+    if (allNodeIds.has(edge.target)) return edge;
+    const candidates = typeIdsByName.get(edge.target);
+    const resolved = candidates?.length === 1 ? candidates[0] : undefined;
+    return resolved ? { ...edge, target: resolved } : edge;
+  };
 
   store.withTransaction(() => {
     for (const parsed of parsedFiles) {
-      const decl = buildDeclarationGraph(parsed);
+      const decl = declarations.get(parsed.filePath)!;
       const calls = buildCallEdges(parsed, index, allNodeIds);
 
       for (const p of calls.phantomNodes) allNodeIds.add(p.id);
@@ -327,13 +437,21 @@ export async function crawlProject(
       // Drop edges whose endpoints aren't part of the indexed project
       // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
       const edges = decl.edges
+        .map(normalizeHierarchyTarget)
         .concat(calls.edges)
         .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
       const nodes = decl.nodes.concat(calls.phantomNodes);
       store.replaceFile(parsed.filePath, nodes, edges);
 
-      totalNodes += decl.nodes.length;
-      totalEdges += edges.length;
+      for (const edge of calls.edges) {
+        if (allNodeIds.has(edge.source) && allNodeIds.has(edge.target)) {
+          allCallEdges.push(edge);
+        }
+      }
+
+      totalDecorators += decl.edges.filter(
+        (e) => e.kind === "ANNOTATED_WITH" && isDecoratorAnnotation(e.target.slice(1))
+      ).length;
       totalResolved += calls.resolved;
       totalUnresolved += calls.unresolved;
       previouslyIndexed.delete(parsed.filePath);
@@ -346,20 +464,33 @@ export async function crawlProject(
         filesRemoved++;
       }
     }
+
+    // Rebuild project-wide derived edges: virtual dispatch and AOP advice.
+    store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES"]);
+    const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
+    store.upsertEdges(dynamic.edges);
+    dynamicDispatchCount = dynamic.dispatchCount;
+    adviceCount = dynamic.adviceCount;
+    aspectCount = dynamic.aspects;
   });
 
   store.setMeta("last_crawl_at", new Date().toISOString());
   store.setMeta("last_project_path", absPath);
 
+  const stats = store.stats();
   return {
     projectPath: absPath,
     filesScanned: files.length,
     filesParsed: parsedFiles.length,
     filesRemoved,
-    nodes: totalNodes,
-    edges: totalEdges,
+    nodes: stats.nodes,
+    edges: stats.edges,
     resolvedCalls: totalResolved,
     unresolvedCalls: totalUnresolved,
+    dynamicDispatchEdges: dynamicDispatchCount,
+    adviceEdges: adviceCount,
+    aspects: aspectCount,
+    decorators: totalDecorators,
     languages: [...new Set(parsedFiles.map((p) => p.language))],
     durationMs: Date.now() - started,
   };

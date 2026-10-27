@@ -8,9 +8,16 @@ import {
   getCallers,
   getCallees,
   tracePath,
+  traceExecution,
   getSubgraph,
   searchSymbols,
   suggestSymbols,
+  findImplementations,
+  getAspects,
+  getDecorators,
+  findAnnotated,
+  hotspots,
+  deadCode,
   type SymbolRef,
 } from "./graph/queries.js";
 import { loadConfig } from "./config.js";
@@ -147,15 +154,29 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "get_callers",
-    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it).",
+    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Optionally follow virtual-dispatch and aspect-advice edges for dynamic callers.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callers (default true)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+      include_advice: z
+        .boolean()
+        .optional()
+        .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callers returned."),
     },
-    async ({ symbol, transitive, max_depth, limit }) => {
-      const result = getCallers(store, symbol, { transitive, maxDepth: max_depth, limit });
+    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit }) => {
+      const result = getCallers(store, symbol, {
+        transitive,
+        includeDynamic: include_dynamic,
+        includeAdvice: include_advice,
+        maxDepth: max_depth,
+        limit,
+      });
       if (!result) return notFound(symbol);
       return text({
         target: ref(result.target),
@@ -163,6 +184,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           caller: ref(c.caller),
           depth: c.depth,
           callSiteLine: line(c.callSiteLine),
+          edgeKind: c.edgeKind,
         })),
       });
     }
@@ -170,15 +192,29 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "get_callees",
-    "Find every symbol the given symbol calls, directly or transitively (the call graph below it).",
+    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Set include_dynamic to also follow virtual/interface dispatch targets.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callees (default true)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+      include_advice: z
+        .boolean()
+        .optional()
+        .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callees returned."),
     },
-    async ({ symbol, transitive, max_depth, limit }) => {
-      const result = getCallees(store, symbol, { transitive, maxDepth: max_depth, limit });
+    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit }) => {
+      const result = getCallees(store, symbol, {
+        transitive,
+        includeDynamic: include_dynamic,
+        includeAdvice: include_advice,
+        maxDepth: max_depth,
+        limit,
+      });
       if (!result) return notFound(symbol);
       return text({
         source: ref(result.source),
@@ -186,6 +222,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           callee: ref(c.callee),
           depth: c.depth,
           callSiteLine: line(c.callSiteLine),
+          edgeKind: c.edgeKind,
         })),
       });
     }
@@ -193,15 +230,28 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "trace_path",
-    "Find static call paths between two symbols. Paths follow CALLS edges; shortest paths are returned first.",
+    "Find call paths between two symbols. Follows static CALLS edges by default; set include_dynamic/include_advice to also route through virtual dispatch and aspect advice.",
     {
       source: z.string().describe("Starting symbol id or qualified name."),
       target: z.string().describe("Destination symbol id or qualified name."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+      include_advice: z
+        .boolean()
+        .optional()
+        .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Maximum path length."),
       limit: z.number().int().min(1).max(100).optional().describe("Max paths returned (default 10)."),
     },
-    async ({ source, target, max_depth, limit }) => {
-      const paths = tracePath(store, source, target, { maxDepth: max_depth, limit });
+    async ({ source, target, include_dynamic, include_advice, max_depth, limit }) => {
+      const paths = tracePath(store, source, target, {
+        includeDynamic: include_dynamic,
+        includeAdvice: include_advice,
+        maxDepth: max_depth,
+        limit,
+      });
       if (!paths) return notFound(source);
       return text({
         source,
@@ -210,6 +260,206 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         paths: paths.map((p) => ({
           length: p.length,
           path: p.path,
+          edges: p.edges.map((e) => ({
+            source: e.source,
+            target: e.target,
+            kind: e.kind,
+            callSiteLine: line(e.callSiteLine),
+          })),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "trace_execution",
+    "Produce a dynamic execution trace from a symbol: follows static and virtual-dispatch calls and weaves in aspect advice. Steps show how each symbol was reached, including INTERCEPT hops where advice wraps a call.",
+    {
+      symbol: z.string().describe("Starting method or constructor id/qualified name."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Follow virtual/interface dispatch edges (default true)."),
+      include_advice: z
+        .boolean()
+        .optional()
+        .describe("Weave aspect advice into the trace (default true)."),
+      max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
+      limit: z.number().int().min(1).max(1000).optional().describe("Max steps returned."),
+    },
+    async ({ symbol, include_dynamic, include_advice, max_depth, limit }) => {
+      const result = traceExecution(store, symbol, {
+        includeDynamic: include_dynamic,
+        includeAdvice: include_advice,
+        maxDepth: max_depth,
+        limit,
+      });
+      if (!result) return notFound(symbol);
+      return text({
+        root: ref(result.root),
+        stepCount: result.steps.length,
+        steps: result.steps.map((s) => ({
+          symbol: ref(s.symbol),
+          depth: s.depth,
+          via: s.via,
+          callSiteLine: line(s.callSiteLine),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_implementations",
+    "Find every class/interface that implements or extends a type, directly or transitively. Use this to understand virtual dispatch candidates.",
+    {
+      symbol: z.string().describe("Interface or superclass id/qualified name."),
+      max_depth: z.number().int().min(1).max(20).optional().describe("Hierarchy depth cap."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max implementations returned."),
+    },
+    async ({ symbol, max_depth, limit }) => {
+      const result = findImplementations(store, symbol, { maxDepth: max_depth, limit });
+      if (!result) return notFound(symbol);
+      return text({
+        target: ref(result.target),
+        implementationCount: result.implementations.length,
+        implementations: result.implementations.map((i) => ({
+          type: ref(i.type),
+          depth: i.depth,
+          via: i.via,
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_aspects",
+    "List aspects with their advice methods (@Before/@After/@Around/...), pointcuts, and the methods each advice intercepts.",
+    {
+      limit: z.number().int().min(1).max(200).optional().describe("Max aspects returned."),
+    },
+    async ({ limit }) => {
+      const aspects = getAspects(store, { limit });
+      return text({
+        aspectCount: aspects.length,
+        aspects: aspects.map((a) => ({
+          aspect: ref(a.aspect),
+          advice: a.advice.map((adv) => ({
+            method: ref(adv.method),
+            adviceKind: adv.adviceKind,
+            pointcut: adv.pointcut,
+            advised: adv.advised.map(ref),
+          })),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "get_decorators",
+    "Get the annotations/decorators applied to a symbol. Set include_members to also list decorators on its methods, constructors, and fields.",
+    {
+      symbol: z.string().describe("Symbol id or qualified name."),
+      include_members: z
+        .boolean()
+        .optional()
+        .describe("Include decorators on declared members (default false)."),
+    },
+    async ({ symbol, include_members }) => {
+      const result = getDecorators(store, symbol, { includeMembers: include_members });
+      if (!result) return notFound(symbol);
+      return text({
+        symbol: ref(result.symbol),
+        decorators: result.decorators.map((d) => ({
+          ...d,
+          line: line(d.line),
+        })),
+        members: result.members.map((m) => ({
+          symbol: ref(m.symbol),
+          decorators: m.decorators.map((d) => ({ ...d, line: line(d.line) })),
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_annotated",
+    "Find every symbol annotated/decorated with a given annotation (simple name, @name, or FQN).",
+    {
+      annotation: z.string().describe("Annotation name, e.g. 'Transactional', '@Aspect' or an FQN."),
+      kind: z
+        .enum(NODE_KINDS)
+        .optional()
+        .describe("Restrict results to a node kind (class, method, field, ...)."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max symbols returned."),
+    },
+    async ({ annotation, kind, limit }) => {
+      const results = findAnnotated(store, annotation, { kind, limit });
+      return text({
+        annotation,
+        count: results.length,
+        results: results.map((r) => ({
+          symbol: ref(r.symbol),
+          annotation: r.annotation,
+          line: line(r.line),
+          arguments: r.arguments,
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_hotspots",
+    "Rank methods/constructors by call volume (fan-in, fan-out, advice interceptions). Useful for prioritizing review or refactoring.",
+    {
+      limit: z.number().int().min(1).max(200).optional().describe("Max hotspots returned."),
+      min_fan_in: z.number().int().min(0).optional().describe("Minimum incoming call count."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Count dynamic-dispatch callers too (default true)."),
+    },
+    async ({ limit, min_fan_in, include_dynamic }) => {
+      const results = hotspots(store, {
+        limit,
+        minFanIn: min_fan_in,
+        includeDynamic: include_dynamic,
+      });
+      return text({
+        count: results.length,
+        hotspots: results.map((h) => ({
+          symbol: ref(h.symbol),
+          fanIn: h.fanIn,
+          fanOut: h.fanOut,
+          adviceCount: h.adviceCount,
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "find_dead_code",
+    "Find methods/constructors with no incoming calls, dispatch, or advice edges. Excludes entry points (`main`) and tests by default; framework-invoked code may be reported false-positively.",
+    {
+      limit: z.number().int().min(1).max(500).optional().describe("Max symbols returned."),
+      include_constructors: z.boolean().optional().describe("Include constructors (default false)."),
+      include_tests: z.boolean().optional().describe("Include test sources (default false)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Treat dynamic-dispatch edges as callers (default true)."),
+    },
+    async ({ limit, include_constructors, include_tests, include_dynamic }) => {
+      const results = deadCode(store, {
+        limit,
+        includeConstructors: include_constructors,
+        includeTests: include_tests,
+        includeDynamic: include_dynamic,
+      });
+      return text({
+        count: results.length,
+        unused: results.map((d) => ({
+          symbol: ref(d.symbol),
+          reason: d.reason,
         })),
       });
     }
@@ -244,7 +494,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "get_schema",
-    "Describe the property-graph model: node kinds, edge kinds, and the id scheme.",
+    "Describe the property-graph model: node kinds, edge kinds, and the id scheme (including annotations, aspects, and dynamic edges).",
     {},
     async () => {
       return text({
@@ -255,8 +505,15 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           method: "com.acme.Foo#run",
           constructor: "com.acme.Foo#<init>",
           field: "com.acme.Foo$repo",
+          annotation: "@Transactional",
           import: "__import__:com.acme.Foo",
           unknown: "__unknown__:System.out.println",
+        },
+        dynamicModel: {
+          DYNAMIC_DISPATCH:
+            "caller -> concrete override/implementation; inferred from the type hierarchy and virtual/interface dispatch.",
+          ADVISES: "advice method -> advised method; matched from @Before/@After/@Around pointcuts.",
+          ANNOTATED_WITH: "symbol -> annotation node; carries arguments and source line.",
         },
         lineNumbers: "1-based in tool output",
       });
@@ -291,8 +548,15 @@ export function createServer(store: GraphStore, config: Config): McpServer {
               method: "com.acme.Foo#run",
               constructor: "com.acme.Foo#<init>",
               field: "com.acme.Foo$repo",
+              annotation: "@Transactional",
               import: "__import__:com.acme.Foo",
               unknown: "__unknown__:System.out.println",
+            },
+            dynamicModel: {
+              DYNAMIC_DISPATCH:
+                "caller -> concrete override/implementation, inferred from the type hierarchy.",
+              ADVISES: "advice method -> advised method, matched from AspectJ pointcuts.",
+              ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
             },
           },
           null,

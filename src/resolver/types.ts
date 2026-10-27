@@ -33,6 +33,10 @@ export class TypeIndex {
   methodsByFqn = new Map<string, MethodInfo[]>();
   /** FQN -> parent FQNs (extends/implements, resolved where possible). */
   parentsByFqn = new Map<string, string[]>();
+  /** Resolved parent FQN -> directly-declared child FQNs. */
+  childrenByFqn = new Map<string, string[]>();
+
+  private hierarchyDirty = false;
 
   addFile(file: ParsedFile): void {
     for (const t of file.types) {
@@ -47,6 +51,58 @@ export class TypeIndex {
       list.push(m);
       this.methodsByFqn.set(m.typeId, list);
     }
+    this.hierarchyDirty = true;
+  }
+
+  /**
+   * Resolve extend/implements names to FQNs and build the reverse hierarchy.
+   * Called lazily so `addFile` can arrive in any order.
+   */
+  linkHierarchy(): void {
+    this.childrenByFqn.clear();
+    for (const child of this.kindByFqn.keys()) {
+      for (const parentName of this.parentsByFqn.get(child) ?? []) {
+        for (const parent of this.resolveType(parentName)) {
+          if (parent === child) continue;
+          const list = this.childrenByFqn.get(parent) ?? [];
+          if (!list.includes(child)) list.push(child);
+          this.childrenByFqn.set(parent, list);
+        }
+      }
+    }
+    this.hierarchyDirty = false;
+  }
+
+  /** Direct subtypes (implementors/subclasses) of a type. */
+  directSubtypes(typeFqn: string): string[] {
+    if (this.hierarchyDirty) this.linkHierarchy();
+    return this.childrenByFqn.get(typeFqn) ?? [];
+  }
+
+  /** Transitive subtypes, breadth-first, depth-bounded. */
+  subtypesOf(typeFqn: string, maxDepth = 10): string[] {
+    if (this.hierarchyDirty) this.linkHierarchy();
+    const out: string[] = [];
+    const seen = new Set<string>([typeFqn]);
+    let frontier = [typeFqn];
+    for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
+      const next: string[] = [];
+      for (const current of frontier) {
+        for (const child of this.directSubtypes(current)) {
+          if (seen.has(child)) continue;
+          seen.add(child);
+          out.push(child);
+          next.push(child);
+        }
+      }
+      frontier = next;
+    }
+    return out;
+  }
+
+  /** True when `candidate` is a (transitive) subtype of `base`. */
+  isSubtypeOf(candidate: string, base: string): boolean {
+    return candidate === base || this.subtypesOf(base).includes(candidate);
   }
 
   /** Resolve a (possibly qualified) type name to candidate FQNs. */
@@ -86,6 +142,7 @@ export class TypeIndex {
 export function buildTypeIndex(files: ParsedFile[]): TypeIndex {
   const index = new TypeIndex();
   for (const f of files) index.addFile(f);
+  index.linkHierarchy();
   return index;
 }
 

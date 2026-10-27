@@ -228,6 +228,20 @@ export class GraphStore {
     tx(filePath, nodes, edges);
   }
 
+  /**
+   * Delete every edge of the given kinds. Project-wide derived edges
+   * (DYNAMIC_DISPATCH / ADVISES) are rebuilt from scratch on each crawl so
+   * removing an override or advice method cannot leave stale edges behind.
+   */
+  deleteEdgesByKind(kinds: EdgeKind[]): void {
+    if (kinds.length === 0) return;
+    const stmt = this.db.prepare("DELETE FROM edges WHERE kind = ?");
+    const tx = this.db.transaction(() => {
+      for (const kind of kinds) stmt.run(kind);
+    });
+    tx();
+  }
+
   /** Ensure every CALLS edge endpoint exists (e.g. phantom unknown symbols). */
   ensureNode(node: GraphNode): void {
     if (!this.getNode(node.id)) this.upsertNode(node);

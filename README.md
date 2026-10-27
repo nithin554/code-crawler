@@ -1,16 +1,20 @@
 # Code-Crawler
 
-**Static call tracing MCP server backed by a persistent property graph of your codebase.**
+**Static + dynamic call tracing MCP server backed by a persistent property graph of your codebase.**
 
 Code-Crawler indexes a project into a SQLite-backed property graph — files, packages,
-classes, methods, fields, imports, and **call edges** — then exposes that graph to LLM
-clients as MCP tools: find callers, trace call paths, explore neighborhoods, and search
-symbols across the whole codebase.
+classes, methods, fields, imports, annotations, **call edges**, **virtual dispatch**, and
+**aspect advice** — then exposes that graph to LLM clients as MCP tools: find callers,
+trace call paths, explore neighborhoods, follow runtime dispatch, and search symbols
+across the whole codebase.
+
+📖 **Documentation site:** <https://nithin554.github.io/code-crawler/>
 
 ```
         ┌───────────────────────  MCP (stdio)  ───────────────────────┐
         │  crawl_project  search_symbols  get_callers  get_callees     │
-        │  trace_path     get_subgraph   get_node      get_schema ...  │
+        │  trace_path     trace_execution  find_aspects  get_decorators│
+        │  find_implementations  find_hotspots  find_dead_code  ...    │
         └───────────────┬──────────────────────────────┬───────────────┘
                         │                              │
                  ┌──────▼───────┐             ┌────────▼────────┐
@@ -39,13 +43,22 @@ and answers them instantly with bounded recursive SQL queries.
 
 - **Java-first** via the `tree-sitter-java` grammar (WASM — no native build step).
   The parser/resolver layer is designed so more languages plug in per-language config modules.
+- **Dynamic tracing on a static graph** — `DYNAMIC_DISPATCH` edges connect interface/base
+  calls to every override in the project, and `ADVISES` edges weave AspectJ/Spring AOP
+  advice into execution traces (`before`, `after`, `around`, `after-returning`,
+  `after-throwing`, named `@Pointcut` references, `&&`/`||`/`!` and `execution`, `within`,
+  `@annotation`, `@within`, `target`, `this`, `args` primitives).
+- **Annotations as first-class nodes** — `@Transactional`, `@Cacheable`, `@Async`, `@Retryable`
+  and friends become `annotation` nodes with `ANNOTATED_WITH` edges, so you can query
+  decorators on types, methods, and fields.
 - **Call resolution heuristics** that go beyond naive string matching:
   receiver types inferred from locals, parameters, fields, `new T()` expressions,
   bare/`this`/`super` calls, static/qualified calls, and superclass chains.
   Unresolvable calls become `unknown_symbol` phantom nodes with `resolved:false` edges,
   so the graph stays traversable.
-- **Idempotent, file-scoped indexing** — re-crawling refreshes changed files and removes
-  stale ones without duplicating the graph.
+- **Idempotent, file-scoped indexing** — re-crawling refreshes changed files, rebuilds
+  derived dynamic edges, and removes stale ones without duplicating the graph.
+- **Analytics** — hotspots (fan-in/fan-out/advice counts) and dead-code candidates.
 - **Self-contained**: single SQLite file, no external services.
 - **LLM-friendly**: every tool returns structured JSON, unknown symbols come back with
   fuzzy search suggestions.
@@ -57,7 +70,7 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (53 tests)
+npm test             # vitest (80 tests)
 ```
 
 ## CLI
@@ -77,6 +90,7 @@ Environment variables:
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Dirs skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap |
+| `CODECRAWLER_HELPFUL_ERRORS` | `true` | Fuzzy suggestions on symbol misses |
 
 ## CI & publishing
 
@@ -117,6 +131,8 @@ Point the client at the same command. The typical flow for an LLM agent:
 1. `crawl_project` the repo once.
 2. `search_symbols` to locate the symbol of interest.
 3. `get_callers` / `get_callees` / `trace_path` to reason about the call graph.
+4. `trace_execution` to follow runtime dispatch and aspect advice; `find_aspects`,
+   `get_decorators`, and `find_annotated` to inspect behaviour-changing annotations.
 
 ## MCP surface
 
@@ -131,6 +147,13 @@ Point the client at the same command. The typical flow for an LLM agent:
 | `get_callers` | Direct or transitive callers (depth-bounded) |
 | `get_callees` | Direct or transitive callees (depth-bounded) |
 | `trace_path` | Static call paths between two symbols (BFS, shortest first) |
+| `trace_execution` | Dynamic trace: static calls + virtual dispatch + woven advice |
+| `find_implementations` | Implementers/subclasses of an interface or superclass |
+| `find_aspects` | Aspects, advice kinds, pointcuts, and intercepted methods |
+| `get_decorators` | Annotations/decorators on a symbol and optionally its members |
+| `find_annotated` | Every symbol annotated with a given annotation |
+| `find_hotspots` | Rank methods by fan-in, fan-out, and advice interceptions |
+| `find_dead_code` | Methods with no incoming call/dispatch/advice edges |
 | `get_subgraph` | Neighborhood extraction for visualization |
 | `get_schema` | Describe the graph model |
 | `clear_index` | Reset the database |
@@ -141,11 +164,14 @@ Point the client at the same command. The typical flow for an LLM agent:
 ## Graph model
 
 **Nodes** — `kind` is one of `file | package | class | interface | enum | method |
-constructor | field | import | unknown_symbol`. Every node has a globally unique
-`qualifiedName` and a JSON `properties` blob (signature, modifiers, lines, ...).
+constructor | field | import | aspect | annotation_type | annotation | unknown_symbol`.
+Every node has a globally unique `qualifiedName` and a JSON `properties` blob
+(signature, modifiers, lines, annotations, ...).
 
 **Edges** — `kind` is one of `CALLS | DECLARED_IN | CONTAINS | IMPLEMENTS | EXTENDS |
-IMPORTS | REFERENCES`. `CALLS` edges carry `line`, `resolved`, and `confidence`.
+IMPORTS | REFERENCES | DYNAMIC_DISPATCH | ADVISES | ANNOTATED_WITH`. `CALLS` edges carry
+`line`, `resolved`, and `confidence`; `ANNOTATED_WITH` edges carry `line` and `arguments`;
+`ADVISES` edges carry `adviceKind` and the resolved `pointcut`.
 
 Id scheme:
 
@@ -155,8 +181,60 @@ Id scheme:
 | method | `com.acme.OrderService#place` |
 | constructor | `com.acme.OrderService#<init>` |
 | field | `com.acme.OrderService$repo` |
+| annotation | `@Transactional` |
 | import | `__import__:java.util.List` |
 | unresolved call | `__unknown__:System.out.println` |
+
+## Dynamic behaviour
+
+Static call edges answer *"what does the source literally call?"*. Runtime behaviour
+differs in two ways, both modelled as derived edges rebuilt on every crawl:
+
+### Virtual dispatch
+
+A call to an interface or base-class method may execute any override. After all files
+are indexed, every resolved `CALLS` edge whose target is an overridable method gets
+`DYNAMIC_DISPATCH` edges to each override found in the project:
+
+```text
+Checkout#checkout --CALLS--> Payment#pay
+Payment#pay --DYNAMIC_DISPATCH--> CardPayment#pay
+Payment#pay --DYNAMIC_DISPATCH--> UpiPayment#pay
+```
+
+Constructors and `private`/`static`/`final` methods are excluded because they cannot be
+overridden. Use `find_implementations` to list candidates and `trace_execution` to follow
+them.
+
+### Aspects, advice, and decorators
+
+`@Aspect` types are indexed as `aspect` nodes. Advice methods are recognised by
+`@Before`, `@After`, `@Around`, `@AfterReturning`, `@AfterThrowing`, and `@Pointcut`.
+Named pointcuts (`@Around("paymentCall()")`) are resolved to their `@Pointcut`
+expression, then matched against every project method to create `ADVISES` edges:
+
+```text
+AuditAspect#auditPayment --ADVISES--> Payment#pay
+AuditAspect#auditPayment --ADVISES--> CardPayment#pay
+AuditAspect#auditPayment --ADVISES--> UpiPayment#pay
+AuditAspect#beforeCheckout --ADVISES--> Checkout#checkout
+```
+
+`trace_execution` weaves these in as `INTERCEPT` hops, so the trace reads:
+
+```text
+Checkout#checkout
+  INTERCEPT  AuditAspect#beforeCheckout
+  CALLS      Payment#pay
+    INTERCEPT        AuditAspect#auditPayment
+    DYNAMIC_DISPATCH CardPayment#pay -> authorize
+    DYNAMIC_DISPATCH UpiPayment#pay   -> settle
+```
+
+Every other annotation is indexed as an `annotation` node with an `ANNOTATED_WITH` edge.
+Framework decorators (`@Transactional`, `@Cacheable`, `@Async`, `@Retryable`,
+`@PreAuthorize`, `@Scheduled`, ...) are additionally flagged `decorator: true` so
+`get_decorators` and `find_annotated` can surface runtime-semantic annotations.
 
 ## Java resolution heuristics
 
@@ -188,8 +266,6 @@ queries, and MCP surface all stay the same.
 Planned enhancements:
 
 - Package-level dependency graphs (module boundaries, cycle detection).
-- Global call-graph analytics: hotspots (most-called methods), dead-code candidates
-  (methods with no incoming CALLS edges), fan-in/fan-out metrics.
 - Test coverage mapping (which tests exercise a given symbol).
 - Incremental crawling (watch mode) and git-blame aware invalidation.
 
@@ -213,8 +289,16 @@ src/
 │       └── java.ts     Java structural extraction
 └── resolver/
     ├── types.ts        TypeIndex (global name/method index) + ResolvedCall
+    ├── dynamic.ts      virtual dispatch + AspectJ pointcut matching/advice edges
     └── javaResolver.ts Java call-target resolution heuristics
 ```
+
+## Documentation site
+
+The static documentation site in `docs/` is deployed to GitHub Pages by
+`.github/workflows/pages.yml`. It covers quickstart, the MCP tool reference, and worked
+examples. Open `docs/index.html` locally or visit
+<https://nithin554.github.io/code-crawler/>.
 
 ## License
 

@@ -10,7 +10,24 @@
  * raw call sites to the language-specific resolver.
  */
 
-export type TypeKind = "class" | "interface" | "enum";
+export type TypeKind = "class" | "interface" | "enum" | "annotation";
+
+/**
+ * An annotation (Java) or decorator (Python/TypeScript) applied to a symbol.
+ * Kept deliberately simple: the name plus raw argument expressions, so the
+ * resolver/crawler can interpret framework annotations without grammar-
+ * specific models.
+ */
+export interface AnnotationInfo {
+  /** Simple name as written in source, e.g. `Loggable`. */
+  name: string;
+  /** Qualified name when the source used one, e.g. `com.acme.Loggable`. */
+  fqn?: string;
+  /** Raw argument expressions, e.g. `["execution(* com.acme.Foo.bar(..))"]`. */
+  arguments: string[];
+  /** 0-based row of the annotation usage. */
+  line: number;
+}
 
 export interface TypeInfo {
   /** Fully-qualified name, e.g. `com.acme.OrderService`. Nested types use `.`. */
@@ -25,6 +42,10 @@ export interface TypeInfo {
   startLine: number;
   /** 0-based row of the declaration end. */
   endLine: number;
+  /** Annotations/decorators applied to the type. */
+  annotations: AnnotationInfo[];
+  /** True when the type is an aspect (`@Aspect`). */
+  isAspect?: boolean;
 }
 
 export interface MethodInfo {
@@ -43,6 +64,15 @@ export interface MethodInfo {
   returnType: string;
   /** Modifiers extracted from source (public, private, static, ...). */
   modifiers: string[];
+  /** Annotations/decorators applied to the method. */
+  annotations: AnnotationInfo[];
+  /**
+   * Aspect advice kind when this method is advice
+   * (before | after | around | afterReturning | afterThrowing | pointcut).
+   */
+  adviceKind?: string;
+  /** AspectJ pointcut expression carried by advice/pointcut methods. */
+  pointcut?: string;
 }
 
 export interface FieldInfo {
@@ -54,6 +84,8 @@ export interface FieldInfo {
   type: string;
   startLine: number;
   modifiers: string[];
+  /** Annotations/decorators applied to the field. */
+  annotations: AnnotationInfo[];
 }
 
 export interface ImportInfo {

@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Code-Crawler — dynamic call tracing for your AI assistant</title>
+    <meta
+      name="description"
+      content="Code-Crawler is an MCP server that indexes your codebase into a SQLite property graph and exposes call tracing, virtual dispatch, aspect advice, decorators, hotspots, and dead-code analysis to LLM clients."
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./" aria-current="page">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <div>
+            <span class="eyebrow">MCP server · Java-first · SQLite graph</span>
+            <h1>Give your AI a <span>real map</span> of the codebase.</h1>
+            <p class="lead">
+              Code-Crawler turns a project into a queryable property graph of files, types,
+              methods, annotations, calls, virtual dispatch, and aspect advice — then exposes
+              it to Claude, Cursor, Copilot, and any MCP client as 17 precise tools.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="usage.html">Get started →</a>
+              <a class="btn btn-secondary" href="tools.html">Browse 17 tools</a>
+            </div>
+            <div class="hero-badges">
+              <span class="badge"><b>17</b> MCP tools</span>
+              <span class="badge"><b>80</b> tests passing</span>
+              <span class="badge"><b>0</b> external services</span>
+              <span class="badge">TypeScript · Node ≥ 20</span>
+            </div>
+          </div>
+
+          <div class="code-card">
+            <div class="code-title">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>trace_execution · com.acme.Checkout#checkout</span>
+            </div>
+            <pre><code><span class="c-com">// static source says: payment.pay(total)</span>
+<span class="c-com">// Code-Crawler shows what really runs:</span>
+
+<span class="c-fn">Checkout#checkout</span>
+  <span class="c-edge">INTERCEPT</span>       <span class="c-type">AuditAspect#beforeCheckout</span>
+  <span class="c-edge">CALLS</span>           <span class="c-fn">Payment#pay</span>
+    <span class="c-edge">INTERCEPT</span>       <span class="c-type">AuditAspect#auditPayment</span>
+    <span class="c-edge">DYNAMIC_DISPATCH</span> <span class="c-type">CardPayment#pay</span>
+      <span class="c-edge">CALLS</span>           <span class="c-fn">Gateway#authorize</span>
+    <span class="c-edge">DYNAMIC_DISPATCH</span> <span class="c-type">UpiPayment#pay</span>
+      <span class="c-edge">CALLS</span>           <span class="c-fn">Gateway#settle</span>
+
+<span class="c-good">3 runtime paths</span> <span class="c-com">· 2 advice hops · 1 interface</span></code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="why">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="eyebrow">Why a graph</span>
+            <h2>Grep can find a string. It can't answer a graph question.</h2>
+            <p class="lead">
+              “Who transitively calls this method?” “What breaks if I change this
+              interface?” “Which advice wraps this endpoint?” Those are traversals, not
+              searches. Code-Crawler builds the graph once and answers them with bounded
+              recursive SQL.
+            </p>
+          </div>
+
+          <div class="grid grid-3">
+            <article class="card">
+              <h3><span class="icon" aria-hidden="true">⇄</span> Call tracing</h3>
+              <p>
+                Transitive callers, callees, and shortest paths — with call-site lines and
+                resolution confidence on every edge.
+              </p>
+            </article>
+            <article class="card">
+              <h3><span class="icon purple" aria-hidden="true">◈</span> Virtual dispatch</h3>
+              <p>
+                Interface and base-class calls fan out to every real override in the
+                project, so traces follow runtime targets, not just source text.
+              </p>
+            </article>
+            <article class="card">
+              <h3><span class="icon green" aria-hidden="true">⚡</span> Aspect advice</h3>
+              <p>
+                AspectJ and Spring AOP pointcuts are matched and woven into traces as
+                <code>INTERCEPT</code> hops — before, after, around, and named pointcuts.
+              </p>
+            </article>
+            <article class="card">
+              <h3><span class="icon warm" aria-hidden="true">@</span> Decorators</h3>
+              <p>
+                Annotations are first-class nodes. Query <code>@Transactional</code>,
+                <code>@Cacheable</code>, <code>@Async</code>, or your own custom decorator
+                across types, methods, and fields.
+              </p>
+            </article>
+            <article class="card">
+              <h3><span class="icon green" aria-hidden="true">▲</span> Analytics</h3>
+              <p>
+                Rank hotspots by fan-in, fan-out, and advice count. Surface dead-code
+                candidates with the reason each symbol is unreachable.
+              </p>
+            </article>
+            <article class="card">
+              <h3><span class="icon" aria-hidden="true">▣</span> One SQLite file</h3>
+              <p>
+                Persistent, idempotent, file-scoped indexing. No server, no docker, no
+                external database — just <code>index.db</code>.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="eyebrow">Architecture</span>
+            <h2>Parse once. Query forever.</h2>
+            <p class="lead">
+              A crawl walks the project, parses each file, resolves call targets against a
+              global type index, writes nodes and edges in a single transaction, then
+              rebuilds the derived dynamic edges.
+            </p>
+          </div>
+
+          <div class="arch">
+            <div class="arch-box">
+              <h4>1 · Discover &amp; parse</h4>
+              <p>
+                <code>tree-sitter-java</code> WASM grammar extracts packages, types,
+                methods, constructors, fields, imports, modifiers, and annotations.
+              </p>
+            </div>
+            <div class="arch-box">
+              <h4>2 · Resolve</h4>
+              <p>
+                A global <code>TypeIndex</code> plus scope heuristics infer receiver types
+                from locals, parameters, fields, <code>new T()</code>, <code>this</code>,
+                and <code>super</code>.
+              </p>
+            </div>
+            <div class="arch-box">
+              <h4>3 · Persist</h4>
+              <p>
+                Nodes and edges land in SQLite (WAL). Ids are stable FQNs; reparsing a file
+                replaces only that file's slice.
+              </p>
+            </div>
+
+            <div class="arch-box span-3">
+              <div class="arch-flow" aria-hidden="true">
+                source → tree-sitter → TypeIndex → resolver → SQLite graph → MCP tools
+              </div>
+            </div>
+
+            <div class="arch-box">
+              <h4>Derived: dispatch</h4>
+              <p>
+                Every overridable call target gains <code>DYNAMIC_DISPATCH</code> edges to
+                each override found in the hierarchy index.
+              </p>
+            </div>
+            <div class="arch-box">
+              <h4>Derived: advice</h4>
+              <p>
+                Aspect advice is matched against all methods with an AspectJ pointcut
+                matcher, producing <code>ADVISES</code> edges.
+              </p>
+            </div>
+            <div class="arch-box">
+              <h4>Derived: queries</h4>
+              <p>
+                Recursive CTEs power callers, callees, paths, execution traces, subgraphs,
+                hotspots, and dead-code detection.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="quickstart">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="eyebrow">Quickstart</span>
+            <h2>Indexed in three commands.</h2>
+            <p class="lead">
+              Install, point it at a project, and register the server with your MCP client.
+              The database is created automatically on first crawl.
+            </p>
+          </div>
+
+          <div class="steps">
+            <div class="step">
+              <h3>Install and build</h3>
+              <p>Requires Node.js 20 or newer.</p>
+              <pre><code>npm install
+npm run build</code></pre>
+            </div>
+            <div class="step">
+              <h3>Index a project</h3>
+              <p>Re-run any time; the crawl is idempotent and refreshes changed files.</p>
+              <pre><code>node dist/index.js crawl /absolute/path/to/your-java-project
+node dist/index.js status</code></pre>
+            </div>
+            <div class="step">
+              <h3>Register the MCP server</h3>
+              <p>Add it to your MCP client configuration and restart the client.</p>
+              <pre><code>{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "node",
+      "args": ["/absolute/path/to/code-crawler/dist/index.js"]
+    }
+  }
+}</code></pre>
+            </div>
+            <div class="step">
+              <h3>Ask graph questions</h3>
+              <p>The assistant can now call any of the 17 tools.</p>
+              <pre><code>Trace every runtime path from Checkout#checkout.
+Who transitively calls OrderRepository#create?
+List the aspects that intercept Payment#pay.</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              Full client setup, environment variables, and the indexing lifecycle live in
+              <a href="usage.html">Usage</a>. Worked request/response pairs are in
+              <a href="examples.html">Examples</a>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="tools">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="eyebrow">Tool surface</span>
+            <h2>Seventeen tools, grouped by question.</h2>
+            <p class="lead">
+              Every tool returns structured JSON. Unknown symbols return fuzzy suggestions
+              instead of a bare error.
+            </p>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Tools</th>
+                  <th>Answers</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Index</td>
+                  <td>
+                    <code>crawl_project</code> <code>index_status</code> <code>clear_index</code>
+                    <code>get_schema</code>
+                  </td>
+                  <td>What is indexed, and what is the graph model?</td>
+                </tr>
+                <tr>
+                  <td>Search</td>
+                  <td><code>search_symbols</code> <code>get_node</code></td>
+                  <td>Where is this symbol and what is its id?</td>
+                </tr>
+                <tr>
+                  <td>Static tracing</td>
+                  <td>
+                    <code>get_callers</code> <code>get_callees</code>
+                    <code>trace_path</code> <code>get_subgraph</code>
+                  </td>
+                  <td>What calls what, and how is it connected?</td>
+                </tr>
+                <tr>
+                  <td>Dynamic tracing</td>
+                  <td>
+                    <code>trace_execution</code> <code>find_implementations</code>
+                    <code>find_aspects</code> <code>get_decorators</code>
+                    <code>find_annotated</code>
+                  </td>
+                  <td>What actually executes, and what intercepts it?</td>
+                </tr>
+                <tr>
+                  <td>Analytics</td>
+                  <td><code>find_hotspots</code> <code>find_dead_code</code></td>
+                  <td>Where is the risk and the unused code?</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="tools.html">Full tool reference →</a>
+            <a class="btn btn-secondary" href="examples.html">See worked examples</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Stop guessing what the code does.</h2>
+      <p>
+        Build the graph once, then let your assistant trace callers, runtime dispatch,
+        advice, and decorators with exact file and line references.
+      </p>
+      <a class="btn btn-primary" href="usage.html">Read the quickstart →</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="tools.html">Tools</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

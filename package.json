@@ -1,10 +1,10 @@
 {
   "name": "@nithin554/code-crawler",
   "version": "0.1.0",
-  "description": "Static call tracing MCP server backed by a SQLite property graph of your codebase",
+  "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/nithin554/code-crawler#readme",
+  "homepage": "https://nithin554.github.io/code-crawler/",
   "bugs": {
     "url": "https://github.com/nithin554/code-crawler/issues"
   },
