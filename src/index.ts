@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig, type Config } from "./config.js";
 import { GraphStore } from "./graph/store.js";
@@ -15,7 +17,7 @@ import { searchSymbols } from "./graph/queries.js";
  */
 
 function usage(): void {
-  console.log(`code-crawler — static call tracing over a codebase property graph
+  console.log(`code-crawler — static + dynamic call tracing over a codebase property graph
 
 Usage:
   codecrawler serve              Start the MCP server over stdio (default)
@@ -138,11 +140,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 }
 
-const isMain =
-  process.argv[1] &&
-  (import.meta.url === `file://${process.argv[1]}` ||
-    process.argv[1].endsWith("/dist/index.js"));
-if (isMain) {
+/**
+ * Compare the invoked script path with this module's URL. Resolving both to
+ * native filesystem paths keeps the check correct on Windows (backslashes,
+ * drive letters) and when the CLI is reached through a symlink-free bin shim.
+ */
+export function isEntrypoint(
+  entry: string | undefined,
+  moduleUrl: string = import.meta.url
+): boolean {
+  if (!entry) return false;
+  try {
+    return path.resolve(entry) === path.resolve(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntrypoint(process.argv[1])) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

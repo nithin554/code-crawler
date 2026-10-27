@@ -35,19 +35,26 @@ async function callTool<T = Record<string, unknown>>(name: string, args: Record<
 }
 
 describe("MCP server tools", () => {
-  it("exposes all 10 tools", async () => {
+  it("exposes all 17 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "clear_index",
         "crawl_project",
+        "find_annotated",
+        "find_aspects",
+        "find_dead_code",
+        "find_hotspots",
+        "find_implementations",
         "get_callers",
         "get_callees",
+        "get_decorators",
         "get_node",
         "get_schema",
         "get_subgraph",
         "index_status",
         "search_symbols",
+        "trace_execution",
         "trace_path",
       ].sort()
     );

@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tool reference — Code-Crawler</title>
+    <meta
+      name="description"
+      content="Complete reference for all 17 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html" aria-current="page">Tools</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Reference</span>
+          <h1>Tool reference</h1>
+          <p class="lead">
+            All 17 MCP tools with their arguments, response shape, and a working call. Every
+            tool returns structured JSON.
+          </p>
+          <div class="toc">
+            <a href="#conventions">Conventions</a>
+            <a href="#index">Index</a>
+            <a href="#lookup">Lookup</a>
+            <a href="#calls">Call graph</a>
+            <a href="#dynamic">Dynamic</a>
+            <a href="#analytics">Analytics</a>
+            <a href="#types">Types</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="conventions">
+        <div class="wrap">
+          <span class="eyebrow">Before you start</span>
+          <h2>Conventions</h2>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="card">
+              <h3>Symbol ids</h3>
+              <p>
+                Most tools accept either an id or a qualified name. Resolve names with
+                <code>search_symbols</code> first. Ids follow a fixed scheme:
+                <code>pkg.Type</code>, <code>Type#method</code>,
+                <code>Type#&lt;init&gt;</code>, <code>Type$field</code>,
+                <code>@Annotation</code>.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Line numbers</h3>
+              <p>
+                Stored 0-based internally, but every tool response reports 1-based lines.
+                Use them directly against an editor or a diff.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Limits and depth</h3>
+              <p>
+                List tools default to 50 results. Traversals are bounded by
+                <code>max_depth</code> and <code>limit</code>; both are validated against a
+                hard maximum so a query cannot run away.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Unknown symbols</h3>
+              <p>
+                A miss returns <code>error</code>, fuzzy <code>suggestions</code>, and a
+                <code>hint</code> instead of failing the call — so an assistant can recover
+                without guessing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="index">
+        <div class="wrap">
+          <span class="eyebrow">Group 1</span>
+          <h2>Index &amp; schema</h2>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>crawl_project</code>
+              <span class="tag core">core</span>
+              <p>Index a project directory into the graph. Idempotent: refreshes changed files and removes vanished ones.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>path</code></td><td>string</td><td>yes</td><td>Absolute path to the project root.</td></tr>
+                    <tr><td><code>language</code></td><td>string</td><td>no</td><td>Force a parser language, e.g. <code>"java"</code>. Defaults to extension detection.</td></tr>
+                    <tr><td><code>fileFilter</code></td><td>string</td><td>no</td><td>Only index files whose path contains this substring.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>projectPath</code>, <code>filesScanned</code>,
+                <code>filesParsed</code>, <code>filesRemoved</code>, <code>nodes</code>,
+                <code>edges</code>, <code>resolvedCalls</code>, <code>unresolvedCalls</code>,
+                <code>dynamicDispatchEdges</code>, <code>adviceEdges</code>,
+                <code>aspects</code>, <code>decorators</code>, <code>languages</code>,
+                <code>durationMs</code>.
+              </p>
+              <pre><code>crawl_project({ path: "C:/work/shop-service" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>index_status</code>
+              <span class="tag core">core</span>
+              <p>Current node/edge/file counts and the last crawl timestamp.</p>
+            </div>
+            <div class="tool-body">
+              <p class="small muted">No arguments. Returns <code>nodes</code>, <code>edges</code>, <code>files</code>, <code>lastCrawl</code>, <code>projectPath</code>.</p>
+              <pre><code>index_status({})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_schema</code>
+              <span class="tag core">core</span>
+              <p>The live graph model: node kinds, edge kinds, id scheme, and dynamic-model semantics.</p>
+            </div>
+            <div class="tool-body">
+              <p class="small muted">
+                No arguments. Use it when an assistant needs to reason about which edge kind
+                expresses a relationship before querying.
+              </p>
+              <pre><code>get_schema({})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>clear_index</code>
+              <span class="tag">destructive</span>
+              <p>Wipe the graph database. You must crawl again afterwards.</p>
+            </div>
+            <div class="tool-body">
+              <p class="small muted">No arguments. Returns <code>{ ok: true, cleared: true }</code>.</p>
+              <pre><code>clear_index({})</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="lookup">
+        <div class="wrap">
+          <span class="eyebrow">Group 2</span>
+          <h2>Symbol lookup</h2>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>search_symbols</code>
+              <span class="tag core">core</span>
+              <p>Fuzzy lookup by name or FQN across types, methods, fields, and files.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>query</code></td><td>string</td><td>yes</td><td>Partial name or FQN, e.g. <code>"OrderService"</code> or <code>"place"</code>.</td></tr>
+                    <tr><td><code>kind</code></td><td>enum</td><td>no</td><td>Restrict to a node kind: class, interface, enum, method, constructor, field, ...</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max results, 1–200. Default 50.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>query</code>, <code>count</code>, and <code>results[]</code> with
+                <code>id</code>, <code>qualifiedName</code>, <code>name</code>,
+                <code>kind</code>, <code>filePath</code>.
+              </p>
+              <pre><code>search_symbols({ query: "OrderService", kind: "class" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_node</code>
+              <span class="tag core">core</span>
+              <p>Metadata and source location for a single symbol.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>qualified_name</code></td><td>string</td><td>yes</td><td>Symbol id or qualified name.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>id</code>, <code>kind</code>, <code>qualifiedName</code>,
+                <code>filePath</code>, and <code>properties</code> (signature, modifiers,
+                annotations, <code>startLine</code>, <code>endLine</code>, ...).
+              </p>
+              <pre><code>get_node({ qualified_name: "com.acme.OrderService#place" })</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="calls">
+        <div class="wrap">
+          <span class="eyebrow">Group 3</span>
+          <h2>Call graph</h2>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_callers</code>
+              <span class="tag core">core</span>
+              <p>Every symbol that calls the target, directly or transitively.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Method or constructor id/qualified name.</td></tr>
+                    <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callers. Default <code>true</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Also follow <code>DYNAMIC_DISPATCH</code> edges.</td></tr>
+                    <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also follow <code>ADVISES</code> edges.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>target</code> and <code>callers[]</code> with
+                <code>caller</code>, <code>depth</code>, <code>callSiteLine</code>,
+                <code>edgeKind</code>.
+              </p>
+              <pre><code>get_callers({
+  symbol: "com.acme.OrderRepository#create",
+  transitive: true,
+  include_dynamic: true
+})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_callees</code>
+              <span class="tag core">core</span>
+              <p>Every symbol the target calls, directly or transitively.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Method or constructor id/qualified name.</td></tr>
+                    <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callees. Default <code>true</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow virtual/interface dispatch targets.</td></tr>
+                    <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Follow advice edges.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callees, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>source</code> and <code>callees[]</code> with
+                <code>callee</code>, <code>depth</code>, <code>callSiteLine</code>,
+                <code>edgeKind</code>.
+              </p>
+              <pre><code>get_callees({ symbol: "com.acme.Checkout#checkout", max_depth: 4 })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>trace_path</code>
+              <span class="tag core">core</span>
+              <p>Find call paths between two symbols. Static by default; optionally route through dispatch and advice.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>source</code></td><td>string</td><td>yes</td><td>Starting symbol id or qualified name.</td></tr>
+                    <tr><td><code>target</code></td><td>string</td><td>yes</td><td>Destination symbol id or qualified name.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Also traverse <code>DYNAMIC_DISPATCH</code> edges.</td></tr>
+                    <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also traverse <code>ADVISES</code> edges.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Maximum path length, 1–50.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max paths, 1–100. Default 10.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>pathCount</code> and <code>paths[]</code>, each with
+                <code>length</code>, a symbol-id <code>path</code> array, and
+                <code>edges[]</code> carrying <code>kind</code> and <code>callSiteLine</code>.
+              </p>
+              <pre><code>trace_path({
+  source: "com.acme.Main#main",
+  target: "com.acme.Gateway#authorize",
+  include_dynamic: true,
+  max_depth: 12
+})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_subgraph</code>
+              <span class="tag core">core</span>
+              <p>Neighborhood around a symbol across any edge kinds — for visualization and local shape.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Center symbol id or qualified name.</td></tr>
+                    <tr><td><code>radius</code></td><td>number</td><td>no</td><td>Hop radius, 1–6. Default 2.</td></tr>
+                    <tr><td><code>edge_kinds</code></td><td>enum[]</td><td>no</td><td>Restrict which edge kinds to follow.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max nodes, 1–2000.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>center</code>, <code>nodeCount</code>, <code>nodes[]</code>,
+                <code>edges[]</code>.
+              </p>
+              <pre><code>get_subgraph({
+  symbol: "com.acme.Payment",
+  radius: 2,
+  edge_kinds: ["CALLS", "DYNAMIC_DISPATCH", "ADVISES"]
+})</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="dynamic">
+        <div class="wrap">
+          <span class="eyebrow">Group 4</span>
+          <h2>Dynamic behaviour</h2>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>trace_execution</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Execution trace from a symbol: static calls, virtual dispatch, and woven advice as <code>INTERCEPT</code> hops.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Starting method or constructor id/qualified name.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Weave aspect advice. Default <code>true</code>.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Depth cap, 1–50.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max steps, 1–1000.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>root</code>, <code>stepCount</code>, and <code>steps[]</code>
+                with <code>symbol</code>, <code>depth</code>, <code>via</code>
+                (<code>CALLS</code>, <code>DYNAMIC_DISPATCH</code>, <code>ADVISES</code>, or
+                <code>INTERCEPT</code>), and <code>callSiteLine</code>.
+              </p>
+              <pre><code>trace_execution({
+  symbol: "com.acme.Checkout#checkout",
+  include_advice: true,
+  max_depth: 6
+})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_implementations</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Every class/interface that implements or extends a type, directly or transitively.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Interface or superclass id/qualified name.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Hierarchy depth cap, 1–20.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max implementations, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>target</code>, <code>implementationCount</code>, and
+                <code>implementations[]</code> with <code>type</code>, <code>depth</code>,
+                <code>via</code> (<code>IMPLEMENTS</code> or <code>EXTENDS</code>).
+              </p>
+              <pre><code>find_implementations({ symbol: "com.acme.Payment" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_aspects</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Aspects with their advice methods, pointcuts, and the methods each advice intercepts.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max aspects, 1–200.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>aspectCount</code> and <code>aspects[]</code>, each with
+                <code>aspect</code> and <code>advice[]</code> carrying <code>method</code>,
+                <code>adviceKind</code>, <code>pointcut</code>, and <code>advised[]</code>.
+              </p>
+              <pre><code>find_aspects({ limit: 20 })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>get_decorators</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Annotations applied to a symbol, optionally including its members.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Symbol id or qualified name.</td></tr>
+                    <tr><td><code>include_members</code></td><td>boolean</td><td>no</td><td>Also list decorators on declared methods, constructors, and fields.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>symbol</code>, <code>decorators[]</code> (<code>name</code>,
+                <code>fqn</code>, <code>decorator</code>, <code>line</code>,
+                <code>arguments</code>), and <code>members[]</code> when requested.
+              </p>
+              <pre><code>get_decorators({
+  symbol: "com.acme.DecoratedService",
+  include_members: true
+})</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_annotated</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Every symbol carrying a given annotation — simple name, <code>@name</code>, or FQN.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>annotation</code></td><td>string</td><td>yes</td><td>Annotation name, e.g. <code>"Transactional"</code>, <code>"@Aspect"</code>, or an FQN.</td></tr>
+                    <tr><td><code>kind</code></td><td>enum</td><td>no</td><td>Restrict to a node kind.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max symbols, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>annotation</code>, <code>count</code>, and <code>results[]</code>
+                with <code>symbol</code>, <code>annotation</code>, <code>line</code>,
+                <code>arguments</code>.
+              </p>
+              <pre><code>find_annotated({ annotation: "Cacheable", kind: "method" })</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="analytics">
+        <div class="wrap">
+          <span class="eyebrow">Group 5</span>
+          <h2>Analytics</h2>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_hotspots</code>
+              <span class="tag analytics">analytics</span>
+              <p>Rank callables by fan-in, fan-out, and advice interceptions.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max hotspots, 1–200.</td></tr>
+                    <tr><td><code>min_fan_in</code></td><td>number</td><td>no</td><td>Minimum incoming call count.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Count dispatch callers too. Default <code>true</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>count</code> and <code>hotspots[]</code> with <code>symbol</code>,
+                <code>fanIn</code>, <code>fanOut</code>, <code>adviceCount</code>.
+              </p>
+              <pre><code>find_hotspots({ min_fan_in: 3, limit: 25 })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_dead_code</code>
+              <span class="tag analytics">analytics</span>
+              <p>Callables with no incoming calls, dispatch, or advice edges.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max symbols, 1–500.</td></tr>
+                    <tr><td><code>include_constructors</code></td><td>boolean</td><td>no</td><td>Include constructors. Default <code>false</code>.</td></tr>
+                    <tr><td><code>include_tests</code></td><td>boolean</td><td>no</td><td>Include test sources. Default <code>false</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Treat dispatch edges as callers. Default <code>true</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>count</code> and <code>unused[]</code> with <code>symbol</code>
+                and <code>reason</code>. <code>main</code> is excluded as an entry point.
+              </p>
+              <pre><code>find_dead_code({ limit: 100, include_constructors: false })</code></pre>
+            </div>
+          </div>
+
+          <div class="note warn">
+            <p>
+              Dead-code output is a candidate list. Framework-invoked code — controllers,
+              listeners, scheduled methods, serialization hooks, reflection targets — has no
+              in-project caller and will be reported as unused.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="types">
+        <div class="wrap">
+          <span class="eyebrow">Appendix</span>
+          <h2>Graph types</h2>
+
+          <h3>Node kinds</h3>
+          <p class="muted">
+            <code>file</code> <code>package</code> <code>class</code>
+            <code>interface</code> <code>enum</code> <code>method</code>
+            <code>constructor</code> <code>field</code> <code>import</code>
+            <code>aspect</code> <code>annotation_type</code> <code>annotation</code>
+            <code>unknown_symbol</code>
+          </p>
+
+          <h3 style="margin-top: 28px">Edge kinds</h3>
+          <div class="table-wrap" style="margin-top: 12px">
+            <table>
+              <thead><tr><th>Kind</th><th>From → to</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>CALLS</code></td><td>callable → callable</td><td>Resolved or unresolved call site.</td></tr>
+                <tr><td><code>DECLARED_IN</code></td><td>symbol → type</td><td>Owning type of a member.</td></tr>
+                <tr><td><code>CONTAINS</code></td><td>file/type → symbol</td><td>Lexical containment.</td></tr>
+                <tr><td><code>IMPLEMENTS</code></td><td>class → interface</td><td>Interface implementation.</td></tr>
+                <tr><td><code>EXTENDS</code></td><td>type → type</td><td>Superclass relation.</td></tr>
+                <tr><td><code>IMPORTS</code></td><td>file → import</td><td>Import declaration.</td></tr>
+                <tr><td><code>REFERENCES</code></td><td>symbol → symbol</td><td>Non-call reference.</td></tr>
+                <tr><td><code>DYNAMIC_DISPATCH</code></td><td>callable → override</td><td>Runtime target of a virtual call.</td></tr>
+                <tr><td><code>ADVISES</code></td><td>advice → advised</td><td>Aspect advice intercepting a method.</td></tr>
+                <tr><td><code>ANNOTATED_WITH</code></td><td>symbol → annotation</td><td>Annotation usage with arguments.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top: 32px">Id scheme</h3>
+          <div class="table-wrap" style="margin-top: 12px">
+            <table>
+              <thead><tr><th>Symbol</th><th>Id</th></tr></thead>
+              <tbody>
+                <tr><td>Type</td><td><code>com.acme.OrderService</code></td></tr>
+                <tr><td>Method</td><td><code>com.acme.OrderService#place</code></td></tr>
+                <tr><td>Constructor</td><td><code>com.acme.OrderService#&lt;init&gt;</code></td></tr>
+                <tr><td>Field</td><td><code>com.acme.OrderService$repo</code></td></tr>
+                <tr><td>Annotation</td><td><code>@Transactional</code></td></tr>
+                <tr><td>Import</td><td><code>__import__:java.util.List</code></td></tr>
+                <tr><td>Unresolved call</td><td><code>__unknown__:System.out.println</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Ready to index?</h2>
+      <p>Install, crawl a project, and register the server with your MCP client.</p>
+      <a class="btn btn-primary" href="usage.html">Quickstart →</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="tools.html">Tools</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

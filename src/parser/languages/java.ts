@@ -1,4 +1,5 @@
 import type {
+  AnnotationInfo,
   CallSite,
   FieldInfo,
   LanguageConfig,
@@ -48,15 +49,27 @@ function isTypeDecl(type: string): boolean {
   return (
     type === "class_declaration" ||
     type === "interface_declaration" ||
-    type === "enum_declaration"
+    type === "enum_declaration" ||
+    type === "annotation_type_declaration"
   );
 }
 
 function typeKind(node: TSNode): TypeKind {
   if (node.type === "interface_declaration") return "interface";
   if (node.type === "enum_declaration") return "enum";
+  if (node.type === "annotation_type_declaration") return "annotation";
   return "class";
 }
+
+/** Framework annotations that mark advice methods (Spring/AspectJ). */
+const ADVICE_ANNOTATIONS: Record<string, string> = {
+  Before: "before",
+  After: "after",
+  Around: "around",
+  AfterReturning: "afterReturning",
+  AfterThrowing: "afterThrowing",
+  Pointcut: "pointcut",
+};
 
 /** Extract simple/qualified type names from a `superclass`/`super_interfaces` node. */
 function superTypes(node: TSNode): string[] {
@@ -114,6 +127,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     // type extends it directly. Top-level types get the package prefix.
     const id = outer ? `${outer}.${simple}` : packageName ? `${packageName}.${simple}` : simple;
 
+    const annotations = extractAnnotations(node);
     types.push({
       id,
       kind: typeKind(node),
@@ -122,6 +136,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       implementsTypes: extractImplements(node),
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
+      annotations,
+      isAspect: annotations.some((a) => isNamed(a, "Aspect")),
     });
     nestingStack.push(id);
 
@@ -146,6 +162,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   function extractMethod(node: TSNode, typeId: string): void {
     const name = childOfType(node, "identifier")?.text ?? "";
     const id = `${typeId}#${name}`;
+    const annotations = extractAnnotations(node);
+    const advice = adviceOf(annotations);
     methods.push({
       id,
       typeId,
@@ -156,6 +174,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       returnType: extractReturnType(node),
       modifiers: extractModifiers(node),
+      annotations,
+      ...advice,
     });
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
@@ -173,6 +193,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       returnType: "",
       modifiers: extractModifiers(node),
+      annotations: extractAnnotations(node),
     });
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
@@ -181,6 +202,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   function extractFields(node: TSNode, typeId: string): void {
     const typeNode = typeNodeOf(node);
     const type = typeNode ? baseTypeName(typeNode.text) : "";
+    const annotations = extractAnnotations(node);
     for (const declarator of childrenOfType(node, "variable_declarator")) {
       const name = childOfType(declarator, "identifier")?.text ?? "";
       if (!name) continue;
@@ -191,6 +213,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
         type,
         startLine: node.startPosition.row,
         modifiers: extractModifiers(node),
+        annotations,
       });
     }
   }
@@ -276,17 +299,22 @@ function enclosingId(
 function extractPackage(root: TSNode): string | null {
   const pkg = childOfType(root, "package_declaration");
   if (!pkg) return null;
-  return childOfType(pkg, "scoped_identifier")?.text ?? null;
+  return (
+    childOfType(pkg, "scoped_identifier")?.text ??
+    childOfType(pkg, "identifier")?.text ??
+    null
+  );
 }
 
 function extractImports(root: TSNode): ParsedFile["imports"] {
   const result: ParsedFile["imports"] = [];
   for (const imp of childrenOfType(root, "import_declaration")) {
-    const scoped = childOfType(imp, "scoped_identifier");
+    const scoped = childOfType(imp, "scoped_identifier") ?? childOfType(imp, "identifier");
     if (!scoped) continue;
-    const fqn = scoped.text;
+    const isWildcard = imp.namedChildren.some((c) => c.type === "asterisk");
+    const fqn = isWildcard ? `${scoped.text}.*` : scoped.text;
     const isStatic = imp.namedChildren.some((c) => c.type === "static");
-    result.push({ fqn, simpleName: simpleName(fqn), isStatic });
+    result.push({ fqn, simpleName: isWildcard ? "*" : simpleName(fqn), isStatic });
   }
   return result;
 }
@@ -322,9 +350,78 @@ function extractReturnType(node: TSNode): string {
 }
 
 function extractModifiers(node: TSNode): string[] {
-  const mods = fieldChild(node, "modifiers");
+  const mods = modifiersOf(node);
   if (!mods) return [];
-  return mods.namedChildren.map((c) => c.text);
+  // Annotations live under `modifiers` too, but they are not modifiers:
+  // they are modelled separately as decorator nodes and edges.
+  return mods.children
+    .filter((c) => c.type !== "annotation" && c.type !== "marker_annotation")
+    .map((c) => c.text)
+    .filter((text) => text.length > 0);
+}
+
+/**
+ * tree-sitter-java exposes `modifiers` as a plain named child (no field), so
+ * fall back to a type lookup when the grammar field is absent.
+ */
+function modifiersOf(node: TSNode): TSNode | null {
+  return fieldChild(node, "modifiers") ?? childOfType(node, "modifiers");
+}
+
+/** Extract `@Annotation` / `@Annotation(args)` usages from a declaration. */
+function extractAnnotations(node: TSNode): AnnotationInfo[] {
+  const mods = modifiersOf(node);
+  if (!mods) return [];
+  const out: AnnotationInfo[] = [];
+  for (const child of mods.namedChildren) {
+    if (child.type !== "annotation" && child.type !== "marker_annotation") continue;
+    const name = fieldChild(child, "name")?.text ?? "";
+    if (!name) continue;
+    const argsNode = fieldChild(child, "arguments");
+    out.push({
+      name: simpleName(name),
+      fqn: name.includes(".") ? name : undefined,
+      arguments: argsNode ? argsNode.namedChildren.map((c) => c.text) : [],
+      line: child.startPosition.row,
+    });
+  }
+  return out;
+}
+
+/** Whether an annotation matches a simple or qualified name. */
+function isNamed(annotation: AnnotationInfo, simple: string): boolean {
+  return (
+    annotation.name === simple ||
+    annotation.fqn === simple ||
+    (annotation.fqn?.endsWith(`.${simple}`) ?? false)
+  );
+}
+
+/** First string-literal argument of an annotation, unquoted. */
+function annotationValue(annotation: AnnotationInfo): string | undefined {
+  const raw =
+    annotation.arguments.find((arg) => arg.trim().startsWith('"')) ?? annotation.arguments[0];
+  return raw === undefined ? undefined : unquote(raw);
+}
+
+function unquote(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  return trimmed;
+}
+
+/** Detect advice methods and capture their pointcut expression. */
+function adviceOf(annotations: AnnotationInfo[]): { adviceKind?: string; pointcut?: string } {
+  for (const annotation of annotations) {
+    for (const [simple, kind] of Object.entries(ADVICE_ANNOTATIONS)) {
+      if (isNamed(annotation, simple)) {
+        return { adviceKind: kind, pointcut: annotationValue(annotation) };
+      }
+    }
+  }
+  return {};
 }
 
 /** Collect local variable types declared directly inside a method body. */

@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Usage — Code-Crawler</title>
+    <meta
+      name="description"
+      content="Install Code-Crawler, index a project, configure MCP clients, and understand the crawl lifecycle, environment variables, and troubleshooting."
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html" aria-current="page">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Documentation</span>
+          <h1>Usage</h1>
+          <p class="lead">
+            Everything from a first local build to a fully wired MCP client, plus the
+            indexing lifecycle and the knobs you can tune.
+          </p>
+          <div class="toc">
+            <a href="#install">Install</a>
+            <a href="#cli">CLI</a>
+            <a href="#clients">MCP clients</a>
+            <a href="#lifecycle">Index lifecycle</a>
+            <a href="#config">Configuration</a>
+            <a href="#workflow">Agent workflow</a>
+            <a href="#limits">Model limits</a>
+            <a href="#troubleshooting">Troubleshooting</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="wrap">
+          <span class="eyebrow">01 · Install</span>
+          <h2>Requirements and build</h2>
+          <p class="lead">Node.js 20 or newer. No native toolchain is required — the Java grammar ships as WASM.</p>
+
+          <div class="grid grid-2" style="margin-top: 28px">
+            <div>
+              <h3>From source</h3>
+              <pre><code>git clone https://github.com/nithin554/code-crawler.git
+cd code-crawler
+npm install
+npm run build
+
+node dist/index.js crawl /absolute/path/to/project
+node dist/index.js serve</code></pre>
+            </div>
+            <div>
+              <h3>As a dependency</h3>
+              <pre><code>npm install @nithin554/code-crawler
+
+npx codecrawler crawl /absolute/path/to/project
+npx codecrawler status
+npx codecrawler serve</code></pre>
+              <p class="small muted">
+                The published package exposes the <code>codecrawler</code> binary and only
+                ships <code>dist/</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              <code>better-sqlite3</code> is a native module. Prebuilt binaries cover
+              common platforms; if install fails, install a matching C++ build toolchain or
+              use a Node LTS release.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="cli">
+        <div class="wrap">
+          <span class="eyebrow">02 · CLI</span>
+          <h2>Four commands</h2>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Command</th><th>Purpose</th><th>Output</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>codecrawler crawl &lt;path&gt;</code></td>
+                  <td>Index a project. Safe to re-run; changed files are refreshed and deleted files pruned.</td>
+                  <td>Summary line on stderr</td>
+                </tr>
+                <tr>
+                  <td><code>codecrawler status</code></td>
+                  <td>Node/edge/file counts, last crawl timestamp, indexed project path.</td>
+                  <td>JSON on stdout</td>
+                </tr>
+                <tr>
+                  <td><code>codecrawler query &lt;symbol&gt;</code></td>
+                  <td>Fuzzy symbol lookup by simple or partial name.</td>
+                  <td>JSON array on stdout</td>
+                </tr>
+                <tr>
+                  <td><code>codecrawler serve</code></td>
+                  <td>Start the MCP server over stdio. This is the default when no command is given.</td>
+                  <td>MCP protocol on stdout, logs on stderr</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="small muted" style="margin-top: 14px">
+            Because stdout carries the MCP protocol in <code>serve</code> mode, all
+            diagnostics go to stderr. Never print to stdout inside a tool handler.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="clients">
+        <div class="wrap">
+          <span class="eyebrow">03 · Connect</span>
+          <h2>Register the MCP server</h2>
+          <p class="lead">
+            Code-Crawler speaks stdio MCP. Use an absolute path to <code>dist/index.js</code>
+            so the client can spawn it from any working directory.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 28px">
+            <div class="card">
+              <h3><span class="icon" aria-hidden="true">◈</span> Claude Desktop</h3>
+              <p style="margin-bottom: 12px">
+                Edit <code>claude_desktop_config.json</code>:
+              </p>
+              <pre><code>{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/code-crawler/dist/index.js"
+      ],
+      "env": {
+        "CODECRAWLER_DB": "/absolute/path/index.db"
+      }
+    }
+  }
+}</code></pre>
+              <p class="small dim" style="margin-top: 10px">
+                macOS: <code>~/Library/Application Support/Claude/</code> ·
+                Windows: <code>%APPDATA%\Claude\</code> ·
+                Linux: <code>~/.config/Claude/</code>
+              </p>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon purple" aria-hidden="true">◈</span> Claude Code</h3>
+              <p style="margin-bottom: 12px">One command registers the server:</p>
+              <pre><code>claude mcp add code-crawler -- \
+  node /absolute/path/to/code-crawler/dist/index.js</code></pre>
+              <p class="small dim" style="margin-top: 10px">
+                Verify with <code>claude mcp list</code>, then run
+                <code>/mcp</code> inside a session.
+              </p>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon green" aria-hidden="true">◈</span> Cursor</h3>
+              <p style="margin-bottom: 12px">
+                Project <code>.cursor/mcp.json</code> or global <code>~/.cursor/mcp.json</code>:
+              </p>
+              <pre><code>{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/code-crawler/dist/index.js"
+      ]
+    }
+  }
+}</code></pre>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon warm" aria-hidden="true">◈</span> VS Code / Copilot</h3>
+              <p style="margin-bottom: 12px">
+                Workspace <code>.vscode/mcp.json</code> uses a <code>servers</code> map:
+              </p>
+              <pre><code>{
+  "servers": {
+    "code-crawler": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/absolute/path/to/code-crawler/dist/index.js"
+      ]
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="note warn">
+            <p>
+              One database per project is the safest default. If you index several repos,
+              give each its own <code>CODECRAWLER_DB</code> path — otherwise the second
+              crawl replaces the first project's file set.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="lifecycle">
+        <div class="wrap">
+          <span class="eyebrow">04 · Lifecycle</span>
+          <h2>What a crawl actually does</h2>
+
+          <div class="steps">
+            <div class="step">
+              <h3>Discover</h3>
+              <p>
+                Walks the project root, skipping <code>CODECRAWLER_EXCLUDE_DIRS</code> and
+                hidden VCS directories. Optional <code>language</code> and
+                <code>fileFilter</code> arguments narrow the crawl.
+              </p>
+            </div>
+            <div class="step">
+              <h3>Parse</h3>
+              <p>
+                Each file is parsed with the tree-sitter Java grammar to extract packages,
+                imports, types, members, modifiers, and annotations.
+              </p>
+            </div>
+            <div class="step">
+              <h3>Index and resolve</h3>
+              <p>
+                A global type index is built for the whole project, then per-file call
+                sites are resolved to symbol ids. Unresolved calls become
+                <code>__unknown__</code> phantom nodes with <code>resolved: false</code>.
+              </p>
+            </div>
+            <div class="step">
+              <h3>Persist</h3>
+              <p>
+                All node and edge writes happen in one transaction. Each file's previous
+                slice is replaced; files that disappeared are removed.
+              </p>
+            </div>
+            <div class="step">
+              <h3>Rebuild derived edges</h3>
+              <p>
+                <code>DYNAMIC_DISPATCH</code> and <code>ADVISES</code> edges are deleted and
+                recomputed from the fresh graph, so re-crawls never duplicate or strand them.
+              </p>
+            </div>
+          </div>
+
+          <h3 style="margin-top: 40px">When the graph goes stale</h3>
+          <p class="muted">
+            The index is a snapshot. After pulling, switching branches, or editing code,
+            re-run <code>crawl_project</code> (or <code>codecrawler crawl</code>).
+            <code>clear_index</code> wipes the database entirely and forces a clean rebuild.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="config">
+        <div class="wrap">
+          <span class="eyebrow">05 · Configuration</span>
+          <h2>Environment variables</h2>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>CODECRAWLER_DB</code></td>
+                  <td><code>~/.code-crawler/index.db</code></td>
+                  <td>Path to the SQLite graph database. Created on first use.</td>
+                </tr>
+                <tr>
+                  <td><code>CODECRAWLER_EXCLUDE_DIRS</code></td>
+                  <td><code>.git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage</code></td>
+                  <td>Comma-separated directory names skipped during crawl.</td>
+                </tr>
+                <tr>
+                  <td><code>CODECRAWLER_DEFAULT_LIMIT</code></td>
+                  <td><code>50</code></td>
+                  <td>Default result limit for list-returning queries.</td>
+                </tr>
+                <tr>
+                  <td><code>CODECRAWLER_MAX_DEPTH</code></td>
+                  <td><code>10</code></td>
+                  <td>Traversal depth cap for recursive queries.</td>
+                </tr>
+                <tr>
+                  <td><code>CODECRAWLER_HELPFUL_ERRORS</code></td>
+                  <td><code>true</code></td>
+                  <td>Attach fuzzy symbol suggestions to “not found” errors.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note">
+            <p>
+              Set these in the <code>env</code> block of your MCP client config so the
+              server always opens the intended database. Paths must be absolute for GUI
+              clients, which do not inherit your shell environment.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="workflow">
+        <div class="wrap">
+          <span class="eyebrow">06 · Prompting</span>
+          <h2>A workflow that gives good answers</h2>
+          <p class="lead">
+            The tools are precise but literal. Two cheap steps — index, then resolve the
+            symbol id — make every later answer reliable.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 28px">
+            <div class="card">
+              <h3>1. Index explicitly</h3>
+              <p style="margin-bottom: 12px">
+                Start a session by asking the assistant to crawl the project at an absolute
+                path. It returns file, node, edge, and call-resolution counts you can sanity
+                check.
+              </p>
+              <pre><code>crawl_project({ path: "C:/work/shop-service" })</code></pre>
+            </div>
+            <div class="card">
+              <h3>2. Resolve names first</h3>
+              <p style="margin-bottom: 12px">
+                Tool arguments take symbol ids, not guesses. Search once, then reuse the
+                returned <code>qualifiedName</code>.
+              </p>
+              <pre><code>search_symbols({ query: "place" })</code></pre>
+            </div>
+            <div class="card">
+              <h3>3. Ask one graph question at a time</h3>
+              <p style="margin-bottom: 12px">
+                Prefer a specific tool over a vague prompt. “Who calls X?” maps to
+                <code>get_callers</code>; “what runs?” maps to <code>trace_execution</code>.
+              </p>
+              <pre><code>get_callers({
+  symbol: "com.acme.OrderService#place",
+  transitive: true
+})</code></pre>
+            </div>
+            <div class="card">
+              <h3>4. Ask for file and line proof</h3>
+              <p>
+                Results carry <code>file</code> and <code>callSiteLine</code> (1-based in
+                output). Ask the assistant to cite them before editing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="limits">
+        <div class="wrap">
+          <span class="eyebrow">07 · Semantics</span>
+          <h2>What the model can and cannot know</h2>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div>
+              <h3>Modelled</h3>
+              <ul>
+                <li>Static <code>CALLS</code> edges with call-site lines and confidence.</li>
+                <li>Package, type, member, and import containment.</li>
+                <li><code>IMPLEMENTS</code> / <code>EXTENDS</code> hierarchy edges.</li>
+                <li>Virtual dispatch to project overrides.</li>
+                <li>AspectJ advice and pointcut matching.</li>
+                <li>Annotations on types, methods, constructors, and fields.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Not modelled</h3>
+              <ul>
+                <li>Reflection, <code>Class.forName</code>, and dynamic proxies.</li>
+                <li>Runtime DI wiring; interface dispatch fans out to all overrides.</li>
+                <li>Control flow, branches, or value flow inside a method.</li>
+                <li>Framework-invoked entry points (controllers, listeners) as roots.</li>
+                <li>Libraries outside the crawled source tree.</li>
+                <li>Non-Java languages (the parser layer is pluggable, not implemented).</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="note warn">
+            <p>
+              Treat <code>find_dead_code</code> as a candidate list, not a verdict.
+              Methods invoked only by frameworks, serialization, or reflection will show up
+              as unused because no source-level caller exists.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="troubleshooting">
+        <div class="wrap">
+          <span class="eyebrow">08 · Troubleshooting</span>
+          <h2>Common failure modes</h2>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Every tool says “not found in the index”</td>
+                  <td>The server is using a different database path than the crawl.</td>
+                  <td>Pin <code>CODECRAWLER_DB</code> in the client <code>env</code> block.</td>
+                </tr>
+                <tr>
+                  <td>Low resolved-call count</td>
+                  <td>Source layout confuses receiver inference, or the crawl included generated code.</td>
+                  <td>Use <code>fileFilter</code> or narrow <code>path</code>; expect heuristic misses on unusual call shapes.</td>
+                </tr>
+                <tr>
+                  <td>No <code>DYNAMIC_DISPATCH</code> edges</td>
+                  <td>No type implements the interface inside the crawled tree.</td>
+                  <td>Confirm overrides live in the project; libraries are out of scope.</td>
+                </tr>
+                <tr>
+                  <td>No aspects listed</td>
+                  <td>Aspect types are missing <code>@Aspect</code> or pointcuts use unsupported syntax.</td>
+                  <td>Supported primitives: <code>execution</code>, <code>call</code>, <code>within</code>, <code>@annotation</code>, <code>@within</code>, <code>target</code>, <code>this</code>, <code>args</code>, <code>&amp;&amp;</code>, <code>||</code>, <code>!</code>.</td>
+                </tr>
+                <tr>
+                  <td>Annotations missing</td>
+                  <td>The source uses a language level the grammar does not expose as modifiers.</td>
+                  <td>Annotations are read from the Java <code>modifiers</code> child; verify with <code>get_node</code> and <code>get_decorators</code>.</td>
+                </tr>
+                <tr>
+                  <td>Stale symbols after a refactor</td>
+                  <td>The index predates the change.</td>
+                  <td>Re-crawl; deleted files are pruned automatically.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note">
+            <p>
+              Still stuck? <code>get_schema</code> prints the live node kinds, edge kinds, id
+              scheme, and dynamic-model semantics the server is using.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Next: see it on real questions.</h2>
+      <p>Impact analysis, runtime traces, aspect auditing, decorator scans, and dead-code triage.</p>
+      <a class="btn btn-primary" href="examples.html">Worked examples →</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="tools.html">Tools</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

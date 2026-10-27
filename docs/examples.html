@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Examples — Code-Crawler</title>
+    <meta
+      name="description"
+      content="Worked Code-Crawler examples: impact analysis, runtime execution traces, aspect audits, decorator scans, hotspots, and dead-code triage."
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html" aria-current="page">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Walkthroughs</span>
+          <h1>Examples</h1>
+          <p class="lead">
+            Five questions a static search cannot answer, and the exact tool calls that do.
+            All examples use the small fixture project below.
+          </p>
+          <div class="toc">
+            <a href="#fixture">Fixture</a>
+            <a href="#impact">Impact analysis</a>
+            <a href="#runtime">Runtime trace</a>
+            <a href="#aspects">Aspect audit</a>
+            <a href="#decorators">Decorators</a>
+            <a href="#analytics">Hotspots &amp; dead code</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="fixture">
+        <div class="wrap">
+          <span class="eyebrow">Setting</span>
+          <h2>The fixture project</h2>
+          <p class="lead">
+            An interface with two implementations, a service that calls it, an aspect that
+            intercepts it, and a class carrying framework decorators.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 28px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>Payment.java · Checkout.java</span>
+              </div>
+              <pre><code><span class="c-kw">public interface</span> <span class="c-type">Payment</span> {
+    <span class="c-kw">void</span> <span class="c-fn">pay</span>(<span class="c-kw">double</span> amount);
+}
+
+<span class="c-kw">public class</span> <span class="c-type">Checkout</span> {
+    <span class="c-kw">private final</span> <span class="c-type">Payment</span> payment;
+
+    <span class="c-kw">public</span> <span class="c-fn">Checkout</span>(<span class="c-type">Payment</span> payment) {
+        <span class="c-kw">this</span>.payment = payment;
+    }
+
+    <span class="c-kw">public void</span> <span class="c-fn">checkout</span>(<span class="c-kw">double</span> amount) {
+        payment.<span class="c-fn">pay</span>(amount);   <span class="c-com">// which pay()?</span>
+    }
+}</code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>AuditAspect.java · DecoratedService.java</span>
+              </div>
+              <pre><code><span class="c-type">@Aspect</span>
+<span class="c-kw">public class</span> <span class="c-type">AuditAspect</span> {
+    <span class="c-type">@Pointcut</span>(<span class="c-str">"execution(* com.acme.*.pay(..))"</span>)
+    <span class="c-kw">public void</span> <span class="c-fn">paymentCall</span>() {}
+
+    <span class="c-type">@Around</span>(<span class="c-str">"paymentCall()"</span>)
+    <span class="c-kw">public</span> <span class="c-type">Object</span> <span class="c-fn">auditPayment</span>(<span class="c-type">JoinPoint</span> jp) { ... }
+
+    <span class="c-type">@Before</span>(<span class="c-str">"execution(* com.acme.Checkout.checkout(..))"</span>)
+    <span class="c-kw">public void</span> <span class="c-fn">beforeCheckout</span>() {}
+}
+
+<span class="c-type">@Service</span>
+<span class="c-kw">public class</span> <span class="c-type">DecoratedService</span> {
+    <span class="c-type">@Transactional</span>(readOnly = <span class="c-kw">true</span>)
+    <span class="c-type">@Cacheable</span>(<span class="c-str">"orders"</span>)
+    <span class="c-kw">public</span> <span class="c-type">String</span> <span class="c-fn">describe</span>(<span class="c-type">String</span> id) { ... }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              Index it with
+              <code>crawl_project({ path: ".../tests/fixtures/java/dynamic" })</code>. The
+              crawl reports 6 files, 43 nodes, 61 edges, 2 dynamic-dispatch edges, and 4
+              advice edges. Response bodies below are trimmed to the fields that matter.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="impact">
+        <div class="wrap">
+          <span class="eyebrow">Example 1</span>
+          <h2>Impact analysis: who reaches this method?</h2>
+          <p class="lead">
+            Before changing <code>Payment#pay</code>, ask for every caller — including
+            virtual-dispatch and advice callers that a text search misses.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>request</span>
+              </div>
+              <pre><code>get_callers({
+  symbol: "com.acme.Payment#pay",
+  transitive: true,
+  include_dynamic: true,
+  include_advice: true
+})</code></pre>
+            </div>
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>response</span>
+              </div>
+              <pre><code>{
+  "target": {
+    "id": "com.acme.Payment#pay",
+    "kind": "method",
+    "filePath": "com/acme/Payment.java"
+  },
+  "callers": [
+    {
+      "caller": {
+        "id": "com.acme.AuditAspect#auditPayment",
+        "kind": "method"
+      },
+      "depth": 1,
+      "edgeKind": "ADVISES"
+    },
+    {
+      "caller": {
+        "id": "com.acme.Checkout#checkout",
+        "kind": "method"
+      },
+      "depth": 1,
+      "callSiteLine": 12,
+      "edgeKind": "CALLS"
+    }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <p class="muted" style="margin-top: 20px">
+            The advice caller is the important one: changing the signature also breaks
+            <code>AuditAspect#auditPayment</code>, which never mentions <code>pay</code> in
+            its own body.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="runtime">
+        <div class="wrap">
+          <span class="eyebrow">Example 2</span>
+          <h2>Runtime trace: what actually executes?</h2>
+          <p class="lead">
+            <code>trace_execution</code> follows static calls, then fans out across virtual
+            dispatch and weaves advice in as <code>INTERCEPT</code> hops.
+          </p>
+
+          <div class="code-card" style="margin-top: 24px">
+            <div class="code-title">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>request · trace_execution</span>
+            </div>
+            <pre><code>trace_execution({
+  symbol: "com.acme.Checkout#checkout",
+  include_dynamic: true,
+  include_advice: true,
+  max_depth: 6
+})</code></pre>
+          </div>
+
+          <div class="code-card" style="margin-top: 16px">
+            <div class="code-title">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>response · steps</span>
+            </div>
+            <pre><code>{
+  "root": { "id": "com.acme.Checkout#checkout", "kind": "method" },
+  "stepCount": 6,
+  "steps": [
+    {
+      "symbol": { "id": "com.acme.Checkout#checkout" },
+      "depth": 0
+    },
+    {
+      "symbol": { "id": "com.acme.AuditAspect#beforeCheckout" },
+      "depth": 1,
+      "via": "INTERCEPT",
+      "callSiteLine": 12
+    },
+    {
+      "symbol": { "id": "com.acme.Payment#pay" },
+      "depth": 1,
+      "via": "CALLS",
+      "callSiteLine": 12
+    },
+    {
+      "symbol": { "id": "com.acme.AuditAspect#auditPayment" },
+      "depth": 2,
+      "via": "INTERCEPT"
+    },
+    {
+      "symbol": { "id": "com.acme.CardPayment#pay" },
+      "depth": 2,
+      "via": "DYNAMIC_DISPATCH"
+    },
+    {
+      "symbol": { "id": "com.acme.UpiPayment#pay" },
+      "depth": 2,
+      "via": "DYNAMIC_DISPATCH"
+    }
+  ]
+}</code></pre>
+          </div>
+
+          <div class="note" style="margin-top: 20px">
+            <p>
+              Reading the <code>via</code> field is the whole point: <code>CALLS</code> is
+              what the source says, <code>DYNAMIC_DISPATCH</code> is what the hierarchy
+              allows at runtime, and <code>INTERCEPT</code> is behaviour injected by an
+              aspect.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="aspects">
+        <div class="wrap">
+          <span class="eyebrow">Example 3</span>
+          <h2>Aspect audit: what intercepts what?</h2>
+          <p class="lead">
+            Pointcuts are resolved — named pointcut references, <code>execution</code>,
+            wildcards, and boolean operators all produce concrete <code>ADVISES</code>
+            edges.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>request</span>
+              </div>
+              <pre><code>find_aspects({ limit: 20 })</code></pre>
+            </div>
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>response</span>
+              </div>
+              <pre><code>{
+  "aspectCount": 1,
+  "aspects": [
+    {
+      "aspect": { "id": "com.acme.AuditAspect" },
+      "advice": [
+        {
+          "method": { "id": "com.acme.AuditAspect#auditPayment" },
+          "adviceKind": "around",
+          "pointcut": "paymentCall()",
+          "advised": [
+            { "id": "com.acme.CardPayment#pay" },
+            { "id": "com.acme.Payment#pay" },
+            { "id": "com.acme.UpiPayment#pay" }
+          ]
+        },
+        {
+          "method": { "id": "com.acme.AuditAspect#beforeCheckout" },
+          "adviceKind": "before",
+          "pointcut": "execution(* com.acme.Checkout.checkout(..))",
+          "advised": [
+            { "id": "com.acme.Checkout#checkout" }
+          ]
+        }
+      ]
+    }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <p class="muted" style="margin-top: 20px">
+            Note that <code>@Around("paymentCall()")</code> is reported with the resolved
+            effect — all three <code>pay</code> methods — not just the pointcut name. This is
+            the difference between indexing an annotation and understanding it.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="decorators">
+        <div class="wrap">
+          <span class="eyebrow">Example 4</span>
+          <h2>Decorators: runtime semantics attached to code</h2>
+          <p class="lead">
+            Annotations are graph nodes, so you can find every symbol carrying one — or list
+            everything attached to a single type and its members.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_annotated</span>
+              </div>
+              <pre><code>find_annotated({
+  annotation: "Transactional",
+  kind: "method"
+})</code></pre>
+            </div>
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>response</span>
+              </div>
+              <pre><code>{
+  "annotation": "Transactional",
+  "count": 1,
+  "results": [
+    {
+      "symbol": {
+        "id": "com.acme.DecoratedService#describe",
+        "kind": "method",
+        "filePath": "com/acme/DecoratedService.java"
+      },
+      "annotation": "Transactional",
+      "line": 11,
+      "arguments": ["readOnly = true"]
+    }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="code-card" style="margin-top: 16px">
+            <div class="code-title">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>get_decorators · include_members</span>
+            </div>
+            <pre><code>get_decorators({
+  symbol: "com.acme.DecoratedService",
+  include_members: true
+})
+
+<span class="c-com">// decorators: [ { name: "Service", decorator: false } ]</span>
+<span class="c-com">// members[0].symbol.id: "com.acme.DecoratedService#describe"</span>
+<span class="c-com">// members[0].decorators:</span>
+<span class="c-com">//   { name: "Transactional", decorator: true, arguments: ["readOnly = true"] }</span>
+<span class="c-com">//   { name: "Cacheable",     decorator: true, arguments: ["orders"] }</span></code></pre>
+          </div>
+
+          <div class="note" style="margin-top: 20px">
+            <p>
+              <code>decorator: true</code> marks framework annotations whose semantics are
+              behavioural — caching, transactions, retries, async execution, security.
+              Structural annotations such as <code>@Override</code> or <code>@Service</code>
+              are indexed but not flagged.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="analytics">
+        <div class="wrap">
+          <span class="eyebrow">Example 5</span>
+          <h2>Hotspots and dead-code candidates</h2>
+          <p class="lead">
+            Two ends of the same graph: where the traffic concentrates, and what nothing
+            calls.
+          </p>
+
+          <div class="grid grid-2" style="margin-top: 24px">
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_hotspots · min_fan_in: 1</span>
+              </div>
+              <pre><code>{
+  "count": 2,
+  "hotspots": [
+    {
+      "symbol": { "id": "com.acme.Payment#pay" },
+      "fanIn": 2,
+      "fanOut": 0,
+      "adviceCount": 1
+    },
+    {
+      "symbol": { "id": "com.acme.Checkout#checkout" },
+      "fanIn": 1,
+      "fanOut": 1,
+      "adviceCount": 1
+    }
+  ]
+}</code></pre>
+            </div>
+            <div class="code-card">
+              <div class="code-title">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>find_dead_code</span>
+              </div>
+              <pre><code>{
+  "count": 2,
+  "unused": [
+    {
+      "symbol": { "id": "com.acme.DecoratedService#describe" },
+      "reason": "no incoming call, dispatch, or advice edges"
+    },
+    {
+      "symbol": { "id": "com.acme.DecoratedService#<init>" },
+      "reason": "no incoming call, dispatch, or advice edges"
+    }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="note warn" style="margin-top: 20px">
+            <p>
+              <code>DecoratedService</code> is reached by Spring, not by source. This is the
+              canonical false positive: no in-project caller exists, so the method looks dead.
+              Use constructors-inclusive output and knowledge of your framework's entry
+              points before deleting anything.
+            </p>
+          </div>
+
+          <h3 style="margin-top: 40px">Composing the primitives</h3>
+          <p class="muted">
+            Real questions combine tools. “Is this aspect safe to remove?” becomes
+            <code>find_aspects</code> → <code>get_callers</code> on each advised method →
+            <code>trace_path</code> from the application entry point. “What breaks if I change
+            this interface?” becomes <code>find_implementations</code> →
+            <code>get_callers</code> per override → <code>find_annotated</code> to spot
+            transactional or cached implementations that carry extra contracts.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Every tool, every argument.</h2>
+      <p>The reference lists the complete input schema and response shape for all 17 tools.</p>
+      <a class="btn btn-primary" href="tools.html">Tool reference →</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="tools.html">Tools</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

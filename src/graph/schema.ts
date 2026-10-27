@@ -16,6 +16,9 @@ export const NODE_KINDS = [
   "class",
   "interface",
   "enum",
+  "annotation_type",
+  "annotation",
+  "aspect",
   "method",
   "constructor",
   "field",
@@ -26,17 +29,32 @@ export type NodeKind = (typeof NODE_KINDS)[number];
 
 export const EDGE_KINDS = [
   "CALLS",
+  "DYNAMIC_DISPATCH",
+  "ADVISES",
   "DECLARED_IN",
   "CONTAINS",
   "IMPLEMENTS",
   "EXTENDS",
   "IMPORTS",
+  "ANNOTATED_WITH",
   "REFERENCES",
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
 /** Kinds that may appear as call *targets* (nodes at the arrow end of CALLS). */
 export const CALLABLE_KINDS: readonly NodeKind[] = ["method", "constructor"];
+
+/** Kinds that can be annotated/decorated. */
+export const DECORATABLE_KINDS: readonly NodeKind[] = [
+  "class",
+  "interface",
+  "enum",
+  "annotation_type",
+  "aspect",
+  "method",
+  "constructor",
+  "field",
+];
 
 export interface NodeProperties {
   /** Zero-based line of the declaration start. */
@@ -47,6 +65,14 @@ export interface NodeProperties {
   name?: string;
   /** Fully-qualified name when distinct from the node id. */
   qualifiedName?: string;
+  /** Simple names of annotations/decorators applied to this symbol. */
+  annotations?: string[];
+  /** True when a class is an aspect (e.g. annotated with `@Aspect`). */
+  aspect?: boolean;
+  /** For advice methods: before | after | around | afterReturning | afterThrowing. */
+  adviceKind?: string;
+  /** For advice/pointcut methods: the AspectJ pointcut expression. */
+  pointcut?: string;
   /** Free-form language-specific metadata. */
   [key: string]: string | number | boolean | (string | number)[] | undefined;
 }
@@ -68,8 +94,16 @@ export interface EdgeProperties {
   resolved?: boolean;
   /** For CALLS edges: heuristic confidence 0..1 when resolved. */
   confidence?: number;
+  /** For DYNAMIC_DISPATCH: why the runtime target was inferred. */
+  via?: string;
+  /** For ADVISES: the advice kind that intercepts the call. */
+  adviceKind?: string;
+  /** For ADVISES: the pointcut expression that matched. */
+  pointcut?: string;
+  /** For ANNOTATED_WITH: raw annotation arguments as written in source. */
+  arguments?: string[];
   /** Free-form language-specific metadata. */
-  [key: string]: string | number | boolean | undefined;
+  [key: string]: string | number | boolean | (string | number)[] | undefined;
 }
 
 export interface GraphEdge {
@@ -101,4 +135,12 @@ export function importNodeId(fqn: string): string {
 /** Fallback id for calls that could not be statically resolved. */
 export function unknownNodeId(qualifiedName: string): string {
   return `__unknown__:${qualifiedName}`;
+}
+
+/**
+ * Annotation/decorator ids share one node per annotation name so that
+ * `find_annotated` and `get_decorators` can pivot across the whole project.
+ */
+export function annotationNodeId(name: string): string {
+  return `@${name}`;
 }
