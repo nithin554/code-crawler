@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nithin554.github.io/code-crawler/sitemap.xml
