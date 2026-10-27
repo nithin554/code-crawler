@@ -1,13 +1,17 @@
 import type {
   AnnotationInfo,
   CallSite,
+  EntryPointInfo,
   FieldInfo,
+  InjectionPoint,
   LanguageConfig,
   MethodInfo,
   ParsedFile,
+  ReflectiveRef,
   TypeInfo,
   TypeKind,
 } from "../language.js";
+import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
 import {
   baseTypeName,
   childOfType,
@@ -27,8 +31,8 @@ import {
  * the per-method local-variable tables to resolve call targets.
  */
 
-const GRAMMAR_PACKAGE = "tree-sitter-java";
-const GRAMMAR_WASM = "tree-sitter-java.wasm";
+const GRAMMAR_PACKAGE = "@vscode/tree-sitter-wasm";
+const GRAMMAR_WASM = "wasm/tree-sitter-java.wasm";
 
 export interface JavaParsedFile extends ParsedFile {
   /**
@@ -70,6 +74,94 @@ const ADVICE_ANNOTATIONS: Record<string, string> = {
   AfterThrowing: "afterThrowing",
   Pointcut: "pointcut",
 };
+
+/** Control-flow ancestors that make a call conditional in Java. */
+const JAVA_FLOW: FlowSpec[] = [
+  { type: "if_statement", kind: "branch", guardField: "condition" },
+  { type: "switch_expression", kind: "branch", guardField: "condition" },
+  { type: "switch_statement", kind: "branch", guardField: "condition" },
+  { type: "conditional_expression", kind: "branch" },
+  { type: "for_statement", kind: "loop", guardField: "condition" },
+  { type: "enhanced_for_statement", kind: "loop" },
+  { type: "while_statement", kind: "loop", guardField: "condition" },
+  { type: "do_statement", kind: "loop", guardField: "condition" },
+  { type: "catch_clause", kind: "exception" },
+];
+
+/** HTTP mapping annotations and the verb they imply. */
+const HTTP_MAPPINGS: Record<string, string> = {
+  GetMapping: "GET",
+  PostMapping: "POST",
+  PutMapping: "PUT",
+  DeleteMapping: "DELETE",
+  PatchMapping: "PATCH",
+  RequestMapping: "ANY",
+};
+
+/** Framework-supplied injection annotations. */
+const INJECTION_ANNOTATIONS: Record<string, string> = {
+  Autowired: "spring",
+  Inject: "jakarta",
+  Resource: "jakarta",
+  Value: "spring",
+  Qualifier: "spring",
+  ManagedProperty: "jakarta",
+};
+
+/** Run-time lookup methods and the kind of target they produce. */
+const REFLECTIVE_METHODS: Record<string, { targetKind: ReflectiveRef["targetKind"]; mechanism: string }> = {
+  forName: { targetKind: "type", mechanism: "Class.forName" },
+  loadClass: { targetKind: "type", mechanism: "ClassLoader.loadClass" },
+  getMethod: { targetKind: "method", mechanism: "Class.getMethod" },
+  getDeclaredMethod: { targetKind: "method", mechanism: "Class.getDeclaredMethod" },
+  getConstructor: { targetKind: "method", mechanism: "Class.getConstructor" },
+  getDeclaredConstructor: { targetKind: "method", mechanism: "Class.getDeclaredConstructor" },
+  getField: { targetKind: "method", mechanism: "Class.getField" },
+  getDeclaredField: { targetKind: "method", mechanism: "Class.getDeclaredField" },
+};
+
+/** Why a Java method is invoked by the framework rather than by source. */
+function javaEntryPointOf(
+  annotations: AnnotationInfo[],
+  name: string,
+  modifiers: string[]
+): EntryPointInfo | undefined {
+  for (const annotation of annotations) {
+    const simple = annotation.name;
+    const httpVerb = HTTP_MAPPINGS[simple];
+    if (httpVerb) {
+      const path = annotationValue(annotation) ?? "/";
+      return { kind: "http", detail: `${httpVerb} ${path}` };
+    }
+    if (simple === "KafkaListener" || simple === "RabbitListener" || simple === "JmsListener" || simple === "StreamListener" || simple === "SqsListener") {
+      const topic = annotationValue(annotation);
+      return { kind: "messaging", detail: topic ? `${simple}(${topic})` : simple };
+    }
+    if (simple === "Scheduled") {
+      const cron = annotation.arguments[0];
+      return { kind: "scheduler", detail: cron ? `@Scheduled(${cron})` : "@Scheduled" };
+    }
+    if (simple === "EventListener" || simple === "TransactionalEventListener") {
+      return { kind: "event", detail: simple };
+    }
+    if (simple === "Test" || simple === "ParameterizedTest" || simple === "RepeatedTest") {
+      return { kind: "test", detail: simple };
+    }
+  }
+  if (name === "main" && modifiers.includes("static")) {
+    return { kind: "cli", detail: "main" };
+  }
+  return undefined;
+}
+
+/** Framework that injects the annotated symbol, if any. */
+function injectionFrameworkOf(annotations: AnnotationInfo[]): string | null {
+  for (const annotation of annotations) {
+    const framework = INJECTION_ANNOTATIONS[annotation.name];
+    if (framework) return framework;
+  }
+  return null;
+}
 
 /** Extract simple/qualified type names from a `superclass`/`super_interfaces` node. */
 function superTypes(node: TSNode): string[] {
@@ -115,6 +207,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   const methods: MethodInfo[] = [];
   const fields: FieldInfo[] = [];
   const callSites: CallSite[] = [];
+  const reflectiveRefs: ReflectiveRef[] = [];
+  const injections: InjectionPoint[] = [];
   const localsByMethod = new Map<string, Map<string, string>>();
 
   // === Pass A: structural extraction with nesting stack for type FQNs. ===
@@ -164,6 +258,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const id = `${typeId}#${name}`;
     const annotations = extractAnnotations(node);
     const advice = adviceOf(annotations);
+    const modifiers = extractModifiers(node);
+    const entryPoint = javaEntryPointOf(annotations, name, modifiers);
     methods.push({
       id,
       typeId,
@@ -173,16 +269,41 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
       returnType: extractReturnType(node),
-      modifiers: extractModifiers(node),
+      modifiers,
       annotations,
       ...advice,
+      ...(entryPoint ? { entryPoint } : {}),
     });
+    collectParamInjections(node, id, annotations);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }
 
+  /** Constructor parameter injections: Spring/Jakarta constructor injection. */
+  function collectParamInjections(node: TSNode, typeId: string, memberAnnotations: AnnotationInfo[]): void {
+    const paramsNode = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
+    if (!paramsNode) return;
+    const memberFramework = injectionFrameworkOf(memberAnnotations);
+    for (const fp of childrenOfType(paramsNode, "formal_parameter")) {
+      const framework = injectionFrameworkOf(extractAnnotations(fp));
+      if (!framework) continue;
+      const name = childOfType(fp, "identifier")?.text ?? "";
+      if (!name) continue;
+      const typeNode = typeNodeOf(fp);
+      injections.push({
+        kind: "constructor-parameter",
+        ownerId: typeId,
+        name,
+        type: typeNode ? baseTypeName(typeNode.text) : "",
+        framework: framework ?? memberFramework ?? "unknown",
+        line: fp.startPosition.row,
+      });
+    }
+  }
+
   function extractConstructor(node: TSNode, typeId: string): void {
     const id = `${typeId}#<init>`;
+    const annotations = extractAnnotations(node);
     methods.push({
       id,
       typeId,
@@ -193,8 +314,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       returnType: "",
       modifiers: extractModifiers(node),
-      annotations: extractAnnotations(node),
+      annotations,
     });
+    collectParamInjections(node, id, annotations);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }
@@ -203,6 +325,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const typeNode = typeNodeOf(node);
     const type = typeNode ? baseTypeName(typeNode.text) : "";
     const annotations = extractAnnotations(node);
+    const framework = injectionFrameworkOf(annotations);
     for (const declarator of childrenOfType(node, "variable_declarator")) {
       const name = childOfType(declarator, "identifier")?.text ?? "";
       if (!name) continue;
@@ -215,6 +338,16 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
         modifiers: extractModifiers(node),
         annotations,
       });
+      if (framework && !extractModifiers(node).includes("static")) {
+        injections.push({
+          kind: "field",
+          ownerId: typeId,
+          name,
+          type,
+          framework,
+          line: node.startPosition.row,
+        });
+      }
     }
   }
 
@@ -231,16 +364,21 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   walk(root, (node) => {
     if (node.type === "method_invocation") {
       const info = invocationInfo(node);
+      const enclosingType = enclosingId(typeRanges, node.startPosition.row) ?? "";
+      const enclosingMethod = enclosingId(methodRanges, node.startPosition.row) ?? "";
       callSites.push({
         line: node.startPosition.row,
         receiver: info.receiver,
         name: info.name,
         argumentTexts: info.args,
-        enclosingTypeId: enclosingId(typeRanges, node.startPosition.row) ?? "",
-        enclosingMethodId: enclosingId(methodRanges, node.startPosition.row) ?? "",
+        enclosingTypeId: enclosingType,
+        enclosingMethodId: enclosingMethod,
         isConstructorCall: false,
         qualifiedReceiver: info.qualified,
+        controlFlow: controlFlowOf(node, JAVA_FLOW),
       });
+      const reflection = reflectionOf(info, enclosingType, enclosingMethod, node.startPosition.row);
+      if (reflection) reflectiveRefs.push(reflection);
     } else if (node.type === "object_creation_expression") {
       const typeNode = fieldChild(node, "type") ?? childOfType(node, "type_identifier");
       const argsNode = fieldChild(node, "arguments") ?? childOfType(node, "argument_list");
@@ -253,6 +391,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
         enclosingMethodId: enclosingId(methodRanges, node.startPosition.row) ?? "",
         isConstructorCall: true,
         qualifiedReceiver: false,
+        controlFlow: controlFlowOf(node, JAVA_FLOW),
       });
     }
   });
@@ -279,6 +418,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     callSites,
     localsByMethod,
     typeByName,
+    scopeTypes: typeByName,
+    reflectiveRefs,
+    injections,
   };
 }
 
@@ -476,4 +618,29 @@ function invocationInfo(node: TSNode): {
 
 function typeName(node: TSNode): string {
   return fieldChild(node, "name")?.text ?? node.namedChild(0)?.text ?? "?";
+}
+
+/**
+ * Detect run-time lookups (`Class.forName`, `getDeclaredMethod`, ...). These
+ * have no static call target, so the resolver records them as REFLECTS edges.
+ */
+function reflectionOf(
+  info: { receiver: string | null; name: string; args: string[] },
+  enclosingTypeId: string,
+  enclosingMethodId: string,
+  line: number
+): ReflectiveRef | null {
+  const base = { enclosingTypeId, enclosingMethodId, line };
+  if (info.name === "load" && info.receiver !== null && /ServiceLoader$/.test(info.receiver)) {
+    const target = unquote(info.args[0] ?? "");
+    return target ? { ...base, mechanism: "ServiceLoader.load", targetKind: "type", target } : null;
+  }
+  const spec = REFLECTIVE_METHODS[info.name];
+  if (!spec || info.receiver === null) return null;
+  if (spec.mechanism.startsWith("Class.getConstructor") || spec.mechanism.startsWith("Class.getDeclaredConstructor")) {
+    return { ...base, mechanism: spec.mechanism, targetKind: "method", target: "<init>", receiver: info.receiver };
+  }
+  const target = unquote(info.args[0] ?? "");
+  if (!target) return null;
+  return { ...base, mechanism: spec.mechanism, targetKind: spec.targetKind, target, receiver: info.receiver };
 }

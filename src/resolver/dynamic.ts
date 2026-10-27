@@ -23,6 +23,7 @@ import type { TypeIndex } from "./types.js";
 
 /** Framework annotations that behave as runtime decorators. */
 export const DECORATOR_ANNOTATIONS = new Set([
+  // Java / Spring / Jakarta / Micrometer
   "Transactional",
   "Cacheable",
   "CachePut",
@@ -39,11 +40,74 @@ export const DECORATOR_ANNOTATIONS = new Set([
   "RateLimit",
   "Idempotent",
   "Validated",
+  // Python: Flask/FastAPI/Django/Celery/Click and stdlib wrappers
+  "app",
+  "router",
+  "route",
+  "get",
+  "post",
+  "put",
+  "delete",
+  "patch",
+  "api_view",
+  "action",
+  "shared_task",
+  "task",
+  "celery",
+  "command",
+  "option",
+  "login_required",
+  "permission_classes",
+  "authentication_classes",
+  "cache_page",
+  "lru_cache",
+  "cache",
+  "wraps",
+  "contextmanager",
+  "asynccontextmanager",
+  "property",
+  "staticmethod",
+  "classmethod",
+  "abstractmethod",
+  "pytest",
+  "fixture",
+  // TypeScript: NestJS/Angular/Express-style decorators
+  "Controller",
+  "Injectable",
+  "Component",
+  "Directive",
+  "Pipe",
+  "Guard",
+  "Interceptor",
+  "Middleware",
+  "UseGuards",
+  "UseInterceptors",
+  "UsePipes",
+  "UseFilters",
+  "SetMetadata",
+  "HttpCode",
+  "Header",
+  "Input",
+  "Output",
+  "HostListener",
+  "ViewChild",
+  "memo",
+  "autobind",
+  "debounce",
+  "throttle",
+  "observable",
+  "computed",
+  "effect",
+  "transactional",
 ]);
 
 /** True when an annotation/decorator changes runtime execution semantics. */
 export function isDecoratorAnnotation(name: string): boolean {
-  return DECORATOR_ANNOTATIONS.has(name);
+  if (DECORATOR_ANNOTATIONS.has(name)) return true;
+  // Python decorators are often dotted (`app.route`) or called factories
+  // (`@retry(times=3)`); compare the final segment too.
+  const tail = name.split(".").pop() ?? name;
+  return tail !== name && DECORATOR_ANNOTATIONS.has(tail);
 }
 
 export interface AdviceInfo {

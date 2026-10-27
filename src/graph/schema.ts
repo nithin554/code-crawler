@@ -13,6 +13,7 @@
 export const NODE_KINDS = [
   "file",
   "package",
+  "module",
   "class",
   "interface",
   "enum",
@@ -23,6 +24,7 @@ export const NODE_KINDS = [
   "constructor",
   "field",
   "import",
+  "external_symbol",
   "unknown_symbol",
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
@@ -38,6 +40,9 @@ export const EDGE_KINDS = [
   "IMPORTS",
   "ANNOTATED_WITH",
   "REFERENCES",
+  "REFLECTS",
+  "INJECTS",
+  "ROUTES",
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
@@ -102,6 +107,26 @@ export interface EdgeProperties {
   pointcut?: string;
   /** For ANNOTATED_WITH: raw annotation arguments as written in source. */
   arguments?: string[];
+  /** For CALLS: true when the call is nested inside a branch/loop/handler. */
+  conditional?: boolean;
+  /** For CALLS: enclosing control-flow categories (branch/loop/exception/predicate). */
+  controlFlow?: string[];
+  /** For CALLS: compact source text of the enclosing conditions. */
+  guards?: string[];
+  /** For CALLS/IMPORTS: the target is outside the crawled source tree. */
+  external?: boolean;
+  /** For INJECTS: framework that performs the injection. */
+  framework?: string;
+  /** For REFLECTS: the run-time lookup mechanism (`Class.forName`, `getattr`). */
+  mechanism?: string;
+  /** For entry-point metadata: the framework-invoked root category. */
+  entryPointKind?: string;
+  /** For entry-point metadata: human-readable route/schedule detail. */
+  entryPointDetail?: string;
+  /** For INJECTS: injected field/parameter name. */
+  injectedName?: string;
+  /** For IMPORTS/REFERENCES: imported member name. */
+  member?: string;
   /** Free-form language-specific metadata. */
   [key: string]: string | number | boolean | (string | number)[] | undefined;
 }
@@ -135,6 +160,11 @@ export function importNodeId(fqn: string): string {
 /** Fallback id for calls that could not be statically resolved. */
 export function unknownNodeId(qualifiedName: string): string {
   return `__unknown__:${qualifiedName}`;
+}
+
+/** External dependency nodes are grouped per package/specifier. */
+export function externalNodeId(specifier: string): string {
+  return `ext:${specifier}`;
 }
 
 /**

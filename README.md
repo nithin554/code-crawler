@@ -3,12 +3,16 @@
 **Static + dynamic call tracing MCP server backed by a persistent property graph of your codebase.**
 
 Code-Crawler indexes a project into a SQLite-backed property graph — files, packages,
-classes, methods, fields, imports, annotations, **call edges**, **virtual dispatch**, and
-**aspect advice** — then exposes that graph to LLM clients as MCP tools: find callers,
-trace call paths, explore neighborhoods, follow runtime dispatch, and search symbols
-across the whole codebase.
+modules, classes, interfaces, methods, fields, imports, annotations/decorators, **call
+edges**, **virtual dispatch**, and **aspect advice** — then exposes that graph to LLM
+clients as MCP tools: find callers, trace call paths, explore neighborhoods, follow
+runtime dispatch, and search symbols across the whole codebase.
+
+Supports **Java**, **Python**, and **TypeScript/JavaScript** projects, and can index all
+three into the same graph.
 
 📖 **Documentation site:** <https://nithin554.github.io/code-crawler/>
+📘 **Task-oriented guide:** [`USAGE.md`](USAGE.md)
 
 ```
         ┌───────────────────────  MCP (stdio)  ───────────────────────┐
@@ -41,18 +45,36 @@ and answers them instantly with bounded recursive SQL queries.
 
 ## Features
 
-- **Java-first** via the `tree-sitter-java` grammar (WASM — no native build step).
-  The parser/resolver layer is designed so more languages plug in per-language config modules.
+- **Three languages, one graph**: Java (`tree-sitter-java`), Python
+  (`tree-sitter-python`), and TypeScript/JavaScript (`tree-sitter-typescript`,
+  `tree-sitter-tsx`, `tree-sitter-javascript`) — all WASM, no native build step.
+  Language is detected per file, so a polyglot repo lands in a single graph.
 - **Dynamic tracing on a static graph** — `DYNAMIC_DISPATCH` edges connect interface/base
   calls to every override in the project, and `ADVISES` edges weave AspectJ/Spring AOP
   advice into execution traces (`before`, `after`, `around`, `after-returning`,
   `after-throwing`, named `@Pointcut` references, `&&`/`||`/`!` and `execution`, `within`,
   `@annotation`, `@within`, `target`, `this`, `args` primitives).
-- **Annotations as first-class nodes** — `@Transactional`, `@Cacheable`, `@Async`, `@Retryable`
-  and friends become `annotation` nodes with `ANNOTATED_WITH` edges, so you can query
-  decorators on types, methods, and fields.
+- **Run-time indirection is named, not lost** — Java reflection/`ServiceLoader`, Python
+  `getattr`/`importlib`, and JS `require`/dynamic `import()` produce `REFLECTS` edges to
+  the resolved symbol when the target is statically determinable, or to a
+  `__reflect__:` marker when it is not.
+- **Framework wiring** — dependency injection (`@Autowired`, NestJS constructor
+  injection, FastAPI `Depends`) becomes `INJECTS` edges, and HTTP routes
+  (`@GetMapping`, `@RequestMapping`, NestJS `@Controller`/`@Get`, FastAPI/Flask
+  decorators, Express `app.get`) become `ROUTES` edges to the handler, which is also
+  marked as an entry point.
+- **Control flow on call edges** — every `CALLS` edge records whether the call is
+  conditional and the compact source text of its enclosing guards/loops, so an agent can
+  tell a happy path from an error path without reading the file.
+- **External dependencies are explicit** — third-party imports and runtime globals
+  become package-level `external_symbol` nodes with `REFERENCES` edges and a
+  `find_external_dependencies` summary, distinct from project code.
+- **Annotations as first-class nodes** — `@Transactional`, `@Cacheable`, `@Async`,
+  `@Retryable`, Python decorators, and TS decorators become `annotation` nodes with
+  `ANNOTATED_WITH` edges, so you can query decorators on types, methods, and fields.
 - **Call resolution heuristics** that go beyond naive string matching:
   receiver types inferred from locals, parameters, fields, `new T()` expressions,
+  `self`/`this` scoping, dotted paths (`service.repo.find`), loop-variable element types,
   bare/`this`/`super` calls, static/qualified calls, and superclass chains.
   Unresolvable calls become `unknown_symbol` phantom nodes with `resolved:false` edges,
   so the graph stays traversable.
@@ -70,7 +92,7 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (80 tests)
+npm test             # vitest (125 tests)
 ```
 
 ## CLI
@@ -129,10 +151,15 @@ if green, **auto-releases**:
 Point the client at the same command. The typical flow for an LLM agent:
 
 1. `crawl_project` the repo once.
-2. `search_symbols` to locate the symbol of interest.
-3. `get_callers` / `get_callees` / `trace_path` to reason about the call graph.
-4. `trace_execution` to follow runtime dispatch and aspect advice; `find_aspects`,
+2. `find_entry_points` to see where execution actually starts (routes, listeners, mains).
+3. `search_symbols` to locate the symbol of interest.
+4. `get_callers` / `get_callees` / `trace_path` to reason about the call graph.
+5. `trace_execution` to follow runtime dispatch and aspect advice; `find_aspects`,
    `get_decorators`, and `find_annotated` to inspect behaviour-changing annotations.
+6. `find_routes`, `find_injections`, `find_reflections`, and `find_external_dependencies`
+   to map framework wiring and third-party surface.
+
+See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 
 ## MCP surface
 
@@ -154,6 +181,11 @@ Point the client at the same command. The typical flow for an LLM agent:
 | `find_annotated` | Every symbol annotated with a given annotation |
 | `find_hotspots` | Rank methods by fan-in, fan-out, and advice interceptions |
 | `find_dead_code` | Methods with no incoming call/dispatch/advice edges |
+| `find_entry_points` | Framework-invoked roots: HTTP routes, listeners, schedulers, CLI mains, tests |
+| `find_routes` | HTTP route → handler mappings (`@GetMapping`, NestJS, FastAPI, Express) |
+| `find_injections` | DI-supplied dependencies (`@Autowired`, NestJS, FastAPI `Depends`) |
+| `find_reflections` | Run-time lookups: `Class.forName`, `getattr`, `importlib`, dynamic `import()` |
+| `find_external_dependencies` | Third-party packages with reference and file counts |
 | `get_subgraph` | Neighborhood extraction for visualization |
 | `get_schema` | Describe the graph model |
 | `clear_index` | Reset the database |
@@ -163,15 +195,18 @@ Point the client at the same command. The typical flow for an LLM agent:
 
 ## Graph model
 
-**Nodes** — `kind` is one of `file | package | class | interface | enum | method |
-constructor | field | import | aspect | annotation_type | annotation | unknown_symbol`.
-Every node has a globally unique `qualifiedName` and a JSON `properties` blob
-(signature, modifiers, lines, annotations, ...).
+**Nodes** — `kind` is one of `file | package | module | class | interface | enum | method |
+constructor | field | import | external_symbol | aspect | annotation_type | annotation |
+unknown_symbol`. Every node has a globally unique `qualifiedName` and a JSON `properties`
+blob (signature, modifiers, lines, annotations, ...).
 
 **Edges** — `kind` is one of `CALLS | DECLARED_IN | CONTAINS | IMPLEMENTS | EXTENDS |
-IMPORTS | REFERENCES | DYNAMIC_DISPATCH | ADVISES | ANNOTATED_WITH`. `CALLS` edges carry
-`line`, `resolved`, and `confidence`; `ANNOTATED_WITH` edges carry `line` and `arguments`;
-`ADVISES` edges carry `adviceKind` and the resolved `pointcut`.
+IMPORTS | REFERENCES | DYNAMIC_DISPATCH | ADVISES | ANNOTATED_WITH | REFLECTS | INJECTS |
+ROUTES`. `CALLS` edges carry `line`, `resolved`, `confidence`, and — when the call sits
+behind control flow — `conditional`, `controlFlow`, and `guards`; `ANNOTATED_WITH` edges
+carry `line` and `arguments`; `ADVISES` edges carry `adviceKind` and the resolved
+`pointcut`; `INJECTS` carries `injectedName` and `framework`; `REFLECTS` carries
+`mechanism`; `REFERENCES` carries `external`.
 
 Id scheme:
 
@@ -184,6 +219,13 @@ Id scheme:
 | annotation | `@Transactional` |
 | import | `__import__:java.util.List` |
 | unresolved call | `__unknown__:System.out.println` |
+| Python/TS module | `module:app.service` |
+| module-level function | `module:app.api#read_order` |
+| module-level field | `module:app.service$AUDIT_LOG` |
+| inline arrow handler | `module:src.routes#<anonymous@7>` |
+| external package | `ext:fastapi` |
+| reflective marker | `__reflect__:./plugins/${name}` |
+| injection marker | `__inject__:Repo` |
 
 ## Dynamic behaviour
 
@@ -236,7 +278,79 @@ Framework decorators (`@Transactional`, `@Cacheable`, `@Async`, `@Retryable`,
 `@PreAuthorize`, `@Scheduled`, ...) are additionally flagged `decorator: true` so
 `get_decorators` and `find_annotated` can surface runtime-semantic annotations.
 
-## Java resolution heuristics
+Python decorators and TypeScript decorators are modelled the same way: `@router.get(...)`,
+`@injectable`, `@Controller(...)`, `@Get(':id')` and friends land in `annotations` on the
+declaring type/method, and framework ones additionally produce routes, injections, or
+entry-point marks.
+
+### Reflection and run-time indirection
+
+Lookups the compiler cannot see through are recorded as `REFLECTS` edges. When the target
+is statically determinable — a string literal, a literal prefix plus a variable
+(`importlib.import_module("app.plugins." + name)`), `getattr(obj, "run")`,
+`require("./x")` — the edge points at the resolved symbol. Otherwise it points at a
+`__reflect__:` marker carrying the `mechanism`:
+
+```text
+module:app.dynamic#load_plugin --REFLECTS--> __reflect__:app.plugins.   (importlib.import_module)
+module:src.dynamic#loadPlugin   --REFLECTS--> __reflect__:./plugins/${name}   (import())
+```
+
+Dynamic module prefixes that belong to the project's own namespace stay in-project; only
+genuinely foreign packages become external dependencies.
+
+### Dependency injection
+
+Dependencies the framework supplies are `INJECTS` edges instead of missing calls
+(`find_injections`):
+
+| Framework | Detected from |
+| --- | --- |
+| Spring | `@Autowired` fields/methods/constructors |
+| NestJS | constructor parameters with decorators; `@Injectable()` classes |
+| FastAPI | `Depends(...)` parameters |
+| dependency-injector | constructor parameters of `@injectable` classes |
+| plain TS/JS | constructor parameters typed with a project class |
+
+Primitive and structural parameter types (`string`, `{ id: string }`, `list[str]`) are
+counted but produce no edge, so `@Body() body: { id: string }` does not pollute the graph.
+
+### Framework entry points and routes
+
+Methods a framework invokes have no source-level caller, so marking them keeps dead-code
+analysis honest and gives `trace_execution` a root (`find_entry_points`, `find_routes`):
+
+| Language | Recognised |
+| --- | --- |
+| Java | `@GetMapping`, `@PostMapping`, `@RequestMapping`, `@Scheduled`, `@EventListener`, listener annotations, tests, `main` |
+| Python | FastAPI (`@router.get`, `@app.post`), Flask (`@bp.route`), `if __name__ == "__main__"`, `pytest` tests |
+| TypeScript | NestJS `@Controller` + `@Get`/`@Post`/... , Express `app.get('/x', handler)`, Jest tests |
+
+Express handlers written inline get a synthetic method node
+(`module:src.routes#<anonymous@7>`) so their body still gets call edges, containment, and
+a route edge.
+
+### Control flow on call edges
+
+Each `CALLS` edge records whether it is guarded:
+
+```json
+{
+  "kind": "CALLS",
+  "source": "app.repository.OrderRepository#create",
+  "target": "ext:builtins",
+  "properties": { "line": 14, "conditional": true, "controlFlow": ["branch", "loop"],
+                  "guards": ["row.get(\"id\") == order_id", "self.rows"] }
+}
+```
+
+`controlFlow` uses `branch | loop | exception | predicate`. Guards are source text, not
+symbolic constraints: they tell an agent *that* a call is conditional and *what* the
+condition looked like, without pretending to model its truth value.
+
+## Resolution heuristics
+
+Java:
 
 1. **Constructor calls** (`new Foo(...)`) → resolve `Foo` → `#<init>` (default ctor if implicit).
 2. **Bare / `this.` / `super.` calls** → enclosing type + superclass chain.
@@ -246,28 +360,87 @@ Framework decorators (`@Transactional`, `@Cacheable`, `@Async`, `@Retryable`,
 5. **Otherwise** → phantom `unknown_symbol` node, `resolved:false`, with the inference
    failure reason attached to the edge.
 
+Python and TypeScript add module-aware resolution on top of the same pipeline:
+
+1. **Import-aware scope** — `from app.repository import OrderRepository` maps the local
+   name to `app.repository.OrderRepository`; relative and project modules are resolved by
+   suffix, bare specifiers fall back to package roots.
+2. **`self.x` / `this.x`** resolve against the enclosing class's fields; a receiver that
+   starts with `self`/`this`/`cls`/`super` never becomes an external package.
+3. **Dotted receivers** (`service.repo.find`) are walked segment by segment: the first
+   segment resolves to a type, the next to a field on it, and container members such as
+   `list.append` are recognised as builtin rather than unknown.
+4. **Locals** are typed from parameters, annotated assignments, `new T()`, and inferred
+   loop/variable element types (`for row in self.rows:` → `row: dict`).
+5. **Module functions** (`module:app.api#read_order`) participate in dispatch, routes, and
+   entry-point marking exactly like class methods.
+
 Each resolved edge carries a `confidence` score and a human-readable `reason` trace
 (e.g. `via local orders: OrderService`), so LLM clients can weigh how much to trust it.
 
-## Roadmap: multi-language
+## Implemented languages
 
-The parsing layer is language-agnostic. Adding a language requires:
+| Language | Extensions | Extracted | Dynamic features |
+| --- | --- | --- | --- |
+| Java | `.java` | packages, classes, interfaces, enums, records, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
+| Python | `.py` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask routes, `getattr`, `importlib`, `__main__`, tests |
+| TypeScript | `.ts`, `.tsx` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
+
+Crawling a directory mixes all of them automatically — language is chosen per file from
+the extension, and a single crawl can return `languages: ["java", "python", "typescript"]`.
+
+Adding a language requires:
 
 1. `src/parser/languages/<lang>.ts` — a `LanguageConfig` implementing `parseFile`
-   (package/module extraction, type/member extraction, raw call sites, local type tables).
+   (module/package extraction, type/member extraction, raw call sites, local type tables).
 2. Register it in `src/parser/languages/index.ts`.
-3. `src/resolver/<lang>Resolver.ts` — translate raw call sites into resolved targets
-   using the shared `TypeIndex`.
+3. Optionally a `src/resolver/<lang>Resolver.ts`; most languages work with the shared
+   `src/resolver/genericResolver.ts` and only override language-specific builtins.
 
-Natural next targets: **Python** (native AST or tree-sitter-python), **TypeScript/JavaScript**
-(tree-sitter-typescript), and **Go** (tree-sitter-go). The graph schema, store, traversal
-queries, and MCP surface all stay the same.
+The graph schema, store, traversal queries, and MCP surface stay the same for every
+language. Natural next targets: Go, C#, Ruby, Rust.
 
-Planned enhancements:
+Not yet modelled, by design:
 
-- Package-level dependency graphs (module boundaries, cycle detection).
-- Test coverage mapping (which tests exercise a given symbol).
-- Incremental crawling (watch mode) and git-blame aware invalidation.
+- Value flow and branch feasibility — edges say *that* a call is conditional and record
+  the guard text, not which branch is taken.
+- Cross-repository resolution — libraries outside the crawled tree are summarised as
+  `ext:` packages rather than crawled.
+- Fully dynamic targets (`getattr(obj, name)`, `require(userInput)`) point at a
+  `__reflect__:` marker instead of a symbol; there is nothing static to point at.
+- Runtime DI graphs assembled from configuration files rather than code.
+
+## Architecture
+
+```
+src/
+├── index.ts                    CLI (crawl | status | query | serve)
+├── server.ts                   MCP server: tools, resources, prompt (thin handlers)
+├── crawler.ts                  file discovery → parse → index → resolve → persist
+├── config.ts                   env-overridable configuration
+├── graph/
+│   ├── schema.ts               node/edge kinds, id scheme, property shapes
+│   ├── store.ts                better-sqlite3 schema + idempotent file-scoped upserts
+│   └── queries.ts              recursive-CTE traversal (callers/callees/path/subgraph)
+├── parser/
+│   ├── language.ts             LanguageConfig contract
+│   ├── treeSitter.ts           WASM runtime + grammar loading + CST walk helpers
+│   ├── controlFlow.ts          enclosing branch/loop/try/catch + guard text
+│   ├── moduleId.ts             import-aware module id derivation
+│   └── languages/
+│       ├── index.ts            language registry + per-file language detection
+│       ├── java.ts             Java structural extraction
+│       ├── python.ts           Python structural extraction
+│       ├── typescript.ts       TypeScript/TSX structural extraction
+│       └── javascript.ts       JavaScript structural extraction
+└── resolver/
+    ├── types.ts                TypeIndex (global name/method index) + ResolvedCall
+    ├── common.ts               builtin types, external packages, receiver inference
+    ├── dynamic.ts              virtual dispatch + AspectJ pointcut matching/advice edges
+    ├── genericResolver.ts      shared resolution for module-based languages
+    └── javaResolver.ts         Java call-target resolution heuristics
+```
 
 ## Architecture
 
