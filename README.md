@@ -133,10 +133,11 @@ if green, **auto-releases**:
    [official MCP Registry](https://registry.modelcontextprotocol.io) as
    `io.github.nithin554/code-crawler` from a separate, re-runnable job using
    [`ExaDev/mcp-registry-publish`](https://github.com/ExaDev/mcp-registry-publish).
-   The job pins `server.json` to the release version, authenticates with GitHub
-   OIDC, skips versions the registry already lists, and retries transient npm
-   propagation or registry errors. Ownership is verified through the `mcpName`
-   field in `package.json`.
+   The job runs inside the `mcp-registry-publish` environment, whose deployment
+   branch policy is limited to `main`. It pins `server.json` to the release
+   version, authenticates with GitHub OIDC, skips versions the registry already
+   lists, and retries transient npm propagation or registry errors. Ownership is
+   verified through the `mcpName` field in `package.json`.
 
 ## Using as an MCP server
 
