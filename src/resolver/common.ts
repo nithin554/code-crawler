@@ -365,14 +365,27 @@ export function findInherited(index: TypeIndex, typeId: string, name: string): M
   return [];
 }
 
-/** Pick the overload whose arity best matches the call site. */
+/**
+ * Pick the overload whose arity best matches the call site.
+ *
+ * Ordered by how much the declaration proves about the call. A fixed-arity
+ * declaration taking exactly this many arguments is the strongest signal, so
+ * it wins over a variadic one. A variadic declaration is next, and accepts
+ * anything at or above its fixed prefix. Only then do we fall back to looser
+ * guesses, which is where ambiguity actually lives: parameter *types* are not
+ * compared, so same-arity overloads resolve to the first declared.
+ */
 export function pickOverload(methods: MethodInfo[], argCount: number): MethodInfo | undefined {
   if (methods.length === 0) return undefined;
   if (methods.length === 1) return methods[0];
-  const exact = methods.find((m) => m.params.length === argCount);
+  const exact = methods.find((m) => !m.variadic && m.params.length === argCount);
   if (exact) return exact;
-  const variadic = methods.find((m) => m.params.length < argCount);
+  const variadic = methods.find((m) => m.variadic && argCount >= m.params.length - 1);
   if (variadic) return variadic;
+  const relaxed = methods.find((m) => m.params.length === argCount);
+  if (relaxed) return relaxed;
+  const shorter = methods.find((m) => m.params.length < argCount);
+  if (shorter) return shorter;
   return methods.slice().sort((a, b) => a.params.length - b.params.length)[0];
 }
 

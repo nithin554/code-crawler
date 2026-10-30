@@ -129,6 +129,16 @@ export interface MethodInfo {
   isConstructor: boolean;
   /** Parameter names and raw type text. */
   params: { name: string; type: string }[];
+  /**
+   * True when the last parameter absorbs the remaining arguments:
+   * `String... names`, `...rest`, `*args`/`**kwargs`.
+   *
+   * Overload selection needs this because a variadic declaration accepts more
+   * arguments than it declares parameters. Without the flag the last parameter
+   * looks like an ordinary one and the arity comparison is wrong in both
+   * directions.
+   */
+  variadic?: boolean;
   startLine: number;
   endLine: number;
   /** Raw return type text (empty for constructors). */

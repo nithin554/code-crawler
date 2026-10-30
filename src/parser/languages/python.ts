@@ -571,6 +571,7 @@ export const pythonConfig: LanguageConfig = {
         name: isCtor ? "<init>" : rawName,
         isConstructor: isCtor,
         params,
+        variadic: params.some((p) => p.name.startsWith("*")),
         startLine: node.startPosition.row,
         endLine: node.endPosition.row,
         returnType,
