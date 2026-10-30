@@ -86,7 +86,9 @@ and answers them with bounded recursive SQL queries.
   `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`. Derived dynamic edges
   and orphan pruning are rebuilt only when something changed. A full re-crawl still removes
   files that disappeared, without duplicating the graph, and scoped crawls (`fileFilter` or a
-  forced `language`) never remove files outside their scope.
+  forced `language`) never remove files outside their scope. When a checkout, `rsync -t`, an
+  mtime-preserving unzip, or clock skew restores an edit with the old size and mtime, the
+  shortcut misses it — pass `force` (`--force` on the CLI) to re-parse everything.
 - **FTS5-backed symbol search** — symbol lookup runs against an external-content FTS5 index
   with BM25 ranking and exact/prefix boosting, falling back to a `LIKE` scan only when FTS
   finds nothing. Search does not degrade as the graph grows.
@@ -118,6 +120,7 @@ npm run bench        # crawl/query benchmark on a generated ~137k-line project
 
 ```bash
 codecrawler crawl <path>     # index a project
+codecrawler crawl <path> --force  # re-parse every file, ignoring cached metadata
 codecrawler status           # index summary
 codecrawler query <symbol>   # fuzzy-lookup a symbol
 codecrawler serve            # start the MCP server over stdio (default)
@@ -565,7 +568,7 @@ Language-specific gaps, in addition to the shared ones below:
 
 | Language | Not modelled |
 | --- | --- |
-| `java` | `record` declarations are skipped entirely — a record contributes no type node, so its components and accessors never appear. Lambda bodies are indexed, but a method reference such as `this::handle` has no static target and produces no call edge. `static {}` and instance initialiser blocks are not extracted. Generic type parameters are erased, so a call through a `List<T>` field binds to the declared bound rather than the concrete argument. |
+| `java` | A `record` is indexed as a `class` with `record: true`; components become `private final` fields plus a synthesized accessor each, but the implicit canonical constructor gets no signature until a call resolves to it. Lambda bodies are indexed, but a method reference such as `this::handle` has no static target and produces no call edge. `static {}` and instance initialiser blocks are not extracted. Generic type parameters are erased, so a call through a `List<T>` field binds to the declared bound rather than the concrete argument. |
 | `python` | No metaclass, descriptor, `__getattr__`, or `__getattribute__` modelling. Members a decorator generates rather than writes — `@dataclass`'s `__init__` and `__eq__`, anything a metaclass adds — have no declaration to point at, so calls to them stay unresolved. Monkey-patching at import time is not tracked. A `lambda` stored on an attribute and invoked later has no target. |
 | `typescript` | A `namespace X {}` block produces no module node, so members declared inside one are not reachable by name. JSX parses cleanly but the element tree is not modelled. Type-level constructs — conditional, mapped, template-literal, intersection — are not evaluated, so a receiver typed that way falls back to unresolved. `static {}` blocks and `accessor` fields are not extracted. |
 | `javascript` | Handled by the TypeScript parser, so every gap above applies. With no annotations available, receivers come only from `new`, assigned initialisers, and the language-agnostic heuristics — dynamically typed code resolves less often than annotated code does. |

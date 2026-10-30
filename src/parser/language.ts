@@ -55,6 +55,8 @@ export interface TypeInfo {
   annotations: AnnotationInfo[];
   /** True when the type is an aspect (`@Aspect`). */
   isAspect?: boolean;
+  /** Java `record` declaration: indexed as a `class` with component accessors. */
+  isRecord?: boolean;
   /** Export visibility. Modules and members default to file-visible. */
   exported?: boolean;
 }

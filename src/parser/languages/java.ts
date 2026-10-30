@@ -54,7 +54,8 @@ function isTypeDecl(type: string): boolean {
     type === "class_declaration" ||
     type === "interface_declaration" ||
     type === "enum_declaration" ||
-    type === "annotation_type_declaration"
+    type === "annotation_type_declaration" ||
+    type === "record_declaration"
   );
 }
 
@@ -231,6 +232,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const id = outer ? `${outer}.${simple}` : packageName ? `${packageName}.${simple}` : simple;
 
     const annotations = extractAnnotations(node);
+    const isRecord = node.type === "record_declaration";
     types.push({
       id,
       kind: typeKind(node),
@@ -241,8 +243,12 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       annotations,
       isAspect: annotations.some((a) => isNamed(a, "Aspect")),
+      ...(isRecord ? { isRecord: true } : {}),
     });
     nestingStack.push(id);
+
+    // Record components are fields plus an implicit accessor each.
+    const components = isRecord ? extractRecordComponents(node, id) : [];
 
     const body = fieldChild(node, "body") ?? childOfType(node, "class_body");
     if (body) {
@@ -251,6 +257,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
           extractMethod(member, id);
         } else if (member.type === "constructor_declaration") {
           extractConstructor(member, id);
+        } else if (member.type === "compact_constructor_declaration") {
+          extractCompactConstructor(member, id, components);
         } else if (member.type === "field_declaration") {
           extractFields(member, id);
         } else if (isTypeDecl(member.type)) {
@@ -259,7 +267,65 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       }
     }
 
+    extractRecordAccessors(id, components, node.startPosition.row);
+
     nestingStack.pop();
+  }
+
+  /**
+   * Record components declared in the header. Each one is a `private final`
+   * field, and — unless the source overrides it — an accessor of the same name.
+   */
+  function extractRecordComponents(node: TSNode, typeId: string): { name: string; type: string }[] {
+    const params = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
+    if (!params) return [];
+    const components: { name: string; type: string }[] = [];
+    for (const param of params.namedChildren) {
+      // `int... values` is a legal last component and parses as spread_parameter.
+      if (param.type !== "formal_parameter" && param.type !== "spread_parameter") continue;
+      const name =
+        param.type === "spread_parameter"
+          ? firstIdentifier(param)?.text
+          : childOfType(param, "identifier")?.text;
+      if (!name) continue;
+      const typeNode = typeNodeOf(param);
+      const type = typeNode ? baseTypeName(typeNode.text) : "";
+      components.push({ name, type });
+      fields.push({
+        id: `${typeId}.${name}`,
+        typeId,
+        name,
+        type,
+        startLine: node.startPosition.row,
+        modifiers: ["private", "final"],
+        annotations: [],
+      });
+    }
+    return components;
+  }
+
+  function extractRecordAccessors(
+    typeId: string,
+    components: { name: string; type: string }[],
+    line: number
+  ): void {
+    for (const component of components) {
+      const id = `${typeId}#${component.name}`;
+      // An explicit accessor in the body wins.
+      if (methods.some((m) => m.id === id)) continue;
+      methods.push({
+        id,
+        typeId,
+        name: component.name,
+        isConstructor: false,
+        params: [],
+        startLine: line,
+        endLine: line,
+        returnType: component.type,
+        modifiers: ["public"],
+        annotations: [],
+      });
+    }
   }
 
   function extractMethod(node: TSNode, typeId: string): void {
@@ -332,6 +398,29 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       annotations,
     });
     collectParamInjections(node, id, annotations);
+    const locals = collectLocals(node);
+    if (locals) localsByMethod.set(id, locals);
+  }
+
+  /** `record R(...) { R { … } }` — the canonical constructor has no params in source. */
+  function extractCompactConstructor(
+    node: TSNode,
+    typeId: string,
+    components: { name: string; type: string }[]
+  ): void {
+    const id = `${typeId}#<init>`;
+    methods.push({
+      id,
+      typeId,
+      name: "<init>",
+      isConstructor: true,
+      params: components.map((component) => ({ ...component })),
+      startLine: node.startPosition.row,
+      endLine: node.endPosition.row,
+      returnType: "",
+      modifiers: extractModifiers(node),
+      annotations: extractAnnotations(node),
+    });
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }

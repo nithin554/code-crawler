@@ -34,6 +34,16 @@ export interface CrawlOptions {
   respectGitignore?: boolean;
   /** Skip files larger than this many bytes. */
   maxFileBytes?: number;
+  /**
+   * Re-parse every discovered file, ignoring the manifest's size, mtime and
+   * content-hash shortcuts.
+   *
+   * Freshness is metadata-based, so a same-size edit with a restored mtime —
+   * what `git checkout`, `rsync -t`, unzip, or a clock skew leaves behind — is
+   * otherwise indistinguishable from an untouched file and the stale parse is
+   * replayed. This is the escape hatch for that case.
+   */
+  force?: boolean;
   /** Called as parsing/persisting advances, for progress reporting. */
   onProgress?: (progress: CrawlProgress) => void;
 }
@@ -57,7 +67,7 @@ export interface CrawlResult {
   filesParsed: number;
   /** Files parsed for the first time by this crawl. */
   filesAdded: number;
-  /** Files re-parsed because their content changed. */
+  /** Files re-parsed because their content changed (or because the crawl was forced). */
   filesUpdated: number;
   /** Files replayed from the parse cache because their content was identical. */
   filesUnchanged: number;
@@ -299,6 +309,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): {
         endLine: t.endLine,
         annotations: t.annotations.map((a) => a.name),
         ...(t.isAspect ? { aspect: true } : {}),
+        ...(t.isRecord ? { record: true } : {}),
         ...(t.exported === false ? { exported: false } : {}),
         ...(t.kind === "module" && parsed.entryPoint
           ? {
@@ -863,6 +874,7 @@ export async function crawlProject(
   }
 
   const maxFileBytes = options.maxFileBytes ?? 1_000_000;
+  const force = options.force === true;
   const skipSampleBytes = 8192;
 
   // Incremental crawl: the manifest records size + mtime + content hash for
@@ -897,7 +909,7 @@ export async function crawlProject(
       }
       const record = manifest.get(file);
       const mtimeMs = Math.trunc(stat.mtimeMs);
-      if (record && record.size === stat.size && record.mtimeMs === mtimeMs) {
+      if (!force && record && record.size === stat.size && record.mtimeMs === mtimeMs) {
         const cached = decodeParsedFile(record.summary);
         if (cached) {
           filesUnchanged++;
@@ -930,7 +942,7 @@ export async function crawlProject(
 
       const sha256 = createHash("sha256").update(buffer).digest("hex");
       const record = manifest.get(file);
-      if (record && record.sha256 === sha256) {
+      if (!force && record && record.sha256 === sha256) {
         const cached = decodeParsedFile(record.summary);
         if (cached) {
           // Same content, new timestamp: refresh metadata without re-parsing.
