@@ -8,14 +8,14 @@
     <title>Usage — Code-Crawler</title>
     <meta
       name="description"
-      content="Install Code-Crawler, index a project, configure MCP clients, and understand the crawl lifecycle, environment variables, and troubleshooting."
+      content="Install Code-Crawler, index a project, configure MCP clients from the MCP registry, and understand the crawl lifecycle, environment variables, and troubleshooting."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Usage — Code-Crawler" />
     <meta
       property="og:description"
-      content="Install Code-Crawler, index a project, configure MCP clients, and understand the crawl lifecycle, environment variables, and troubleshooting."
+      content="Install Code-Crawler, index a project, configure MCP clients from the MCP registry, and understand the crawl lifecycle, environment variables, and troubleshooting."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/usage.html" />
     <meta name="twitter:card" content="summary" />
@@ -55,6 +55,7 @@
             <a href="#install">Install</a>
             <a href="#cli">CLI</a>
             <a href="#clients">MCP clients</a>
+            <a href="#registry">Registry install</a>
             <a href="#lifecycle">Index lifecycle</a>
             <a href="#config">Configuration</a>
             <a href="#workflow">Agent workflow</a>
@@ -155,6 +156,10 @@ npx codecrawler serve</code></pre>
             Code-Crawler speaks stdio MCP. Use an absolute path to <code>dist/index.js</code>
             so the client can spawn it from any working directory.
           </p>
+          <p class="small muted">
+            Skipped the local build? Every card below has an <code>npx</code> equivalent —
+            see <a href="#registry">Registry install</a>.
+          </p>
 
           <div class="grid grid-2" style="margin-top: 28px">
             <div class="card">
@@ -239,9 +244,141 @@ npx codecrawler serve</code></pre>
         </div>
       </section>
 
+      <section class="section" id="registry">
+        <div class="wrap">
+          <span class="eyebrow">04 · Registry</span>
+          <h2>Install from the MCP registry</h2>
+          <p class="lead">
+            Code-Crawler is published to the official MCP registry as
+            <code>io.github.nithin554/code-crawler</code> and to npm as
+            <code>@nithin554/code-crawler</code>, so registry-aware clients can add it
+            without cloning the repository or building it locally.
+          </p>
+
+          <div class="table-wrap" style="margin-top: 24px">
+            <table>
+              <thead>
+                <tr><th>Field</th><th>Value</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Registry name</td>
+                  <td><code>io.github.nithin554/code-crawler</code></td>
+                </tr>
+                <tr>
+                  <td>npm package</td>
+                  <td><code>@nithin554/code-crawler</code></td>
+                </tr>
+                <tr>
+                  <td>Launch command</td>
+                  <td><code>npx -y @nithin554/code-crawler@latest</code></td>
+                </tr>
+                <tr>
+                  <td>Transport</td>
+                  <td>stdio — a local child process; no ports, no auth, no hosted service</td>
+                </tr>
+                <tr>
+                  <td>Runtime</td>
+                  <td>Node.js 20 or newer</td>
+                </tr>
+                <tr>
+                  <td>Environment</td>
+                  <td>All optional — see <a href="#config">Configuration</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="grid grid-2" style="margin-top: 28px">
+            <div class="card">
+              <h3><span class="icon" aria-hidden="true">◆</span> GitHub Copilot app</h3>
+              <p style="margin-bottom: 12px">
+                Open <strong>Customize → MCP</strong>. If Code-Crawler appears in the
+                catalog, select it and follow the prompts; otherwise add a custom server
+                named <code>code-crawler</code> with this command:
+              </p>
+              <pre><code>npx -y @nithin554/code-crawler@latest</code></pre>
+              <p class="small dim" style="margin-top: 10px">
+                The app stores the entry in <code>~/.copilot/mcp-config.json</code> and lists
+                it under <strong>Customize → Installed</strong>. Sessions already running keep
+                their current tool set — the server is spawned for the next session or after
+                you toggle it off and on.
+              </p>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon purple" aria-hidden="true">◆</span> Copilot CLI</h3>
+              <p style="margin-bottom: 12px">One command writes the user-level configuration:</p>
+              <pre><code>copilot mcp add code-crawler -- \
+  npx -y @nithin554/code-crawler@latest</code></pre>
+              <p class="small dim" style="margin-top: 10px">
+                Verify with <code>copilot mcp list</code>, or <code>/mcp</code> inside a
+                session. Add env vars with <code>--env CODECRAWLER_DB=...</code>.
+              </p>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon green" aria-hidden="true">◆</span> VS Code</h3>
+              <p style="margin-bottom: 12px">
+                If the catalog lists it, install from the Extensions view with
+                <code>@mcp code-crawler</code>. Otherwise add the entry to
+                <code>.vscode/mcp.json</code> (workspace) or your user MCP settings:
+              </p>
+              <pre><code>{
+  "servers": {
+    "code-crawler": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler@latest"]
+    }
+  }
+}</code></pre>
+            </div>
+
+            <div class="card">
+              <h3><span class="icon warm" aria-hidden="true">◆</span> Other stdio clients</h3>
+              <p style="margin-bottom: 12px">
+                Any client that accepts a command and args works — no local build and no
+                absolute path to <code>dist/index.js</code>:
+              </p>
+              <pre><code>{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler@latest"],
+      "env": {
+        "CODECRAWLER_DB": "/absolute/path/index.db"
+      }
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <h3 style="margin-top: 40px">Versions and updates</h3>
+          <p class="muted">
+            <code>npx</code> resolves the <code>latest</code> dist-tag every time the client
+            spawns the server, reusing npm's download cache when the version is already
+            there. A new npm release therefore takes effect on the next server start —
+            restart the client, open a new session, or toggle the server off and on. Nothing
+            upgrades mid-session, and no version is pushed to you.
+          </p>
+
+          <div class="note">
+            <p>
+              Pin an exact version for reproducible setups:
+              <code>"@nithin554/code-crawler@0.1.49"</code>. Catalog installs use the version
+              recorded in <code>server.json</code> at publish time, which can lag the npm
+              <code>latest</code> tag while the registry ingests a release. Check what you are
+              running with <code>npm view @nithin554/code-crawler version</code>.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section class="section" id="lifecycle">
         <div class="wrap">
-          <span class="eyebrow">04 · Lifecycle</span>
+          <span class="eyebrow">05 · Lifecycle</span>
           <h2>What a crawl actually does</h2>
 
           <div class="steps">
@@ -296,7 +433,7 @@ npx codecrawler serve</code></pre>
 
       <section class="section" id="config">
         <div class="wrap">
-          <span class="eyebrow">05 · Configuration</span>
+          <span class="eyebrow">06 · Configuration</span>
           <h2>Environment variables</h2>
 
           <div class="table-wrap">
@@ -346,7 +483,7 @@ npx codecrawler serve</code></pre>
 
       <section class="section" id="workflow">
         <div class="wrap">
-          <span class="eyebrow">06 · Prompting</span>
+          <span class="eyebrow">07 · Prompting</span>
           <h2>A workflow that gives good answers</h2>
           <p class="lead">
             The tools are precise but literal. Two cheap steps — index, then resolve the
@@ -395,7 +532,7 @@ npx codecrawler serve</code></pre>
 
       <section class="section" id="limits">
         <div class="wrap">
-          <span class="eyebrow">07 · Semantics</span>
+          <span class="eyebrow">08 · Semantics</span>
           <h2>What the model can and cannot know</h2>
 
           <div class="grid grid-2" style="margin-top: 24px">
@@ -462,7 +599,7 @@ npx codecrawler serve</code></pre>
 
       <section class="section" id="troubleshooting">
         <div class="wrap">
-          <span class="eyebrow">08 · Troubleshooting</span>
+          <span class="eyebrow">09 · Troubleshooting</span>
           <h2>Common failure modes</h2>
 
           <div class="table-wrap">
