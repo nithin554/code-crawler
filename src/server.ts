@@ -199,14 +199,21 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .string()
         .optional()
         .describe("Optional substring filter: only index files whose path contains this string."),
+      force: z
+        .boolean()
+        .optional()
+        .describe(
+          "Re-parse every discovered file, ignoring the manifest's size, mtime and content-hash shortcuts. Use when the index may be stale despite matching metadata — a same-size edit with a restored mtime (git checkout, rsync -t, unzip) is otherwise replayed from the cache."
+        ),
     },
-    async ({ path: projectPath, language, fileFilter }, rawExtra) => {
+    async ({ path: projectPath, language, fileFilter, force }, rawExtra) => {
       const extra = rawExtra as ProgressExtra;
       const progressToken = extra._meta?.progressToken;
       const step = (total: number) => Math.max(1, Math.floor(total / 100));
       const result = await crawlProject(store, projectPath, config.excludeDirs, {
         language,
         fileFilter,
+        force,
         respectGitignore: config.respectGitignore,
         maxFileBytes: config.maxFileBytes,
         onProgress:

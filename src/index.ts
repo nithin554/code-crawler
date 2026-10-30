@@ -22,6 +22,8 @@ function usage(): void {
 Usage:
   codecrawler serve              Start the MCP server over stdio (default)
   codecrawler crawl <path>       Index a project into the graph database
+  codecrawler crawl <path> --force
+                                 Re-parse every file, ignoring cached metadata
   codecrawler status             Show index summary
   codecrawler query <symbol>     Fuzzy-lookup a symbol
 
@@ -57,7 +59,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       break;
     }
     case "crawl": {
-      const target = rest[0];
+      const force = rest.includes("--force");
+      const target = rest.find((arg) => !arg.startsWith("--"));
       if (!target) {
         console.error("code-crawler: missing <path> argument\n");
         usage();
@@ -70,6 +73,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         const result = await crawlProject(store, target, config.excludeDirs, {
           respectGitignore: config.respectGitignore,
           maxFileBytes: config.maxFileBytes,
+          force,
           onProgress: (progress) => {
             const percent =
               progress.total === 0 ? 100 : Math.floor((progress.processed / progress.total) * 100);

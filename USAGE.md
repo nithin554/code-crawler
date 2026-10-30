@@ -79,7 +79,9 @@ Use a separate `CODECRAWLER_DB` per repository. A database holds exactly one pro
 crawling a different path fails with a `clear_index` hint rather than replacing the existing
 index. Re-crawling the same database is safe and cheap: file-scoped upserts replace only
 what changed. A full crawl also removes files that disappeared; scoped crawls (`fileFilter`
-or a forced `language`) skip stale removal and report `pruned: false`.
+or a forced `language`) skip stale removal and report `pruned: false`. When something outside
+the project rewrote a file but restored its size and mtime, the manifest cannot see the edit —
+re-crawl with `force: true` to re-parse everything.
 
 ### What discovery skips
 
@@ -201,7 +203,9 @@ flowchart TD
 
 1. **`crawl_project`** — index once per session. Re-run after edits: it is incremental,
    so the second crawl only re-parses files whose content actually changed and reports the
-   split as `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`.
+   split as `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`. If the
+   manifest can be wrong — `rsync -t`, an mtime-preserving unzip, clock skew, a checkout that
+   restored an old timestamp — pass `force: true` to re-parse every file.
 2. **`find_entry_points`** — see what the framework actually invokes. This is the honest
    starting set for "where does this app begin?", because `main` is often not the answer
    in a server-side framework.
@@ -512,9 +516,12 @@ that most often explain a surprising "unresolved" result.
 
 #### `java`
 
-- **Records are not extracted.** A `record` declaration matches none of the declaration
-  kinds the parser handles, so the file is indexed but the record type, its components
-  and its accessors do not exist in the graph.
+- **Records are indexed as classes, not as records.** A `record` becomes a `class` node
+  carrying `record: true`; its components become `private final` fields with one
+  synthesized public accessor each, and a compact constructor carries the component
+  parameters. An implicit canonical constructor is not materialised as a signature — a
+  record with no declared constructor only gets a synthetic `#<init>` when a call
+  resolves to it. An accessor you declare yourself wins over the synthesized one.
 - **Method references have no call edge.** `this::handle` and `Foo::bar` are not treated
   as call targets, so they never appear in `get_callers`. Calls *inside* a lambda body
   are indexed normally — it is the reference itself that is invisible.

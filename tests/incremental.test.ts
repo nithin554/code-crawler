@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { crawlProject } from "../src/crawler.js";
+import { type CrawlOptions, crawlProject } from "../src/crawler.js";
 import { GraphStore } from "../src/graph/store.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
@@ -23,8 +23,8 @@ afterEach(() => {
   fs.rmSync(project, { recursive: true, force: true });
 });
 
-function crawl() {
-  return crawlProject(store, project, loadConfig().excludeDirs, {});
+function crawl(options: Partial<CrawlOptions> = {}) {
+  return crawlProject(store, project, loadConfig().excludeDirs, options);
 }
 
 /** SQLite rowid per node id: stable only while a row is not rewritten. */
@@ -135,5 +135,40 @@ describe("incremental crawl", () => {
     const result = await crawl();
     expect(result.filesAdded).toBe(8);
     expect(result.filesUnchanged).toBe(0);
+  });
+
+  it("replays a same-size edit with a restored mtime until forced", async () => {
+    await crawl();
+    expect(store.getNode("com.acme.OrderService#place")).not.toBeNull();
+
+    const target = path.join(project, "com", "acme", "OrderService.java");
+    const record = store.listFileRecords().get(target);
+    if (!record) throw new Error("manifest record missing");
+    const source = fs.readFileSync(target, "utf8");
+    // `place` -> `fetch` keeps the byte length, so the size check cannot notice,
+    // and putting the mtime back hides the edit from the timestamp check too.
+    // This is the state `git checkout`, `rsync -t` and unzip leave behind.
+    fs.writeFileSync(target, source.replaceAll("place", "fetch"));
+    // The filesystem rounds the timestamp we request, so nudge in half
+    // millisecond steps until it reports the millisecond the crawler stored.
+    const seconds = record.mtimeMs / 1000;
+    let restored = false;
+    for (let step = 0; step < 20 && !restored; step++) {
+      fs.utimesSync(target, seconds, seconds + step / 2000);
+      restored = Math.trunc(fs.statSync(target).mtimeMs) === record.mtimeMs;
+    }
+    expect(restored).toBe(true);
+    expect(fs.statSync(target).size).toBe(record.size);
+
+    const stale = await crawl();
+    expect(stale.filesUnchanged).toBe(8);
+    expect(stale.filesUpdated).toBe(0);
+    expect(store.getNode("com.acme.OrderService#fetch")).toBeNull();
+
+    const forced = await crawl({ force: true });
+    expect(forced.filesUnchanged).toBe(0);
+    expect(forced.filesUpdated).toBe(8);
+    expect(store.getNode("com.acme.OrderService#fetch")).not.toBeNull();
+    expect(store.getNode("com.acme.OrderService#place")).toBeNull();
   });
 });
