@@ -1,6 +1,6 @@
-﻿import { describe, it, expect } from "vitest";
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 import { typescriptConfig } from "../src/parser/languages/typescript.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "typescript", "sample");
@@ -30,14 +30,18 @@ describe("TypeScript parser", () => {
       "src.repository.OrderRepository#create",
       "src.repository.OrderRepository#find",
     ]);
-    expect(pf.fields.map((f) => [f.id, f.type])).toEqual([["src.repository.OrderRepository$rows", "Order[]"]]);
+    expect(pf.fields.map((f) => [f.id, f.type])).toEqual([
+      ["src.repository.OrderRepository$rows", "Order[]"],
+    ]);
   });
 
   it("models decorators as annotations", async () => {
     const pf = await parse("src/controller.ts");
     const controller = pf.types.find((t) => t.id === "src.controller.OrderController");
     expect(controller?.annotations.map((a) => a.name)).toEqual(["Controller"]);
-    expect(pf.methods.find((m) => m.name === "read")?.annotations.map((a) => a.name)).toEqual(["Get"]);
+    expect(pf.methods.find((m) => m.name === "read")?.annotations.map((a) => a.name)).toEqual([
+      "Get",
+    ]);
   });
 
   it("derives NestJS routes from controller and method decorators", async () => {
@@ -73,7 +77,9 @@ describe("TypeScript parser", () => {
     const handlers = pf.methods.filter((m) => m.id.includes("<anonymous@"));
     expect(handlers.map((m) => m.entryPoint?.kind)).toEqual(["http", "http"]);
     // Calls inside the inline arrow keep the synthetic handler as their enclosure.
-    expect(pf.callSites.find((c) => c.name === "place")?.enclosingMethodId).toBe("module:src.routes#<anonymous@7>");
+    expect(pf.callSites.find((c) => c.name === "place")?.enclosingMethodId).toBe(
+      "module:src.routes#<anonymous@7>"
+    );
   });
 
   it("records dynamic import() as reflection", async () => {

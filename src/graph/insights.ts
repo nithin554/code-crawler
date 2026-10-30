@@ -5,9 +5,10 @@
  * breaks if a symbol changes, a one-shot explanation of a symbol, call cycles,
  * and graph export in diagram formats.
  */
-import type { GraphStore } from "./store.js";
-import type { EdgeKind, NodeKind } from "./schema.js";
+
 import {
+  type DecoratorInfo,
+  edgeLine,
   findEntryPoints,
   findImplementations,
   findInjections,
@@ -18,15 +19,15 @@ import {
   getDecorators,
   getSubgraph,
   nodeToRef,
+  type Row,
   resolveNode,
   rowToRef,
-  sqlKinds,
-  edgeLine,
-  type DecoratorInfo,
-  type Row,
   type SymbolRef,
+  sqlKinds,
   type WiringEdge,
 } from "./queries.js";
+import type { EdgeKind, NodeKind } from "./schema.js";
+import type { GraphStore } from "./store.js";
 
 const UNKNOWN_PREFIX = "__unknown__:";
 
@@ -103,10 +104,7 @@ export function findUnresolved(
   opts: UnresolvedQueryOptions = {}
 ): UnresolvedReport {
   const limit = Math.max(1, opts.limit ?? 2000);
-  const conditions = [
-    "e.kind = 'CALLS'",
-    "json_extract(e.properties, '$.resolved') = 0",
-  ];
+  const conditions = ["e.kind = 'CALLS'", "json_extract(e.properties, '$.resolved') = 0"];
   const params: unknown[] = [];
   if (opts.kind) {
     conditions.push("s.kind = ?");
@@ -779,9 +777,7 @@ function cycleSample(
   let current: string = start;
 
   for (let step = 0; step < component.length + 1; step++) {
-    const candidates = (adj.get(current) ?? [])
-      .filter((n) => inComponent.has(n))
-      .sort();
+    const candidates = (adj.get(current) ?? []).filter((n) => inComponent.has(n)).sort();
     const next: string | undefined = candidates.find((n) => n === start || !seen.has(n));
     if (next === undefined) break;
     path.push(next);
@@ -837,7 +833,8 @@ export function exportGraph(store: GraphStore, opts: ExportOptions = {}): GraphE
   const format = opts.format ?? "mermaid";
   const direction = opts.direction ?? "LR";
   const limit = Math.max(1, opts.limit ?? 200);
-  const edgeKinds = opts.edgeKinds && opts.edgeKinds.length > 0 ? opts.edgeKinds : EXPORT_EDGE_KINDS;
+  const edgeKinds =
+    opts.edgeKinds && opts.edgeKinds.length > 0 ? opts.edgeKinds : EXPORT_EDGE_KINDS;
 
   let nodes: SymbolRef[];
   let edges: { source: string; target: string; kind: string }[];
@@ -877,7 +874,9 @@ export function exportGraph(store: GraphStore, opts: ExportOptions = {}): GraphE
 
   const index = new Map<string, number>();
   const ordered = [...nodes].sort((a, b) => a.qualifiedName.localeCompare(b.qualifiedName));
-  ordered.forEach((n, i) => index.set(n.id, i));
+  ordered.forEach((n, i) => {
+    index.set(n.id, i);
+  });
 
   const seen = new Set<string>();
   const rendered = edges.filter((e) => {

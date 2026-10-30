@@ -1,6 +1,6 @@
-import type { GraphStore } from "./store.js";
-import { annotationNodeId } from "./schema.js";
 import type { EdgeKind, GraphNode, NodeKind } from "./schema.js";
+import { annotationNodeId } from "./schema.js";
+import type { GraphStore } from "./store.js";
 
 /**
  * Traversal queries over the property graph.
@@ -92,7 +92,12 @@ export function getCallers(
   opts: CallerQueryOptions = {}
 ): {
   target: SymbolRef;
-  callers: ({ caller: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind } & FlowEdgeInfo)[];
+  callers: ({
+    caller: SymbolRef;
+    depth: number;
+    callSiteLine?: number;
+    edgeKind: EdgeKind;
+  } & FlowEdgeInfo)[];
 } | null {
   const target = resolveNode(store, symbol);
   if (!target) return null;
@@ -103,7 +108,7 @@ export function getCallers(
   const kinds = traversalEdgeKinds(opts);
 
   if (!transitive) {
-    const rows = store.raw<(RowWithEdge & { edge_kind: EdgeKind })>(
+    const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
       `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
               e.properties AS edge_props, e.kind AS edge_kind
        FROM edges e
@@ -126,7 +131,7 @@ export function getCallers(
     };
   }
 
-  const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
+  const rows = store.raw<RowWithEdge & { depth: number; edge_kind: EdgeKind }>(
     `WITH RECURSIVE callers(id, depth, edge_kind, edge_props) AS (
        SELECT e.source, 1, e.kind, e.properties
        FROM edges e
@@ -180,7 +185,12 @@ export function getCallees(
   opts: CalleeQueryOptions = {}
 ): {
   source: SymbolRef;
-  callees: ({ callee: SymbolRef; depth: number; callSiteLine?: number; edgeKind: EdgeKind } & FlowEdgeInfo)[];
+  callees: ({
+    callee: SymbolRef;
+    depth: number;
+    callSiteLine?: number;
+    edgeKind: EdgeKind;
+  } & FlowEdgeInfo)[];
 } | null {
   const source = resolveNode(store, symbol);
   if (!source) return null;
@@ -191,7 +201,7 @@ export function getCallees(
   const kinds = traversalEdgeKinds(opts);
 
   if (!transitive) {
-    const rows = store.raw<(RowWithEdge & { edge_kind: EdgeKind })>(
+    const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
       `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
               e.properties AS edge_props, e.kind AS edge_kind
        FROM edges e
@@ -214,7 +224,7 @@ export function getCallees(
     };
   }
 
-  const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
+  const rows = store.raw<RowWithEdge & { depth: number; edge_kind: EdgeKind }>(
     `WITH RECURSIVE callees(id, depth, edge_kind, edge_props) AS (
        SELECT e.target, 1, e.kind, e.properties
        FROM edges e
@@ -389,7 +399,9 @@ export function traceExecution(
        WHERE a.kind = 'ADVISES'`
     : "";
 
-  const rows = store.raw<(RowWithEdge & { depth: number; via: EdgeKind | "INTERCEPT" | null; step_props: string | null })>(
+  const rows = store.raw<
+    RowWithEdge & { depth: number; via: EdgeKind | "INTERCEPT" | null; step_props: string | null }
+  >(
     `WITH RECURSIVE flow(source, target, kind, properties, advice_hop) AS (
        SELECT source, target, kind, properties, 0 FROM edges WHERE kind IN (${base})
        ${interceptJoin}
@@ -459,23 +471,21 @@ export function getSubgraph(
   if (!center) return { center: null, nodes: [], edges: [] };
 
   const radius = Math.max(1, opts.radius ?? 2);
-  const edgeKinds =
-    opts.edgeKinds ??
-    [
-      "CALLS",
-      "DYNAMIC_DISPATCH",
-      "ADVISES",
-      "DECLARED_IN",
-      "CONTAINS",
-      "EXTENDS",
-      "IMPLEMENTS",
-      "ANNOTATED_WITH",
-      "REFERENCES",
-      "IMPORTS",
-      "REFLECTS",
-      "INJECTS",
-      "ROUTES",
-    ];
+  const edgeKinds = opts.edgeKinds ?? [
+    "CALLS",
+    "DYNAMIC_DISPATCH",
+    "ADVISES",
+    "DECLARED_IN",
+    "CONTAINS",
+    "EXTENDS",
+    "IMPLEMENTS",
+    "ANNOTATED_WITH",
+    "REFERENCES",
+    "IMPORTS",
+    "REFLECTS",
+    "INJECTS",
+    "ROUTES",
+  ];
   const limit = opts.limit ?? 500;
 
   const kinds = edgeKinds.map((k) => `'${k}'`).join(",");
@@ -509,7 +519,12 @@ export function getSubgraph(
   if (ids.length === 0) return { center: nodeToRef(center), nodes, edges: [] };
 
   const placeholders = ids.map(() => "?").join(",");
-  const edgeRows = store.raw<{ source: string; target: string; kind: EdgeKind; properties: string }>(
+  const edgeRows = store.raw<{
+    source: string;
+    target: string;
+    kind: EdgeKind;
+    properties: string;
+  }>(
     `SELECT source, target, kind, properties
      FROM edges
      WHERE kind IN (${kinds})
@@ -589,7 +604,10 @@ export function searchSymbols(
 
 /** Turn a free-text query into an FTS5 prefix expression, e.g. `"com"* AND "ord"*`. */
 function ftsPrefixQuery(q: string): string | null {
-  const tokens = q.split(/[^a-z0-9_]+/).filter(Boolean).slice(0, 8);
+  const tokens = q
+    .split(/[^a-z0-9_]+/)
+    .filter(Boolean)
+    .slice(0, 8);
   if (tokens.length === 0) return null;
   return tokens.map((t) => `"${t}"*`).join(" AND ");
 }
@@ -668,7 +686,7 @@ export function findImplementations(
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
 
-  const rows = store.raw<(Row & { depth: number; via: "EXTENDS" | "IMPLEMENTS" })>(
+  const rows = store.raw<Row & { depth: number; via: "EXTENDS" | "IMPLEMENTS" }>(
     `WITH RECURSIVE impl(id, depth, via) AS (
        SELECT e.source, 1, e.kind
        FROM edges e
@@ -870,16 +888,11 @@ export function findAnnotated(
   const limit = opts.limit ?? store.defaultLimit ?? 50;
   const kindClause = opts.kind ? "AND n.kind = ?" : "";
 
-  const params: unknown[] = [
-    annotationNodeId(name),
-    name,
-    `%.${name}`,
-    `%"name":"${name}"%`,
-  ];
+  const params: unknown[] = [annotationNodeId(name), name, `%.${name}`, `%"name":"${name}"%`];
   if (opts.kind) params.push(opts.kind);
   params.push(limit);
 
-  const rows = store.raw<(Row & { ann_props: string; edge_props: string })>(
+  const rows = store.raw<Row & { ann_props: string; edge_props: string }>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
             a.properties AS ann_props, e.properties AS edge_props
      FROM edges e
@@ -925,7 +938,7 @@ export function hotspots(
   // the callable nodes. The previous form ran three correlated subqueries per
   // candidate row and had to over-fetch `limit * 4` rows because `minFanIn`
   // was applied in JS.
-  const rows = store.raw<(Row & { fan_in: number; fan_out: number; advice_count: number })>(
+  const rows = store.raw<Row & { fan_in: number; fan_out: number; advice_count: number }>(
     `WITH inbound AS (
        SELECT e.target AS id,
               COUNT(DISTINCT CASE WHEN e.kind IN (${kinds}) THEN e.source END) AS fan_in,
@@ -1064,7 +1077,10 @@ export function findEntryPoints(
   );
 
   return rows.map((r) => {
-    const props = JSON.parse(r.properties) as { entryPointKind?: string; entryPointDetail?: string };
+    const props = JSON.parse(r.properties) as {
+      entryPointKind?: string;
+      entryPointDetail?: string;
+    };
     return {
       symbol: rowToRef(r),
       entryPointKind: props.entryPointKind ?? "unknown",

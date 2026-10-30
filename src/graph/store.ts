@@ -1,13 +1,13 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import type {
   EdgeKind,
+  EdgeProperties,
   GraphEdge,
   GraphNode,
   NodeKind,
   NodeProperties,
-  EdgeProperties,
 } from "./schema.js";
 
 /**
@@ -323,9 +323,7 @@ export class GraphStore {
   }
 
   getNode(id: string): GraphNode | null {
-    const row = this.db
-      .prepare("SELECT * FROM nodes WHERE id = ?")
-      .get(id) as Row | undefined;
+    const row = this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as Row | undefined;
     return row ? rowToNode(row) : null;
   }
 
@@ -343,9 +341,7 @@ export class GraphStore {
 
   /** All nodes originating from one source file (for reindex + stats). */
   getFileNodes(filePath: string): GraphNode[] {
-    const rows = this.db
-      .prepare("SELECT * FROM nodes WHERE file_path = ?")
-      .all(filePath) as Row[];
+    const rows = this.db.prepare("SELECT * FROM nodes WHERE file_path = ?").all(filePath) as Row[];
     return rows.map(rowToNode);
   }
 
@@ -500,9 +496,9 @@ export class GraphStore {
   }
 
   getMeta(key: string): string | null {
-    const row = this.db
-      .prepare("SELECT value FROM crawl_meta WHERE key = ?")
-      .get(key) as { value: string } | undefined;
+    const row = this.db.prepare("SELECT value FROM crawl_meta WHERE key = ?").get(key) as
+      | { value: string }
+      | undefined;
     return row?.value ?? null;
   }
 
@@ -526,7 +522,9 @@ export class GraphStore {
 
   clearAll(): void {
     const tx = this.db.transaction(() => {
-      this.db.exec("DELETE FROM edges; DELETE FROM nodes; DELETE FROM files; DELETE FROM crawl_meta;");
+      this.db.exec(
+        "DELETE FROM edges; DELETE FROM nodes; DELETE FROM files; DELETE FROM crawl_meta;"
+      );
       this.setMeta("schema_version", String(SCHEMA_VERSION));
     });
     tx();

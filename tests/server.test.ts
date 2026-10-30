@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
 import { GraphStore } from "../src/graph/store.js";
 import { createServer } from "../src/server.js";
-import { loadConfig } from "../src/config.js";
-import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
@@ -29,7 +29,10 @@ afterEach(async () => {
   store.close();
 });
 
-async function callTool<T = Record<string, unknown>>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+async function callTool<T = Record<string, unknown>>(
+  name: string,
+  args: Record<string, unknown> = {}
+): Promise<T> {
   const result = await client.callTool({ name, arguments: args });
   const text = result.content.find((c) => c.type === "text")?.text;
   if (!text) throw new Error(`tool ${name} returned no text`);
@@ -73,10 +76,12 @@ describe("MCP server tools", () => {
   });
 
   it("crawl_project -> index_status round trip", async () => {
-    const crawl = await callTool<{ ok: boolean; filesParsed: number; resolvedCalls: number; unresolvedCalls: number }>(
-      "crawl_project",
-      { path: FIXTURES }
-    );
+    const crawl = await callTool<{
+      ok: boolean;
+      filesParsed: number;
+      resolvedCalls: number;
+      unresolvedCalls: number;
+    }>("crawl_project", { path: FIXTURES });
     expect(crawl.ok).toBe(true);
     expect(crawl.filesParsed).toBe(8);
     expect(crawl.resolvedCalls).toBe(15);
@@ -89,7 +94,9 @@ describe("MCP server tools", () => {
 
   it("search_symbols finds methods", async () => {
     await callTool("crawl_project", { path: FIXTURES });
-    const r = await callTool<{ results: { qualifiedName: string }[] }>("search_symbols", { query: "place" });
+    const r = await callTool<{ results: { qualifiedName: string }[] }>("search_symbols", {
+      query: "place",
+    });
     expect(r.results.map((x) => x.qualifiedName)).toEqual(["com.acme.OrderService#place"]);
   });
 
@@ -107,10 +114,9 @@ describe("MCP server tools", () => {
 
   it("get_callees returns transitive callees", async () => {
     await callTool("crawl_project", { path: FIXTURES });
-    const r = await callTool<{ callees: { callee: { qualifiedName: string } }[] }>(
-      "get_callees",
-      { symbol: "com.acme.Main#main" }
-    );
+    const r = await callTool<{ callees: { callee: { qualifiedName: string } }[] }>("get_callees", {
+      symbol: "com.acme.Main#main",
+    });
     const names = r.callees.map((c) => c.callee.qualifiedName);
     expect(names).toContain("com.acme.Tracking#dispatch");
     expect(names).toContain("com.acme.OrderRepository#create");
@@ -131,10 +137,13 @@ describe("MCP server tools", () => {
 
   it("get_subgraph returns a neighborhood", async () => {
     await callTool("crawl_project", { path: FIXTURES });
-    const r = await callTool<{ center: { qualifiedName: string }; nodeCount: number }>("get_subgraph", {
-      symbol: "com.acme.OrderService#place",
-      radius: 1,
-    });
+    const r = await callTool<{ center: { qualifiedName: string }; nodeCount: number }>(
+      "get_subgraph",
+      {
+        symbol: "com.acme.OrderService#place",
+        radius: 1,
+      }
+    );
     expect(r.center.qualifiedName).toBe("com.acme.OrderService#place");
     expect(r.nodeCount).toBeGreaterThanOrEqual(5);
   });
@@ -216,15 +225,20 @@ describe("MCP server P3 analysis tools", () => {
 
   it("impact_analysis aggregates the callers of a type's members", async () => {
     await callTool("crawl_project", { path: FIXTURES });
-    const r = await callTool<{ summary: { totalCallers: number; risk: string } }>("impact_analysis", {
-      symbol: "com.acme.OrderService",
-    });
+    const r = await callTool<{ summary: { totalCallers: number; risk: string } }>(
+      "impact_analysis",
+      {
+        symbol: "com.acme.OrderService",
+      }
+    );
     expect(r.summary.totalCallers).toBeGreaterThan(0);
     expect(r.summary.risk).toBe("high");
   });
 
   it("impact_analysis returns an error for an unknown symbol", async () => {
-    const r = await callTool<{ ok: boolean; error: string }>("impact_analysis", { symbol: "com.nope.X" });
+    const r = await callTool<{ ok: boolean; error: string }>("impact_analysis", {
+      symbol: "com.nope.X",
+    });
     expect(r.ok).toBe(false);
     expect(r.error).toContain("com.nope.X");
   });
@@ -299,10 +313,13 @@ describe("MCP server token budgeting", () => {
 
   it("paginates callers of a widely called method", async () => {
     await callTool("crawl_project", { path: FIXTURES });
-    const r = await callTool<{ count: number; callers: unknown[]; page: { truncated: boolean } }>("get_callers", {
-      symbol: "com.acme.OrderService#place",
-      max_tokens: 120,
-    });
+    const r = await callTool<{ count: number; callers: unknown[]; page: { truncated: boolean } }>(
+      "get_callers",
+      {
+        symbol: "com.acme.OrderService#place",
+        max_tokens: 120,
+      }
+    );
     expect(r.count).toBeGreaterThan(0);
     expect(r.callers.length).toBeLessThanOrEqual(r.count);
   });
@@ -311,7 +328,11 @@ describe("MCP server token budgeting", () => {
     await callTool("crawl_project", { path: FIXTURES });
     const cases: Array<[string, Record<string, unknown>, string]> = [
       ["trace_execution", { symbol: "com.acme.Main#main" }, "steps"],
-      ["trace_path", { source: "com.acme.Main#main", target: "com.acme.OrderService#place" }, "paths"],
+      [
+        "trace_path",
+        { source: "com.acme.Main#main", target: "com.acme.OrderService#place" },
+        "paths",
+      ],
       ["find_aspects", {}, "aspects"],
       ["get_decorators", { symbol: "com.acme.OrderService", include_members: true }, "members"],
       ["find_external_dependencies", {}, "packages"],
@@ -358,7 +379,10 @@ describe("MCP server token budgeting", () => {
 describe("MCP server resources & prompts", () => {
   it("exposes the schema and status resources", async () => {
     const { resources } = await client.listResources();
-    expect(resources.map((r) => r.uri).sort()).toEqual(["codecrawler://schema", "codecrawler://status"]);
+    expect(resources.map((r) => r.uri).sort()).toEqual([
+      "codecrawler://schema",
+      "codecrawler://status",
+    ]);
   });
 
   it("reads the schema resource", async () => {
@@ -384,9 +408,12 @@ describe("MCP server error boundary", () => {
       const ok = await callTool<{ ok: boolean }>("crawl_project", { path: first });
       expect(ok.ok).toBe(true);
 
-      const failure = await callTool<{ ok: boolean; error: string; hint: string }>("crawl_project", {
-        path: second,
-      });
+      const failure = await callTool<{ ok: boolean; error: string; hint: string }>(
+        "crawl_project",
+        {
+          path: second,
+        }
+      );
       expect(failure.ok).toBe(false);
       expect(failure.error).toMatch(/already contains/);
       expect(failure.hint.length).toBeGreaterThan(0);

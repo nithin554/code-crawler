@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { GraphEdge, GraphNode } from "../src/graph/schema.js";
+import { fieldNodeId, methodNodeId } from "../src/graph/schema.js";
 import { GraphStore } from "../src/graph/store.js";
-import { methodNodeId, fieldNodeId } from "../src/graph/schema.js";
-import type { GraphNode, GraphEdge } from "../src/graph/schema.js";
 
 function node(id: string, kind: GraphNode["kind"] = "method", filePath = "/tmp/A.java"): GraphNode {
   return { id, kind, qualifiedName: id, filePath, properties: {} };
@@ -62,11 +62,7 @@ describe("GraphStore", () => {
     });
 
     // Reindex Foo.java: helper removed, run survives.
-    store.replaceFile(
-      "/tmp/Foo.java",
-      [node("com.acme.Foo#run", "method", "/tmp/Foo.java")],
-      []
-    );
+    store.replaceFile("/tmp/Foo.java", [node("com.acme.Foo#run", "method", "/tmp/Foo.java")], []);
 
     expect(store.getNode("com.acme.Foo#helper")).toBeNull();
     // Cross-file edge Bar#main -> Foo#run survives.
@@ -120,7 +116,7 @@ describe("GraphStore", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-store-"));
     const dbPath = path.join(tmp, "index.db");
     try {
-      let legacy = new GraphStore(dbPath);
+      const legacy = new GraphStore(dbPath);
       legacy.db.exec("CREATE INDEX idx_nodes_name ON nodes (qualified_name)");
       legacy.close();
 

@@ -1,19 +1,4 @@
-import {
-  childOfType,
-  childrenOfType,
-  createParser,
-  fieldChild,
-  loadGrammar,
-  walk,
-  type TSNode,
-} from "../treeSitter.js";
-import { controlFlowOf, insideAny, type FlowSpec } from "../controlFlow.js";
-import {
-  DEFAULT_EXPORT_SUFFIX,
-  moduleNodeId,
-  resolveRelativeModule,
-  tsModuleId,
-} from "../moduleId.js";
+import { controlFlowOf, type FlowSpec, insideAny } from "../controlFlow.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -28,6 +13,21 @@ import type {
   RouteRegistration,
   TypeInfo,
 } from "../language.js";
+import {
+  DEFAULT_EXPORT_SUFFIX,
+  moduleNodeId,
+  resolveRelativeModule,
+  tsModuleId,
+} from "../moduleId.js";
+import {
+  childOfType,
+  childrenOfType,
+  createParser,
+  fieldChild,
+  loadGrammar,
+  type TSNode,
+  walk,
+} from "../treeSitter.js";
 
 /**
  * TypeScript / JavaScript parser (TS, TSX, JS, JSX).
@@ -64,7 +64,16 @@ const TS_FLOWS: FlowSpec[] = [
 
 const SKIP_CALL_ANCESTORS = new Set(["decorator", "import_statement"]);
 
-const HTTP_DECORATORS = new Set(["Get", "Post", "Put", "Delete", "Patch", "Head", "Options", "All"]);
+const HTTP_DECORATORS = new Set([
+  "Get",
+  "Post",
+  "Put",
+  "Delete",
+  "Patch",
+  "Head",
+  "Options",
+  "All",
+]);
 
 const HTTP_METHODS = new Set(["get", "post", "put", "delete", "patch", "head", "options", "all"]);
 
@@ -173,7 +182,9 @@ export const typescriptConfig: LanguageConfig = {
     const routes: RouteRegistration[] = [];
 
     const methodRanges: MethodRange[] = [];
-    const typeRanges: TypeRange[] = [{ startLine: 0, endLine: root.endPosition.row, id: moduleTypeId }];
+    const typeRanges: TypeRange[] = [
+      { startLine: 0, endLine: root.endPosition.row, id: moduleTypeId },
+    ];
     const fieldIds = new Set<string>();
     let defaultExportName: string | undefined;
 
@@ -255,9 +266,7 @@ export const typescriptConfig: LanguageConfig = {
     }
 
     function annotationsOf(decorators: TSNode[]): AnnotationInfo[] {
-      return decorators
-        .map((d) => annotationOf(d))
-        .filter((a): a is AnnotationInfo => a !== null);
+      return decorators.map((d) => annotationOf(d)).filter((a): a is AnnotationInfo => a !== null);
     }
 
     function annotationString(annotation: AnnotationInfo): string {
@@ -282,7 +291,10 @@ export const typescriptConfig: LanguageConfig = {
         const simple = annotation.name;
         if (HTTP_DECORATORS.has(simple)) {
           const path = annotationString(annotation);
-          return { kind: "http", detail: `${simple.toUpperCase()} ${joinPath(controllerPath, path)}`.trim() };
+          return {
+            kind: "http",
+            detail: `${simple.toUpperCase()} ${joinPath(controllerPath, path)}`.trim(),
+          };
         }
         if (simple === "MessagePattern" || simple === "EventPattern" || simple === "OnMessage") {
           return { kind: "messaging", detail: `${simple} ${annotationString(annotation)}`.trim() };
@@ -352,7 +364,10 @@ export const typescriptConfig: LanguageConfig = {
         if (param.type === "required_parameter" || param.type === "optional_parameter") {
           const pattern = fieldChild(param, "pattern") ?? param.namedChildren[0];
           if (pattern) {
-            out.push({ name: pattern.text.replace(/\s+/g, " "), type: annotationTypeText(fieldChild(param, "type")) });
+            out.push({
+              name: pattern.text.replace(/\s+/g, " "),
+              type: annotationTypeText(fieldChild(param, "type")),
+            });
           }
         } else if (param.type === "identifier") {
           out.push({ name: param.text, type: "" });
@@ -450,15 +465,22 @@ export const typescriptConfig: LanguageConfig = {
           continue;
         }
         const memberDecorators = buffer.splice(0, buffer.length);
-        for (const fieldDecorator of childrenOfType(member, "decorator")) memberDecorators.push(fieldDecorator);
+        for (const fieldDecorator of childrenOfType(member, "decorator"))
+          memberDecorators.push(fieldDecorator);
         const memberAnnotations = annotationsOf(memberDecorators);
         if (member.type === "method_definition") {
           visitMethod(member, memberAnnotations, id, injectable, controllerPath);
         } else if (member.type === "public_field_definition") {
           visitClassField(member, memberAnnotations, id, injectable);
-        } else if (member.type === "abstract_method_signature" || member.type === "method_signature") {
+        } else if (
+          member.type === "abstract_method_signature" ||
+          member.type === "method_signature"
+        ) {
           visitSignature(member, memberAnnotations, id, controllerPath);
-        } else if (member.type === "class_declaration" || member.type === "abstract_class_declaration") {
+        } else if (
+          member.type === "class_declaration" ||
+          member.type === "abstract_class_declaration"
+        ) {
           visitClass(member, memberAnnotations, id, true);
         }
       }
@@ -471,7 +493,8 @@ export const typescriptConfig: LanguageConfig = {
       injectable: boolean
     ): void {
       const nameNode =
-        fieldChild(node, "name") ?? node.namedChildren.find((c) => c.type === "property_identifier");
+        fieldChild(node, "name") ??
+        node.namedChildren.find((c) => c.type === "property_identifier");
       if (!nameNode) return;
       const name = nameNode.text;
       const declared = annotationTypeText(fieldChild(node, "type"));
@@ -493,7 +516,13 @@ export const typescriptConfig: LanguageConfig = {
         return;
       }
 
-      addField(classId, name, declared || inferExpressionType(value), node.startPosition.row, annotations);
+      addField(
+        classId,
+        name,
+        declared || inferExpressionType(value),
+        node.startPosition.row,
+        annotations
+      );
 
       const injectDecorator = annotations.find((a) => INJECT_DECORATORS.has(a.name));
       if (injectDecorator || (injectable && !declared)) {
@@ -516,7 +545,8 @@ export const typescriptConfig: LanguageConfig = {
       controllerPath: string
     ): void {
       const nameNode =
-        fieldChild(node, "name") ?? node.namedChildren.find((c) => c.type === "property_identifier");
+        fieldChild(node, "name") ??
+        node.namedChildren.find((c) => c.type === "property_identifier");
       if (!nameNode) return;
       const rawName = nameNode.text;
       visitCallable({
@@ -553,7 +583,8 @@ export const typescriptConfig: LanguageConfig = {
       controllerPath: string
     ): void {
       const nameNode =
-        fieldChild(node, "name") ?? node.namedChildren.find((c) => c.type === "property_identifier");
+        fieldChild(node, "name") ??
+        node.namedChildren.find((c) => c.type === "property_identifier");
       if (!nameNode) return;
       const rawName = nameNode.text;
       const id = `${classId}#${rawName}`;
@@ -562,7 +593,9 @@ export const typescriptConfig: LanguageConfig = {
         typeId: classId,
         name: rawName,
         isConstructor: false,
-        params: parseParams(fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters")),
+        params: parseParams(
+          fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters")
+        ),
         startLine: node.startPosition.row,
         endLine: node.endPosition.row,
         returnType: annotationTypeText(fieldChild(node, "return_type")),
@@ -570,7 +603,12 @@ export const typescriptConfig: LanguageConfig = {
         annotations,
         entryPoint: entryPointOf(annotations, controllerPath, rawName),
       });
-      methodRanges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, id, typeId: classId });
+      methodRanges.push({
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        id,
+        typeId: classId,
+      });
     }
 
     function visitCallable(options: {
@@ -586,7 +624,8 @@ export const typescriptConfig: LanguageConfig = {
       injectable: boolean;
       isConstructor: boolean;
     }): void {
-      const { name, node, paramsNode, returnTypeNode, bodyNode, annotations, ownerTypeId } = options;
+      const { name, node, paramsNode, returnTypeNode, bodyNode, annotations, ownerTypeId } =
+        options;
       const isConstructor = options.isConstructor;
       const id = `${ownerTypeId}#${isConstructor ? "<init>" : name}`;
       const params = parseParams(paramsNode);
@@ -604,7 +643,12 @@ export const typescriptConfig: LanguageConfig = {
         annotations,
         entryPoint: options.entryPoint,
       });
-      methodRanges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, id, typeId: ownerTypeId });
+      methodRanges.push({
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        id,
+        typeId: ownerTypeId,
+      });
 
       const locals = new Map<string, string>();
       for (const param of params) {
@@ -748,7 +792,8 @@ export const typescriptConfig: LanguageConfig = {
 
     function visitTypeAlias(node: TSNode, decorators: AnnotationInfo[], exported: boolean): void {
       const nameNode = fieldChild(node, "name") ?? childOfType(node, "type_identifier");
-      const value = fieldChild(node, "value") ?? node.namedChildren.find((c) => c.type === "object_type");
+      const value =
+        fieldChild(node, "value") ?? node.namedChildren.find((c) => c.type === "object_type");
       if (!nameNode || !value || value.type !== "object_type") return;
       const name = nameNode.text;
       const id = `${moduleId}.${name}`;
@@ -874,7 +919,9 @@ export const typescriptConfig: LanguageConfig = {
       const isRelative = specifier.startsWith(".");
       const aliasMatch = specifier.startsWith("@/") || specifier.startsWith("~/");
       const candidateModule = isRelative
-        ? normalizeResolved(resolveRelativeModule(moduleId, stripSpecifierExtension(specifier)) ?? specifier)
+        ? normalizeResolved(
+            resolveRelativeModule(moduleId, stripSpecifierExtension(specifier)) ?? specifier
+          )
         : aliasMatch
           ? specifier.slice(2).replace(/\//g, ".")
           : specifier;
@@ -883,14 +930,24 @@ export const typescriptConfig: LanguageConfig = {
 
       const clause = childOfType(node, "import_clause");
       if (!clause) {
-        addImport({ fqn: specifier, simpleName: specifier, isStatic: false, module: candidateModule, external });
+        addImport({
+          fqn: specifier,
+          simpleName: specifier,
+          isStatic: false,
+          module: candidateModule,
+          external,
+        });
         return;
       }
 
       for (const child of clause.namedChildren) {
         if (child.type === "identifier") {
           const binding = child.text;
-          bindSymbol(binding, external ? specifier : `${moduleCandidate}${DEFAULT_EXPORT_SUFFIX}`, external ? null : moduleCandidate);
+          bindSymbol(
+            binding,
+            external ? specifier : `${moduleCandidate}${DEFAULT_EXPORT_SUFFIX}`,
+            external ? null : moduleCandidate
+          );
           addImport({
             fqn: external ? `${specifier}.default` : `${candidateModule}.default`,
             simpleName: binding,
@@ -940,7 +997,11 @@ export const typescriptConfig: LanguageConfig = {
 
     // ------------------------------------------------- top-level declarations
 
-    function handleDeclaration(node: TSNode, decorators: AnnotationInfo[], exported: boolean): void {
+    function handleDeclaration(
+      node: TSNode,
+      decorators: AnnotationInfo[],
+      exported: boolean
+    ): void {
       switch (node.type) {
         case "class_declaration":
         case "abstract_class_declaration":
@@ -990,7 +1051,8 @@ export const typescriptConfig: LanguageConfig = {
             if (nameNode) defaultExportName = nameNode.text;
           }
         } else {
-          const value = fieldChild(child, "value") ?? child.namedChildren.find((c) => c.type === "identifier");
+          const value =
+            fieldChild(child, "value") ?? child.namedChildren.find((c) => c.type === "identifier");
           if (value && (value.type === "identifier" || value.type === "member_expression")) {
             defaultExportName = value.text.split(".").pop() ?? value.text;
           }
@@ -1109,7 +1171,7 @@ export const typescriptConfig: LanguageConfig = {
         const property = fieldChild(fn, "property");
         if (!property) return;
         let receiver = object ? object.text : null;
-        if (receiver && receiver.endsWith("!")) receiver = receiver.slice(0, -1);
+        if (receiver?.endsWith("!")) receiver = receiver.slice(0, -1);
         const name = property.text;
         callSites.push({
           ...base,
@@ -1141,7 +1203,11 @@ export const typescriptConfig: LanguageConfig = {
               ? "this"
               : ""
           : "";
-        if (HTTP_METHODS.has(name.toLowerCase()) && ROUTE_RECEIVERS.has(rootReceiver) && args.length >= 2) {
+        if (
+          HTTP_METHODS.has(name.toLowerCase()) &&
+          ROUTE_RECEIVERS.has(rootReceiver) &&
+          args.length >= 2
+        ) {
           const path = stringContent(args[0] ?? "");
           const handlerNode = argsNode?.namedChildren[1] ?? null;
           // Only a plain reference names a handler; anything else (arrow,
@@ -1165,7 +1231,8 @@ export const typescriptConfig: LanguageConfig = {
               name: handler,
               node: handlerNode,
               paramsNode:
-                fieldChild(handlerNode, "parameters") ?? childOfType(handlerNode, "formal_parameters"),
+                fieldChild(handlerNode, "parameters") ??
+                childOfType(handlerNode, "formal_parameters"),
               returnTypeNode: fieldChild(handlerNode, "return_type"),
               bodyNode: fieldChild(handlerNode, "body"),
               annotations: [],

@@ -12,10 +12,7 @@ import type { ParsedFile } from "./language.js";
  */
 
 interface PackedParsedFile
-  extends Omit<
-    ParsedFile,
-    "localsByMethod" | "scopeTypes" | "scopeModules" | "externalModules"
-  > {
+  extends Omit<ParsedFile, "localsByMethod" | "scopeTypes" | "scopeModules" | "externalModules"> {
   localsByMethod: Record<string, Record<string, string>>;
   scopeTypes?: Record<string, string>;
   scopeModules?: Record<string, string>;

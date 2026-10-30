@@ -93,7 +93,14 @@ export interface InjectionPoint {
 }
 
 /** Why a method is a root even though nothing in the source calls it. */
-export type EntryPointKind = "http" | "messaging" | "scheduler" | "event" | "cli" | "test" | "route";
+export type EntryPointKind =
+  | "http"
+  | "messaging"
+  | "scheduler"
+  | "event"
+  | "cli"
+  | "test"
+  | "route";
 
 export interface EntryPointInfo {
   kind: EntryPointKind;

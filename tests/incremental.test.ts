@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GraphStore } from "../src/graph/store.js";
-import { crawlProject } from "../src/crawler.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { crawlProject } from "../src/crawler.js";
+import { GraphStore } from "../src/graph/store.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
@@ -82,7 +82,10 @@ describe("incremental crawl", () => {
 
     const target = path.join(project, "com", "acme", "Order.java");
     const source = fs.readFileSync(target, "utf8");
-    const patched = source.replace(/\}\s*$/, '    public String label() {\n        return "x";\n    }\n}\n');
+    const patched = source.replace(
+      /\}\s*$/,
+      '    public String label() {\n        return "x";\n    }\n}\n'
+    );
     fs.writeFileSync(target, patched);
 
     const result = await crawl();

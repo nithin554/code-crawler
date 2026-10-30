@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GraphStore } from "../src/graph/store.js";
-import { crawlProject } from "../src/crawler.js";
-import { getCallers, getCallees } from "../src/graph/queries.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { crawlProject } from "../src/crawler.js";
+import { getCallees, getCallers } from "../src/graph/queries.js";
+import { GraphStore } from "../src/graph/store.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
@@ -52,7 +52,9 @@ describe("crawlProject", () => {
     ]);
 
     const callees = getCallees(store, "com.acme.Main#main", { transitive: true });
-    expect(callees?.callees.some((c) => c.callee.qualifiedName === "com.acme.Tracking#dispatch")).toBe(true);
+    expect(
+      callees?.callees.some((c) => c.callee.qualifiedName === "com.acme.Tracking#dispatch")
+    ).toBe(true);
   });
 
   it("creates synthetic nodes for implicit default constructors", async () => {
@@ -64,7 +66,9 @@ describe("crawlProject", () => {
 
   it("records phantom unknown symbols for unresolved calls", async () => {
     await crawlProject(store, FIXTURES, loadConfig().excludeDirs, {});
-    const phantoms = store.raw("SELECT id FROM nodes WHERE kind='unknown_symbol'") as { id: string }[];
+    const phantoms = store.raw("SELECT id FROM nodes WHERE kind='unknown_symbol'") as {
+      id: string;
+    }[];
     expect(phantoms).toEqual([{ id: "__unknown__:System.out.println" }]);
   });
 
@@ -132,7 +136,10 @@ describe("crawlProject", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-javascript-"));
     try {
       fs.writeFileSync(path.join(tmp, "app.js"), "function app() {\n  return 1;\n}\n");
-      fs.writeFileSync(path.join(tmp, "types.ts"), "export function types(): number {\n  return 2;\n}\n");
+      fs.writeFileSync(
+        path.join(tmp, "types.ts"),
+        "export function types(): number {\n  return 2;\n}\n"
+      );
 
       const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {
         language: "javascript",
@@ -156,9 +163,9 @@ describe("crawlProject", () => {
       fs.writeFileSync(b, "def b():\n    return 2\n");
 
       await crawlProject(store, first, loadConfig().excludeDirs, {});
-      await expect(
-        crawlProject(store, second, loadConfig().excludeDirs, {})
-      ).rejects.toThrow(/already contains/);
+      await expect(crawlProject(store, second, loadConfig().excludeDirs, {})).rejects.toThrow(
+        /already contains/
+      );
 
       // The failed crawl must not have mutated the first project's index.
       expect(store.getNode(a)).not.toBeNull();
@@ -300,10 +307,13 @@ describe("crawl hardening", () => {
     withProject(async (tmp) => {
       const small = path.join(tmp, "small.py");
       const big = path.join(tmp, "big.py");
+      const filler = "x".repeat(4000);
       fs.writeFileSync(small, "def small():\n    return 1\n");
-      fs.writeFileSync(big, `def big():\n    return "${"x".repeat(4000)}"\n`);
+      fs.writeFileSync(big, `def big():\n    return "${filler}"\n`);
 
-      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, { maxFileBytes: 1024 });
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {
+        maxFileBytes: 1024,
+      });
 
       expect(result.filesSkipped).toBe(1);
       expect(result.skippedFiles).toEqual([{ path: big, reason: "too-large" }]);

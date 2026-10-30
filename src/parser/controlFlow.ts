@@ -98,7 +98,5 @@ function guardText(node: TSNode, field?: string): string {
   if (!child) return "";
   const compact = child.text.replace(/\s+/g, " ").trim();
   if (!compact) return "";
-  return compact.length > MAX_GUARD_LENGTH
-    ? `${compact.slice(0, MAX_GUARD_LENGTH - 1)}…`
-    : compact;
+  return compact.length > MAX_GUARD_LENGTH ? `${compact.slice(0, MAX_GUARD_LENGTH - 1)}…` : compact;
 }

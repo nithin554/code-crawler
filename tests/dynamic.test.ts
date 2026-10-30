@@ -1,16 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import path from "node:path";
 import { readFileSync } from "node:fs";
-import { GraphStore } from "../src/graph/store.js";
-import { crawlProject, type CrawlResult } from "../src/crawler.js";
-import { initTreeSitter } from "../src/parser/treeSitter.js";
-import { parseFile, type JavaParsedFile } from "../src/parser/languages/java.js";
-import {
-  isDecoratorAnnotation,
-  matchExecution,
-  matchPointcut,
-  matchTypePattern,
-} from "../src/resolver/dynamic.js";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type CrawlResult, crawlProject } from "../src/crawler.js";
 import {
   deadCode,
   findAnnotated,
@@ -20,6 +11,15 @@ import {
   hotspots,
   traceExecution,
 } from "../src/graph/queries.js";
+import { GraphStore } from "../src/graph/store.js";
+import { type JavaParsedFile, parseFile } from "../src/parser/languages/java.js";
+import { initTreeSitter } from "../src/parser/treeSitter.js";
+import {
+  isDecoratorAnnotation,
+  matchExecution,
+  matchPointcut,
+  matchTypePattern,
+} from "../src/resolver/dynamic.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "dynamic");
 
@@ -102,10 +102,16 @@ describe("pointcut matching", () => {
     const type = parsed.types[0]!;
 
     expect(
-      matchPointcut("execution(* com.acme.*.pay(..))", pay, type.annotations, pay.annotations).matched
+      matchPointcut("execution(* com.acme.*.pay(..))", pay, type.annotations, pay.annotations)
+        .matched
     ).toBe(true);
     expect(
-      matchPointcut("execution(* com.acme.*.pay(..)) && !@annotation(Override)", pay, type.annotations, pay.annotations).matched
+      matchPointcut(
+        "execution(* com.acme.*.pay(..)) && !@annotation(Override)",
+        pay,
+        type.annotations,
+        pay.annotations
+      ).matched
     ).toBe(false);
     expect(
       matchPointcut(
@@ -146,11 +152,12 @@ describe("dynamic graph enrichment", () => {
 
     const advice = new Map(aspects[0]!.advice.map((a) => [a.method.name, a]));
     expect(advice.get("auditPayment")?.adviceKind).toBe("around");
-    expect(advice.get("auditPayment")?.advised.map((r) => r.qualifiedName).sort()).toEqual([
-      "com.acme.CardPayment#pay",
-      "com.acme.Payment#pay",
-      "com.acme.UpiPayment#pay",
-    ]);
+    expect(
+      advice
+        .get("auditPayment")
+        ?.advised.map((r) => r.qualifiedName)
+        .sort()
+    ).toEqual(["com.acme.CardPayment#pay", "com.acme.Payment#pay", "com.acme.UpiPayment#pay"]);
     expect(advice.get("beforeCheckout")?.advised.map((r) => r.qualifiedName)).toEqual([
       "com.acme.Checkout#checkout",
     ]);
@@ -178,7 +185,9 @@ describe("dynamic graph enrichment", () => {
     expect(type.decorators.map((d) => d.name)).toEqual(["Service"]);
     expect(type.decorators[0]!.decorator).toBe(false);
 
-    const method = type.members.find((m) => m.symbol.qualifiedName === "com.acme.DecoratedService#describe");
+    const method = type.members.find(
+      (m) => m.symbol.qualifiedName === "com.acme.DecoratedService#describe"
+    );
     expect(method?.decorators.map((d) => d.name)).toEqual(["Cacheable", "Transactional"]);
     expect(method?.decorators.find((d) => d.name === "Transactional")?.arguments).toEqual([
       "readOnly = true",
@@ -187,7 +196,9 @@ describe("dynamic graph enrichment", () => {
 
   it("finds symbols annotated with a given annotation", () => {
     const found = findAnnotated(store, "Transactional");
-    expect(found.map((f) => f.symbol.qualifiedName)).toEqual(["com.acme.DecoratedService#describe"]);
+    expect(found.map((f) => f.symbol.qualifiedName)).toEqual([
+      "com.acme.DecoratedService#describe",
+    ]);
     expect(found[0]!.arguments).toEqual(["readOnly = true"]);
 
     expect(findAnnotated(store, "@Aspect").map((f) => f.symbol.qualifiedName)).toEqual([

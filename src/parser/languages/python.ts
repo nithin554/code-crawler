@@ -1,19 +1,4 @@
-import {
-  childOfType,
-  childrenOfType,
-  createParser,
-  fieldChild,
-  loadGrammar,
-  sameNode,
-  walk,
-  type TSNode,
-} from "../treeSitter.js";
-import { controlFlowOf, insideAny, type FlowSpec } from "../controlFlow.js";
-import {
-  moduleNodeId,
-  pythonModuleId,
-  resolvePythonRelative,
-} from "../moduleId.js";
+import { controlFlowOf, type FlowSpec, insideAny } from "../controlFlow.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -28,6 +13,17 @@ import type {
   RouteRegistration,
   TypeInfo,
 } from "../language.js";
+import { moduleNodeId, pythonModuleId, resolvePythonRelative } from "../moduleId.js";
+import {
+  childOfType,
+  childrenOfType,
+  createParser,
+  fieldChild,
+  loadGrammar,
+  sameNode,
+  type TSNode,
+  walk,
+} from "../treeSitter.js";
 
 /**
  * Python parser.
@@ -139,7 +135,9 @@ export const pythonConfig: LanguageConfig = {
     return loadGrammar("@vscode/tree-sitter-wasm", "wasm/tree-sitter-python.wasm");
   },
   async parseFile(source, filePath, context): Promise<ParsedFile> {
-    const parser = createParser((await pythonConfig.loadGrammar()) as import("web-tree-sitter").Language);
+    const parser = createParser(
+      (await pythonConfig.loadGrammar()) as import("web-tree-sitter").Language
+    );
     const tree = parser.parse(source);
     parser.delete();
     if (!tree) throw new Error(`failed to parse ${filePath}`);
@@ -174,7 +172,9 @@ export const pythonConfig: LanguageConfig = {
     const routes: RouteRegistration[] = [];
 
     const methodRanges: MethodRange[] = [];
-    const typeRanges: TypeRange[] = [{ startLine: 0, endLine: root.endPosition.row, id: moduleTypeId }];
+    const typeRanges: TypeRange[] = [
+      { startLine: 0, endLine: root.endPosition.row, id: moduleTypeId },
+    ];
     const fieldIds = new Set<string>();
 
     const typeIdOf = (name: string, parentId: string | null): string =>
@@ -207,7 +207,12 @@ export const pythonConfig: LanguageConfig = {
         const args = argsNode
           ? argsNode.namedChildren.filter((c) => c.type !== "comment").map((c) => c.text)
           : [];
-        return { name: named.name, fqn: named.fqn, arguments: args, line: decorator.startPosition.row };
+        return {
+          name: named.name,
+          fqn: named.fqn,
+          arguments: args,
+          line: decorator.startPosition.row,
+        };
       }
       const named = calleeName(expression);
       if (!named) return null;
@@ -215,9 +220,7 @@ export const pythonConfig: LanguageConfig = {
     }
 
     function annotationsOf(decorators: TSNode[]): AnnotationInfo[] {
-      return decorators
-        .map((d) => annotationOf(d))
-        .filter((a): a is AnnotationInfo => a !== null);
+      return decorators.map((d) => annotationOf(d)).filter((a): a is AnnotationInfo => a !== null);
     }
 
     function unquote(raw: string): string {
@@ -242,7 +245,10 @@ export const pythonConfig: LanguageConfig = {
 
         if (HTTP_VERBS.has(lower) && (hasReceiver || lower.endsWith("route"))) {
           const path = stringArgument(annotation);
-          const method = lower === "route" || lower === "api_route" || lower === "websocket_route" ? "" : lower.toUpperCase();
+          const method =
+            lower === "route" || lower === "api_route" || lower === "websocket_route"
+              ? ""
+              : lower.toUpperCase();
           return { kind: "http", detail: `${method} ${path}`.trim() || qualified };
         }
         if (["task", "shared_task", "periodic_task", "celery_task"].includes(lower)) {
@@ -251,10 +257,17 @@ export const pythonConfig: LanguageConfig = {
         if (["scheduled", "cron", "interval", "periodic_task"].includes(lower)) {
           return { kind: "scheduler", detail: qualified };
         }
-        if (lower === "fixture" || qualified.endsWith(".fixture") || lower === "parametrize" || lower.startsWith("mark.")) {
+        if (
+          lower === "fixture" ||
+          qualified.endsWith(".fixture") ||
+          lower === "parametrize" ||
+          lower.startsWith("mark.")
+        ) {
           return { kind: "test", detail: qualified };
         }
-        if (["on_event", "listener", "receiver", "on_message", "subscribe", "handler"].includes(lower)) {
+        if (
+          ["on_event", "listener", "receiver", "on_message", "subscribe", "handler"].includes(lower)
+        ) {
           return { kind: "event", detail: qualified };
         }
       }
@@ -280,9 +293,10 @@ export const pythonConfig: LanguageConfig = {
         const qualified = annotation.fqn ?? annotation.name;
         const receiver = qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
         if (!annotation.arguments.length && !receiver && !lower.endsWith("route")) continue;
-        const verb = lower === "route" || lower === "api_route" || lower === "websocket_route"
-          ? "ANY"
-          : lower.toUpperCase();
+        const verb =
+          lower === "route" || lower === "api_route" || lower === "websocket_route"
+            ? "ANY"
+            : lower.toUpperCase();
         found.push({
           framework: receiver || "flask",
           httpMethod: verb,
@@ -332,7 +346,13 @@ export const pythonConfig: LanguageConfig = {
       }
     }
 
-    function addField(typeId: string, name: string, type: string, line: number, annotations: AnnotationInfo[] = []): void {
+    function addField(
+      typeId: string,
+      name: string,
+      type: string,
+      line: number,
+      annotations: AnnotationInfo[] = []
+    ): void {
       const id = `${typeId}$${name}`;
       if (fieldIds.has(id)) return;
       fieldIds.add(id);
@@ -355,7 +375,8 @@ export const pythonConfig: LanguageConfig = {
             break;
           case "typed_parameter": {
             const nameNode = param.namedChildren.find((c) => c.type === "identifier");
-            if (nameNode) out.push({ name: nameNode.text, type: typeText(fieldChild(param, "type")) });
+            if (nameNode)
+              out.push({ name: nameNode.text, type: typeText(fieldChild(param, "type")) });
             break;
           }
           case "default_parameter": {
@@ -366,7 +387,8 @@ export const pythonConfig: LanguageConfig = {
           case "typed_default_parameter": {
             const nameNode =
               fieldChild(param, "name") ?? param.namedChildren.find((c) => c.type === "identifier");
-            if (nameNode) out.push({ name: nameNode.text, type: typeText(fieldChild(param, "type")) });
+            if (nameNode)
+              out.push({ name: nameNode.text, type: typeText(fieldChild(param, "type")) });
             break;
           }
           case "list_splat_pattern":
@@ -392,7 +414,9 @@ export const pythonConfig: LanguageConfig = {
           return { name: param.text, type: "" };
         case "typed_parameter": {
           const nameNode = param.namedChildren.find((c) => c.type === "identifier");
-          return nameNode ? { name: nameNode.text, type: typeText(fieldChild(param, "type")) } : null;
+          return nameNode
+            ? { name: nameNode.text, type: typeText(fieldChild(param, "type")) }
+            : null;
         }
         case "default_parameter": {
           const nameNode = fieldChild(param, "name") ?? param.namedChildren[0];
@@ -401,7 +425,9 @@ export const pythonConfig: LanguageConfig = {
         case "typed_default_parameter": {
           const nameNode =
             fieldChild(param, "name") ?? param.namedChildren.find((c) => c.type === "identifier");
-          return nameNode ? { name: nameNode.text, type: typeText(fieldChild(param, "type")) } : null;
+          return nameNode
+            ? { name: nameNode.text, type: typeText(fieldChild(param, "type")) }
+            : null;
         }
         default:
           return null;
@@ -441,7 +467,11 @@ export const pythonConfig: LanguageConfig = {
       return out;
     }
 
-    function visitClass(node: TSNode, decorators: AnnotationInfo[], parentTypeId: string | null): void {
+    function visitClass(
+      node: TSNode,
+      decorators: AnnotationInfo[],
+      parentTypeId: string | null
+    ): void {
       const nameNode = fieldChild(node, "name") ?? childOfType(node, "identifier");
       if (!nameNode) return;
       const name = nameNode.text;
@@ -497,7 +527,7 @@ export const pythonConfig: LanguageConfig = {
       for (const assignment of statement.namedChildren) {
         if (assignment.type !== "assignment") continue;
         const left = fieldChild(assignment, "left") ?? assignment.namedChildren[0];
-        if (!left || left.type !== "identifier") continue;
+        if (left?.type !== "identifier") continue;
         const typeNode = fieldChild(assignment, "type");
         const right = fieldChild(assignment, "right");
         const type = typeNode ? typeText(typeNode) : inferExpressionType(right);
@@ -525,7 +555,12 @@ export const pythonConfig: LanguageConfig = {
       if (/^\s*async\b/.test(node.text)) modifiers.push("async");
       for (const annotation of annotations) {
         const lower = annotation.name.toLowerCase();
-        if (lower === "staticmethod" || lower === "classmethod" || lower === "property" || lower === "abstractmethod") {
+        if (
+          lower === "staticmethod" ||
+          lower === "classmethod" ||
+          lower === "property" ||
+          lower === "abstractmethod"
+        ) {
           modifiers.push(lower);
         }
       }
@@ -543,7 +578,12 @@ export const pythonConfig: LanguageConfig = {
         annotations,
         entryPoint: entryPointOf(annotations, rawName),
       });
-      methodRanges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, id, typeId: owner });
+      methodRanges.push({
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        id,
+        typeId: owner,
+      });
 
       const isHandler = annotations.some((a) => HTTP_VERBS.has(a.name.toLowerCase()));
       if (isHandler) routes.push(...decoratorRoutesOf(annotations, rawName, owner));
@@ -555,7 +595,9 @@ export const pythonConfig: LanguageConfig = {
 
       // Parameters supplied by the framework rather than by the caller.
       if (paramsNode) {
-        const methodInjects = annotations.some((a) => INJECTION_DECORATORS.has(a.name.toLowerCase()));
+        const methodInjects = annotations.some((a) =>
+          INJECTION_DECORATORS.has(a.name.toLowerCase())
+        );
         for (const param of paramsNode.namedChildren) {
           const named = paramName(param);
           if (!named) continue;
@@ -650,7 +692,8 @@ export const pythonConfig: LanguageConfig = {
       return fields.find((f) => f.typeId === ownerTypeId && f.name === attribute.text)?.type ?? "";
     }
 
-    function collectLocalsAndFields(      body: TSNode,
+    function collectLocalsAndFields(
+      body: TSNode,
       locals: Map<string, string>,
       ownerId: string,
       ownerTypeId: string | null,
@@ -664,7 +707,9 @@ export const pythonConfig: LanguageConfig = {
           const left = fieldChild(node, "left");
           const iterable = fieldChild(node, "right");
           const element = elementTypeOf(
-            iterable ? inferExpressionType(iterable) || iterableTypeOf(iterable, locals, ownerTypeId) : ""
+            iterable
+              ? inferExpressionType(iterable) || iterableTypeOf(iterable, locals, ownerTypeId)
+              : ""
           );
           if (left && element) {
             const targets = left.type === "identifier" ? [left] : left.namedChildren;
@@ -695,7 +740,8 @@ export const pythonConfig: LanguageConfig = {
           const object = fieldChild(left, "object");
           const attribute = fieldChild(left, "attribute");
           if (!object || !attribute) return;
-          if (object.type !== "identifier" || (object.text !== "self" && object.text !== "cls")) return;
+          if (object.type !== "identifier" || (object.text !== "self" && object.text !== "cls"))
+            return;
           addField(ownerTypeId, attribute.text, inferred, node.startPosition.row);
           if (inferred) locals.set(`self.${attribute.text}`, inferred);
         }
@@ -705,13 +751,25 @@ export const pythonConfig: LanguageConfig = {
 
     // -------------------------------------------------------------- imports
 
-    function moduleBindingOf(moduleText: string, alias: string | undefined, isNamespace: boolean): void {
+    function moduleBindingOf(
+      moduleText: string,
+      alias: string | undefined,
+      isNamespace: boolean
+    ): void {
       if (!moduleText) return;
-      const binding = alias ?? (isNamespace ? (moduleText.split(".")[0] ?? moduleText) : (moduleText.split(".").pop() ?? moduleText));
+      const binding =
+        alias ??
+        (isNamespace
+          ? (moduleText.split(".")[0] ?? moduleText)
+          : (moduleText.split(".").pop() ?? moduleText));
       scopeModules.set(binding, moduleText);
     }
 
-    function symbolBindingOf(moduleText: string, importedName: string, alias: string | undefined): void {
+    function symbolBindingOf(
+      moduleText: string,
+      importedName: string,
+      alias: string | undefined
+    ): void {
       const binding = alias ?? importedName;
       if (moduleText) scopeTypes.set(binding, `${moduleText}.${importedName}`);
       else scopeTypes.set(binding, importedName);
@@ -758,7 +816,8 @@ export const pythonConfig: LanguageConfig = {
       } else {
         const prefix = childOfType(statement, "import_prefix");
         if (prefix) level = prefix.text.length;
-        const moduleNode = fieldChild(statement, "module_name") ?? childOfType(statement, "dotted_name");
+        const moduleNode =
+          fieldChild(statement, "module_name") ?? childOfType(statement, "dotted_name");
         moduleText = moduleNode?.text ?? "";
       }
       if (level > 0) moduleText = resolvePythonRelative(moduleId, isPackageFile, level, moduleText);
@@ -766,7 +825,12 @@ export const pythonConfig: LanguageConfig = {
       const moduleNode = fieldChild(statement, "module_name") ?? relative;
       const wildcard = childOfType(statement, "wildcard_import");
       if (wildcard) {
-        imports.push({ fqn: `${moduleText}.*`, simpleName: "*", isStatic: false, module: moduleText });
+        imports.push({
+          fqn: `${moduleText}.*`,
+          simpleName: "*",
+          isStatic: false,
+          module: moduleText,
+        });
         continue;
       }
       for (const nameNode of statement.namedChildren) {
@@ -932,7 +996,7 @@ export const pythonConfig: LanguageConfig = {
         }
         if (HTTP_VERBS.has(name.toLowerCase()) && ROUTE_RECEIVERS.has(rootReceiver)) {
           const path = args[0] ? unquote(args[0]) : "";
-          const handler = args[1] ? args[1].split(".").pop() ?? "" : "";
+          const handler = args[1] ? (args[1].split(".").pop() ?? "") : "";
           if (handler) {
             routes.push({
               framework: "http",

@@ -1,6 +1,6 @@
-﻿import { describe, it, expect } from "vitest";
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 import { pythonConfig } from "../src/parser/languages/python.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "python", "sample");
@@ -18,7 +18,10 @@ describe("Python parser", () => {
 
   it("extracts types, methods and fields", async () => {
     const pf = await parse("app/repository.py");
-    expect(pf.types.map((t) => t.id)).toEqual(["module:app.repository", "app.repository.OrderRepository"]);
+    expect(pf.types.map((t) => t.id)).toEqual([
+      "module:app.repository",
+      "app.repository.OrderRepository",
+    ]);
     expect(pf.methods.map((m) => m.id)).toEqual([
       "app.repository.OrderRepository#<init>",
       "app.repository.OrderRepository#create",
@@ -35,7 +38,9 @@ describe("Python parser", () => {
     const service = pf.types.find((t) => t.id === "app.service.OrderService");
     expect(service?.annotations.map((a) => a.name)).toEqual(["injectable"]);
     const api = await parse("app/api.py");
-    expect(api.methods.find((m) => m.name === "read_order")?.annotations.map((a) => a.name)).toEqual(["get"]);
+    expect(
+      api.methods.find((m) => m.name === "read_order")?.annotations.map((a) => a.name)
+    ).toEqual(["get"]);
   });
 
   it("records constructor parameter injection", async () => {
@@ -58,12 +63,17 @@ describe("Python parser", () => {
     ]);
     // Depends()-supplied parameters are framework-injected, not call sites.
     expect(pf.injections?.length).toBe(2);
-    expect(pf.injections?.every((i) => i.type === "OrderService" && i.framework === "fastapi")).toBe(true);
+    expect(
+      pf.injections?.every((i) => i.type === "OrderService" && i.framework === "fastapi")
+    ).toBe(true);
   });
 
   it("records dynamic imports and getattr as reflection", async () => {
     const pf = await parse("app/dynamic.py");
-    expect(pf.reflectiveRefs?.map((r) => r.mechanism)).toEqual(["importlib.import_module", "getattr"]);
+    expect(pf.reflectiveRefs?.map((r) => r.mechanism)).toEqual([
+      "importlib.import_module",
+      "getattr",
+    ]);
     expect(pf.reflectiveRefs?.[0].target).toContain("app.plugins.");
   });
 
@@ -80,7 +90,9 @@ describe("Python parser", () => {
       enclosingTypeId: "app.service.OrderService",
       enclosingMethodId: "app.service.OrderService#place",
     });
-    expect(pf.callSites.find((c) => c.name === "audit")?.enclosingMethodId).toBe("app.service.OrderService#place");
+    expect(pf.callSites.find((c) => c.name === "audit")?.enclosingMethodId).toBe(
+      "app.service.OrderService#place"
+    );
   });
 
   it("annotates call sites with their enclosing control flow", async () => {
@@ -90,7 +102,9 @@ describe("Python parser", () => {
     expect(guarded?.controlFlow?.kinds).toContain("branch");
     expect(guarded?.controlFlow?.guards.length).toBeGreaterThan(0);
     // The raise sits behind the guard, so its call site carries it too.
-    expect(pf.callSites.find((c) => c.name === "ValueError")?.controlFlow?.guards).toEqual(["not order_id"]);
+    expect(pf.callSites.find((c) => c.name === "ValueError")?.controlFlow?.guards).toEqual([
+      "not order_id",
+    ]);
   });
 
   it("infers element types for container iteration", async () => {
@@ -101,10 +115,18 @@ describe("Python parser", () => {
   it("records imported modules for resolution", async () => {
     const pf = await parse("app/service.py");
     expect(pf.imports).toContainEqual(
-      expect.objectContaining({ module: "app.repository", importedName: "OrderRepository", simpleName: "OrderRepository" }),
+      expect.objectContaining({
+        module: "app.repository",
+        importedName: "OrderRepository",
+        simpleName: "OrderRepository",
+      })
     );
     const api = await parse("app/api.py");
     // One import per statement, no duplicates from the module name.
-    expect(api.imports.map((i) => i.fqn)).toEqual(["fastapi.APIRouter", "fastapi.Depends", "app.service.OrderService"]);
+    expect(api.imports.map((i) => i.fqn)).toEqual([
+      "fastapi.APIRouter",
+      "fastapi.Depends",
+      "app.service.OrderService",
+    ]);
   });
 });

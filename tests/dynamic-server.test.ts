@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
 import { GraphStore } from "../src/graph/store.js";
 import { createServer } from "../src/server.js";
-import { loadConfig } from "../src/config.js";
-import path from "node:path";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "dynamic");
 
@@ -28,7 +28,10 @@ afterEach(async () => {
   store.close();
 });
 
-async function callTool<T = Record<string, unknown>>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+async function callTool<T = Record<string, unknown>>(
+  name: string,
+  args: Record<string, unknown> = {}
+): Promise<T> {
   const result = await client.callTool({ name, arguments: args });
   const text = result.content.find((c) => c.type === "text")?.text;
   if (!text) throw new Error(`tool ${name} returned no text`);
@@ -60,10 +63,10 @@ describe("dynamic tracing tools", () => {
   });
 
   it("find_implementations lists interface implementers", async () => {
-    const r = await callTool<{ implementationCount: number; implementations: { type: { qualifiedName: string }; via: string }[] }>(
-      "find_implementations",
-      { symbol: "com.acme.Payment" }
-    );
+    const r = await callTool<{
+      implementationCount: number;
+      implementations: { type: { qualifiedName: string }; via: string }[];
+    }>("find_implementations", { symbol: "com.acme.Payment" });
     expect(r.implementationCount).toBe(2);
     expect(r.implementations.map((i) => i.type.qualifiedName)).toEqual([
       "com.acme.CardPayment",
@@ -77,7 +80,11 @@ describe("dynamic tracing tools", () => {
       aspectCount: number;
       aspects: {
         aspect: { qualifiedName: string };
-        advice: { method: { name: string }; adviceKind: string; advised: { qualifiedName: string }[] }[];
+        advice: {
+          method: { name: string };
+          adviceKind: string;
+          advised: { qualifiedName: string }[];
+        }[];
       }[];
     }>("find_aspects");
 
@@ -95,12 +102,17 @@ describe("dynamic tracing tools", () => {
   it("get_decorators lists type and member decorators", async () => {
     const r = await callTool<{
       decorators: { name: string; decorator: boolean; line?: number }[];
-      members: { symbol: { qualifiedName: string }; decorators: { name: string; arguments: string[] }[] }[];
+      members: {
+        symbol: { qualifiedName: string };
+        decorators: { name: string; arguments: string[] }[];
+      }[];
     }>("get_decorators", { symbol: "com.acme.DecoratedService", include_members: true });
 
     expect(r.decorators.map((d) => d.name)).toEqual(["Service"]);
     expect(r.decorators[0]!.decorator).toBe(false);
-    const describe = r.members.find((m) => m.symbol.qualifiedName === "com.acme.DecoratedService#describe")!;
+    const describe = r.members.find(
+      (m) => m.symbol.qualifiedName === "com.acme.DecoratedService#describe"
+    )!;
     expect(describe.decorators.map((d) => d.name)).toEqual(["Cacheable", "Transactional"]);
     const transactional = describe.decorators.find((d) => d.name === "Transactional")!;
     expect(transactional.arguments).toEqual(["readOnly = true"]);
@@ -117,10 +129,9 @@ describe("dynamic tracing tools", () => {
   });
 
   it("find_hotspots counts advice interceptions", async () => {
-    const r = await callTool<{ hotspots: { symbol: { qualifiedName: string }; adviceCount: number }[] }>(
-      "find_hotspots",
-      { limit: 50 }
-    );
+    const r = await callTool<{
+      hotspots: { symbol: { qualifiedName: string }; adviceCount: number }[];
+    }>("find_hotspots", { limit: 50 });
     const pay = r.hotspots.find((h) => h.symbol.qualifiedName === "com.acme.Payment#pay");
     expect(pay?.adviceCount).toBe(1);
   });
@@ -135,10 +146,9 @@ describe("dynamic tracing tools", () => {
   });
 
   it("get_callees reports edge kinds when dynamic tracing is enabled", async () => {
-    const r = await callTool<{ callees: { callee: { qualifiedName: string }; edgeKind: string }[] }>(
-      "get_callees",
-      { symbol: "com.acme.Checkout#checkout", include_dynamic: true }
-    );
+    const r = await callTool<{
+      callees: { callee: { qualifiedName: string }; edgeKind: string }[];
+    }>("get_callees", { symbol: "com.acme.Checkout#checkout", include_dynamic: true });
     const pay = r.callees.find((c) => c.callee.qualifiedName === "com.acme.Payment#pay");
     expect(pay?.edgeKind).toBe("CALLS");
     const impl = r.callees.find((c) => c.callee.qualifiedName === "com.acme.CardPayment#pay");

@@ -1,31 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { GraphStore } from "./graph/store.js";
 import type { Config } from "./config.js";
-import { NODE_KINDS, EDGE_KINDS } from "./graph/schema.js";
+import { loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
-import {
-  getCallers,
-  getCallees,
-  tracePath,
-  traceExecution,
-  getSubgraph,
-  searchSymbols,
-  suggestSymbols,
-  findImplementations,
-  getAspects,
-  getDecorators,
-  findAnnotated,
-  hotspots,
-  deadCode,
-  findEntryPoints,
-  findInjections,
-  findReflections,
-  findRoutes,
-  externalDependencies,
-  type SymbolRef,
-  type WiringEdge,
-} from "./graph/queries.js";
 import { applyBudget, pageMeta } from "./graph/budget.js";
 import {
   explainSymbol,
@@ -35,7 +12,30 @@ import {
   impactAnalysis,
   unresolvedForNode,
 } from "./graph/insights.js";
-import { loadConfig } from "./config.js";
+import {
+  deadCode,
+  externalDependencies,
+  findAnnotated,
+  findEntryPoints,
+  findImplementations,
+  findInjections,
+  findReflections,
+  findRoutes,
+  getAspects,
+  getCallees,
+  getCallers,
+  getDecorators,
+  getSubgraph,
+  hotspots,
+  type SymbolRef,
+  searchSymbols,
+  suggestSymbols,
+  traceExecution,
+  tracePath,
+  type WiringEdge,
+} from "./graph/queries.js";
+import { EDGE_KINDS, NODE_KINDS } from "./graph/schema.js";
+import type { GraphStore } from "./graph/store.js";
 
 /**
  * MCP server surface for code-crawler.
@@ -212,7 +212,10 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           progressToken === undefined
             ? undefined
             : (progress) => {
-                if (progress.processed !== progress.total && progress.processed % step(progress.total) !== 0) {
+                if (
+                  progress.processed !== progress.total &&
+                  progress.processed % step(progress.total) !== 0
+                ) {
                   return;
                 }
                 void extra
@@ -331,7 +334,16 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       limit: z.number().int().min(1).max(500).optional().describe("Max callers returned."),
       ...budgetParams,
     },
-    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
+    async ({
+      symbol,
+      transitive,
+      include_dynamic,
+      include_advice,
+      max_depth,
+      limit,
+      max_tokens,
+      cursor,
+    }) => {
       const result = getCallers(store, symbol, {
         transitive,
         includeDynamic: include_dynamic,
@@ -373,7 +385,16 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       limit: z.number().int().min(1).max(500).optional().describe("Max callees returned."),
       ...budgetParams,
     },
-    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
+    async ({
+      symbol,
+      transitive,
+      include_dynamic,
+      include_advice,
+      max_depth,
+      limit,
+      max_tokens,
+      cursor,
+    }) => {
       const result = getCallees(store, symbol, {
         transitive,
         includeDynamic: include_dynamic,
@@ -412,10 +433,25 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Maximum path length."),
-      limit: z.number().int().min(1).max(100).optional().describe("Max paths returned (default 10)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Max paths returned (default 10)."),
       ...budgetParams,
     },
-    async ({ source, target, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
+    async ({
+      source,
+      target,
+      include_dynamic,
+      include_advice,
+      max_depth,
+      limit,
+      max_tokens,
+      cursor,
+    }) => {
       const paths = tracePath(store, source, target, {
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
@@ -581,7 +617,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     "find_annotated",
     "Find every symbol annotated/decorated with a given annotation (simple name, @name, or FQN).",
     {
-      annotation: z.string().describe("Annotation name, e.g. 'Transactional', '@Aspect' or an FQN."),
+      annotation: z
+        .string()
+        .describe("Annotation name, e.g. 'Transactional', '@Aspect' or an FQN."),
       kind: z
         .enum(NODE_KINDS)
         .optional()
@@ -641,7 +679,10 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     "Find methods/constructors with no incoming calls, dispatch, or advice edges. Excludes framework-invoked entry points (routes, listeners, schedulers, event handlers, `main`) and test sources by default; code invoked purely through reflection may still be reported.",
     {
       limit: z.number().int().min(1).max(500).optional().describe("Max symbols returned."),
-      include_constructors: z.boolean().optional().describe("Include constructors (default false)."),
+      include_constructors: z
+        .boolean()
+        .optional()
+        .describe("Include constructors (default false)."),
       include_tests: z.boolean().optional().describe("Include test sources (default false)."),
       include_dynamic: z
         .boolean()
@@ -697,7 +738,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       kind: z
         .string()
         .optional()
-        .describe("Filter by entry-point kind: http, messaging, scheduler, event, cli, test, route."),
+        .describe(
+          "Filter by entry-point kind: http, messaging, scheduler, event, cli, test, route."
+        ),
       limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
       ...budgetParams,
     },
@@ -709,12 +752,10 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         ...(e.detail ? { detail: e.detail } : {}),
       }));
       return text(
-        paged(
-          { count: entryPoints.length, entryPoints },
-          "entryPoints",
-          entryPoints,
-          { max_tokens, cursor }
-        )
+        paged({ count: entryPoints.length, entryPoints }, "entryPoints", entryPoints, {
+          max_tokens,
+          cursor,
+        })
       );
     }
   );
@@ -798,7 +839,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         ...(e.framework ? { framework: e.framework } : {}),
         ...(e.line !== undefined ? { line: line(e.line) } : {}),
       }));
-      return text(paged({ count: routes.length, routes }, "routes", routes, { max_tokens, cursor }));
+      return text(
+        paged({ count: routes.length, routes }, "routes", routes, { max_tokens, cursor })
+      );
     }
   );
 
@@ -851,14 +894,15 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         dynamicModel: {
           DYNAMIC_DISPATCH:
             "caller -> concrete override/implementation; inferred from the type hierarchy and virtual/interface dispatch.",
-          ADVISES: "advice method -> advised method; matched from @Before/@After/@Around pointcuts.",
+          ADVISES:
+            "advice method -> advised method; matched from @Before/@After/@Around pointcuts.",
           INJECTS:
             "injecting symbol -> injected type; DI/framework wiring such as @Autowired, NestJS constructor params, FastAPI Depends.",
           REFLECTS:
             "looking-up symbol -> resolved target; Class.forName, ServiceLoader, getattr, importlib, require, dynamic import().",
-          ROUTES: "registering symbol -> handler symbol; HTTP route/verb/path recorded on the edge.",
-          ANNOTATED_WITH:
-            "symbol -> annotation/decorator node; carries arguments and source line.",
+          ROUTES:
+            "registering symbol -> handler symbol; HTTP route/verb/path recorded on the edge.",
+          ANNOTATED_WITH: "symbol -> annotation/decorator node; carries arguments and source line.",
           CARRIES_CONTROL_FLOW:
             "CALLS edges carry `conditional` and `controlFlow` (branch/loop/exception/predicate) plus the enclosing guard text.",
         },
@@ -1067,7 +1111,13 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .array(z.enum(EDGE_KINDS))
         .optional()
         .describe("Explicit edge kinds to follow, overriding include_dynamic."),
-      limit: z.number().int().min(1).max(500).optional().describe("Max cycles returned (default 100)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max cycles returned (default 100)."),
       ...budgetParams,
     },
     async ({ include_dynamic, min_size, edge_kinds, limit, max_tokens, cursor }) => {
@@ -1141,76 +1191,105 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   // ------------------------------------------------------------- resources
 
-  server.registerResource("graph-schema", "codecrawler://schema", {
-    title: "Graph schema",
-    description: "Node and edge kinds used by the codebase property graph.",
-  }, async () => ({
-    contents: [
-      {
-        uri: "codecrawler://schema",
-        text: JSON.stringify(
-          {
-            nodeKinds: NODE_KINDS,
-            edgeKinds: EDGE_KINDS,
-            idScheme: {
-              type: "com.acme.Foo",
-              method: "com.acme.Foo#run",
-              constructor: "com.acme.Foo#<init>",
-              field: "com.acme.Foo$repo",
-              annotation: "@Transactional",
-              module: "module:app/services/orders",
-              external: "ext:requests",
-              import: "__import__:com.acme.Foo",
-              unknown: "__unknown__:System.out.println",
-            },
-            languages: ["java", "python", "typescript", "javascript"],
-            dynamicModel: {
-              DYNAMIC_DISPATCH:
-                "caller -> concrete override/implementation, inferred from the type hierarchy.",
-              ADVISES: "advice method -> advised method, matched from AspectJ pointcuts.",
-              INJECTS: "injecting symbol -> injected type, from DI/framework wiring.",
-              REFLECTS: "looking-up symbol -> resolved target, from reflection/dynamic import.",
-              ROUTES: "registering symbol -> handler symbol, with HTTP verb and path.",
-              ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
-            },
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  }));
-
-  server.registerResource("index-status", "codecrawler://status", {
-    title: "Index status",
-    description: "Current index summary (nodes, edges, files, last crawl).",
-  }, async () => {
-    const stats = store.stats();
-    return {
+  server.registerResource(
+    "graph-schema",
+    "codecrawler://schema",
+    {
+      title: "Graph schema",
+      description: "Node and edge kinds used by the codebase property graph.",
+    },
+    async () => ({
       contents: [
         {
-          uri: "codecrawler://status",
+          uri: "codecrawler://schema",
           text: JSON.stringify(
             {
-              ...stats,
-              projectPath: store.getMeta("last_project_path"),
+              nodeKinds: NODE_KINDS,
+              edgeKinds: EDGE_KINDS,
+              idScheme: {
+                type: "com.acme.Foo",
+                method: "com.acme.Foo#run",
+                constructor: "com.acme.Foo#<init>",
+                field: "com.acme.Foo$repo",
+                annotation: "@Transactional",
+                module: "module:app/services/orders",
+                external: "ext:requests",
+                import: "__import__:com.acme.Foo",
+                unknown: "__unknown__:System.out.println",
+              },
+              languages: ["java", "python", "typescript", "javascript"],
+              dynamicModel: {
+                DYNAMIC_DISPATCH:
+                  "caller -> concrete override/implementation, inferred from the type hierarchy.",
+                ADVISES: "advice method -> advised method, matched from AspectJ pointcuts.",
+                INJECTS: "injecting symbol -> injected type, from DI/framework wiring.",
+                REFLECTS: "looking-up symbol -> resolved target, from reflection/dynamic import.",
+                ROUTES: "registering symbol -> handler symbol, with HTTP verb and path.",
+                ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
+              },
             },
             null,
             2
           ),
         },
       ],
-    };
-  });
+    })
+  );
+
+  server.registerResource(
+    "index-status",
+    "codecrawler://status",
+    {
+      title: "Index status",
+      description: "Current index summary (nodes, edges, files, last crawl).",
+    },
+    async () => {
+      const stats = store.stats();
+      return {
+        contents: [
+          {
+            uri: "codecrawler://status",
+            text: JSON.stringify(
+              {
+                ...stats,
+                projectPath: store.getMeta("last_project_path"),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
 
   // --------------------------------------------------------------- prompts
 
-  server.prompt("trace-call-path", "Given two symbols, trace every static call path between them.", {
-    from: z.string().describe("Starting symbol"),
-    to: z.string().describe("Destination symbol"),
-  }, async ({ from, to }) => {
-    const paths = tracePath(store, from, to, { limit: 10 });
-    if (!paths || paths.length === 0) {
+  server.prompt(
+    "trace-call-path",
+    "Given two symbols, trace every static call path between them.",
+    {
+      from: z.string().describe("Starting symbol"),
+      to: z.string().describe("Destination symbol"),
+    },
+    async ({ from, to }) => {
+      const paths = tracePath(store, from, to, { limit: 10 });
+      if (!paths || paths.length === 0) {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: {
+                type: "text",
+                text:
+                  `No static call path was found from \`${from}\` to \`${to}\`. ` +
+                  `Use \`search_symbols\` to confirm both symbols exist, and ` +
+                  `\`get_subgraph\` on each to inspect their neighborhoods.`,
+              },
+            },
+          ],
+        };
+      }
       return {
         messages: [
           {
@@ -1218,31 +1297,15 @@ export function createServer(store: GraphStore, config: Config): McpServer {
             content: {
               type: "text",
               text:
-                `No static call path was found from \`${from}\` to \`${to}\`. ` +
-                `Use \`search_symbols\` to confirm both symbols exist, and ` +
-                `\`get_subgraph\` on each to inspect their neighborhoods.`,
+                `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
+                paths.map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`).join("\n") +
+                `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
             },
           },
         ],
       };
     }
-    return {
-      messages: [
-        {
-          role: "assistant",
-          content: {
-            type: "text",
-            text:
-              `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
-              paths
-                .map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`)
-                .join("\n") +
-              `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
-          },
-        },
-      ],
-    };
-  });
+  );
 
   return server;
 }

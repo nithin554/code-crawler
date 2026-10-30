@@ -1,3 +1,4 @@
+import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -11,7 +12,6 @@ import type {
   TypeInfo,
   TypeKind,
 } from "../language.js";
-import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
 import {
   baseTypeName,
   childOfType,
@@ -19,8 +19,8 @@ import {
   createParser,
   fieldChild,
   loadGrammar,
-  walk,
   type TSNode,
+  walk,
 } from "../treeSitter.js";
 
 /**
@@ -109,7 +109,10 @@ const INJECTION_ANNOTATIONS: Record<string, string> = {
 };
 
 /** Run-time lookup methods and the kind of target they produce. */
-const REFLECTIVE_METHODS: Record<string, { targetKind: ReflectiveRef["targetKind"]; mechanism: string }> = {
+const REFLECTIVE_METHODS: Record<
+  string,
+  { targetKind: ReflectiveRef["targetKind"]; mechanism: string }
+> = {
   forName: { targetKind: "type", mechanism: "Class.forName" },
   loadClass: { targetKind: "type", mechanism: "ClassLoader.loadClass" },
   getMethod: { targetKind: "method", mechanism: "Class.getMethod" },
@@ -133,7 +136,13 @@ function javaEntryPointOf(
       const path = annotationValue(annotation) ?? "/";
       return { kind: "http", detail: `${httpVerb} ${path}` };
     }
-    if (simple === "KafkaListener" || simple === "RabbitListener" || simple === "JmsListener" || simple === "StreamListener" || simple === "SqsListener") {
+    if (
+      simple === "KafkaListener" ||
+      simple === "RabbitListener" ||
+      simple === "JmsListener" ||
+      simple === "StreamListener" ||
+      simple === "SqsListener"
+    ) {
       const topic = annotationValue(annotation);
       return { kind: "messaging", detail: topic ? `${simple}(${topic})` : simple };
     }
@@ -280,7 +289,11 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   }
 
   /** Constructor parameter injections: Spring/Jakarta constructor injection. */
-  function collectParamInjections(node: TSNode, typeId: string, memberAnnotations: AnnotationInfo[]): void {
+  function collectParamInjections(
+    node: TSNode,
+    typeId: string,
+    memberAnnotations: AnnotationInfo[]
+  ): void {
     const paramsNode = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
     if (!paramsNode) return;
     const memberFramework = injectionFrameworkOf(memberAnnotations);
@@ -442,9 +455,7 @@ function extractPackage(root: TSNode): string | null {
   const pkg = childOfType(root, "package_declaration");
   if (!pkg) return null;
   return (
-    childOfType(pkg, "scoped_identifier")?.text ??
-    childOfType(pkg, "identifier")?.text ??
-    null
+    childOfType(pkg, "scoped_identifier")?.text ?? childOfType(pkg, "identifier")?.text ?? null
   );
 }
 
@@ -637,10 +648,25 @@ function reflectionOf(
   }
   const spec = REFLECTIVE_METHODS[info.name];
   if (!spec || info.receiver === null) return null;
-  if (spec.mechanism.startsWith("Class.getConstructor") || spec.mechanism.startsWith("Class.getDeclaredConstructor")) {
-    return { ...base, mechanism: spec.mechanism, targetKind: "method", target: "<init>", receiver: info.receiver };
+  if (
+    spec.mechanism.startsWith("Class.getConstructor") ||
+    spec.mechanism.startsWith("Class.getDeclaredConstructor")
+  ) {
+    return {
+      ...base,
+      mechanism: spec.mechanism,
+      targetKind: "method",
+      target: "<init>",
+      receiver: info.receiver,
+    };
   }
   const target = unquote(info.args[0] ?? "");
   if (!target) return null;
-  return { ...base, mechanism: spec.mechanism, targetKind: spec.targetKind, target, receiver: info.receiver };
+  return {
+    ...base,
+    mechanism: spec.mechanism,
+    targetKind: spec.targetKind,
+    target,
+    receiver: info.receiver,
+  };
 }

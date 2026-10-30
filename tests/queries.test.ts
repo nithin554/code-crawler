@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { GraphStore } from "../src/graph/store.js";
-import { methodNodeId } from "../src/graph/schema.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  getCallers,
   getCallees,
-  tracePath,
+  getCallers,
   getSubgraph,
   searchSymbols,
+  tracePath,
 } from "../src/graph/queries.js";
 import type { GraphEdge } from "../src/graph/schema.js";
+import { methodNodeId } from "../src/graph/schema.js";
+import { GraphStore } from "../src/graph/store.js";
 
 let store: GraphStore;
 
@@ -42,8 +42,14 @@ beforeEach(() => {
     E(methodNodeId("com.acme.Main", "main"), methodNodeId("com.acme.OrderService", "place")),
     E(methodNodeId("com.acme.Main", "main"), methodNodeId("com.acme.CustomerService", "find")),
     E(methodNodeId("com.acme.Main", "main"), methodNodeId("com.acme.ShippingService", "ship")),
-    E(methodNodeId("com.acme.OrderService", "place"), methodNodeId("com.acme.OrderRepository", "create")),
-    E(methodNodeId("com.acme.ShippingService", "ship"), methodNodeId("com.acme.Tracking", "dispatch")),
+    E(
+      methodNodeId("com.acme.OrderService", "place"),
+      methodNodeId("com.acme.OrderRepository", "create")
+    ),
+    E(
+      methodNodeId("com.acme.ShippingService", "ship"),
+      methodNodeId("com.acme.Tracking", "dispatch")
+    ),
   ]);
 });
 
@@ -56,8 +62,14 @@ describe("getCallers", () => {
   it("returns transitive callers with depth", () => {
     const r = getCallers(store, "com.acme.OrderRepository#create", { transitive: true });
     expect(r?.callers).toEqual([
-      expect.objectContaining({ depth: 1, caller: expect.objectContaining({ qualifiedName: "com.acme.OrderService#place" }) }),
-      expect.objectContaining({ depth: 2, caller: expect.objectContaining({ qualifiedName: "com.acme.Main#main" }) }),
+      expect.objectContaining({
+        depth: 1,
+        caller: expect.objectContaining({ qualifiedName: "com.acme.OrderService#place" }),
+      }),
+      expect.objectContaining({
+        depth: 2,
+        caller: expect.objectContaining({ qualifiedName: "com.acme.Main#main" }),
+      }),
     ]);
   });
 

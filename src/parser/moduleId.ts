@@ -58,7 +58,10 @@ export function pythonModuleId(filePath: string, projectRoot?: string): string {
 export function tsModuleId(filePath: string, projectRoot?: string): string {
   const relative = stripExtension(relativeModulePath(filePath, projectRoot)).replace(/\.d$/, "");
   const parts = relative.split("/").filter(Boolean);
-  if (parts.length > 1 && (parts[parts.length - 1] === "index" || parts[parts.length - 1] === "mod")) {
+  if (
+    parts.length > 1 &&
+    (parts[parts.length - 1] === "index" || parts[parts.length - 1] === "mod")
+  ) {
     parts.pop();
   }
   return parts.join(".") || "__root__";
@@ -69,10 +72,7 @@ export function tsModuleId(filePath: string, projectRoot?: string): string {
  * `currentModuleId` is the importing file's module id (including its own
  * segment), so the file segment is dropped before walking `..`.
  */
-export function resolveRelativeModule(
-  currentModuleId: string,
-  specifier: string
-): string | null {
+export function resolveRelativeModule(currentModuleId: string, specifier: string): string | null {
   if (!specifier.startsWith(".")) return null;
   const base = currentModuleId.split(".").filter(Boolean);
   base.pop();
