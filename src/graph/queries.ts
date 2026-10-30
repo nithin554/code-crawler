@@ -38,7 +38,7 @@ export interface FlowEdgeInfo {
   guards?: string[];
 }
 
-function nodeToRef(node: GraphNode): SymbolRef {
+export function nodeToRef(node: GraphNode): SymbolRef {
   return {
     id: node.id,
     qualifiedName: node.qualifiedName,
@@ -49,7 +49,7 @@ function nodeToRef(node: GraphNode): SymbolRef {
 }
 
 /** Resolve a node by exact id or by qualified name, favoring id. */
-function resolveNode(store: GraphStore, symbol: string): GraphNode | null {
+export function resolveNode(store: GraphStore, symbol: string): GraphNode | null {
   return store.getNode(symbol) ?? store.getNodeByQualifiedName(symbol);
 }
 
@@ -69,7 +69,7 @@ export function traversalEdgeKinds(opts: DynamicEdgeOptions = {}): EdgeKind[] {
   return kinds;
 }
 
-function sqlKinds(kinds: EdgeKind[]): string {
+export function sqlKinds(kinds: EdgeKind[]): string {
   return kinds.map((k) => `'${k}'`).join(",");
 }
 
@@ -1224,7 +1224,7 @@ interface WiringRow {
   t_props: string;
 }
 
-interface Row {
+export interface Row {
   id: string;
   qualified_name: string;
   kind: NodeKind;
@@ -1237,7 +1237,7 @@ interface RowWithEdge extends Row {
   edge_props?: string;
 }
 
-function rowToRef(r: Row): SymbolRef {
+export function rowToRef(r: Row): SymbolRef {
   return {
     id: r.id,
     qualifiedName: r.qualified_name,
@@ -1247,7 +1247,7 @@ function rowToRef(r: Row): SymbolRef {
   };
 }
 
-function edgeLine(props: string | undefined): number | undefined {
+export function edgeLine(props: string | undefined): number | undefined {
   if (!props) return undefined;
   const line = (JSON.parse(props) as { line?: number }).line;
   return typeof line === "number" ? line : undefined;

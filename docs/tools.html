@@ -8,14 +8,14 @@
     <title>Tool reference — Code-Crawler</title>
     <meta
       name="description"
-      content="Complete reference for all 22 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Tool reference — Code-Crawler" />
     <meta
       property="og:description"
-      content="Complete reference for all 22 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/tools.html" />
     <meta name="twitter:card" content="summary" />
@@ -48,7 +48,7 @@
           <span class="eyebrow">Reference</span>
           <h1>Tool reference</h1>
           <p class="lead">
-            All 22 MCP tools with their arguments, response shape, and a working call. Every
+            All 27 MCP tools with their arguments, response shape, and a working call. Every
             tool returns structured JSON.
           </p>
           <div class="toc">
@@ -93,6 +93,25 @@
                 List tools default to 50 results. Traversals are bounded by
                 <code>max_depth</code> and <code>limit</code>; both are validated against a
                 hard maximum so a query cannot run away.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Token budgets</h3>
+              <p>
+                The 18 list-returning query tools accept <code>max_tokens</code> (100–200000) and
+                <code>cursor</code>. Passing either adds a <code>page</code> block with
+                <code>totalCount</code>, <code>returnedCount</code>, <code>truncated</code>,
+                <code>estimatedTokens</code> and <code>nextCursor</code>; omit both and the
+                response shape is unchanged. Paging never returns an empty page, so a continuation
+                loop always terminates.
+              </p>
+              <p>
+                <code>get_subgraph</code> is the exception: its <code>nodes</code> and
+                <code>edges</code> are two views of the same slice, so it is bounded by
+                <code>radius</code> and <code>limit</code> instead. Tools that return a single
+                object (<code>impact_analysis</code>, <code>explain_symbol</code>,
+                <code>export_graph</code>, <code>get_node</code>, <code>index_status</code>,
+                <code>get_schema</code>) take no budget.
               </p>
             </div>
             <div class="card">
@@ -731,6 +750,169 @@
               listeners, scheduled methods, serialization hooks, reflection targets — has no
               in-project caller and will be reported as unused.
             </p>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_unresolved</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Call sites the resolver could not bind, grouped by failure reason.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>reason</code></td><td>string</td><td>no</td><td>Case-insensitive substring filter on the failure reason.</td></tr>
+                    <tr><td><code>caller_kind</code></td><td>string</td><td>no</td><td>Restrict to callers of this node kind.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max call sites scanned, 1–5000. Default <code>2000</code>.</td></tr>
+                    <tr><td><code>max_tokens</code></td><td>number</td><td>no</td><td>Token budget for the <code>unresolved[]</code> list.</td></tr>
+                    <tr><td><code>cursor</code></td><td>number</td><td>no</td><td>Offset into the list, from a previous <code>page.nextCursor</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>total</code>, <code>byReason[]</code>, and <code>unresolved[]</code>
+                with <code>caller</code>, <code>target</code> (as written in source),
+                <code>reason</code>, and <code>line</code>.
+              </p>
+              <pre><code>find_unresolved({ reason: "receiver" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>impact_analysis</code>
+              <span class="tag analytics">analytics</span>
+              <p>What breaks if this symbol changes: callers, entry points, routes, overrides.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Symbol id or qualified name.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Caller traversal depth, 1–50. Default <code>10</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers returned, 1–1000. Default <code>200</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>summary</code> (<code>totalCallers</code>, <code>directCallers</code>,
+                <code>entryPoints</code>, <code>routes</code>, <code>implementations</code>,
+                <code>affectedFiles</code>, <code>risk</code>), plus <code>callers[]</code>,
+                <code>entryPoints[]</code>, <code>routes[]</code>, <code>implementations[]</code>,
+                and <code>affectedFiles[]</code>. Analysing a class aggregates the callers of its
+                methods.
+              </p>
+              <pre><code>impact_analysis({ symbol: "com.acme.OrderService#place" })</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              <code>risk</code> is a heuristic, not a verdict: <code>high</code> when a
+              framework entry point reaches the symbol, <code>medium</code> when it has direct
+              callers, <code>low</code> otherwise. Reflection and configuration-file dispatch are
+              outside the graph, so a <code>low</code> band does not prove the symbol is unused.
+            </p>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>explain_symbol</code>
+              <span class="tag analytics">analytics</span>
+              <p>One-round-trip digest of a symbol: members, decorators, callers, wiring.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Symbol id or qualified name.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Caller/callee depth, 1–5. Default <code>1</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max rows per section, 1–500. Default <code>50</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>symbol</code>, <code>line</code>, <code>isEntryPoint</code>,
+                <code>decorators[]</code>, <code>members[]</code>, <code>callers[]</code>,
+                <code>callees[]</code>, <code>implementations[]</code>, <code>routes[]</code>,
+                <code>injections[]</code>, <code>reflections[]</code>, and a <code>summary</code>
+                of section sizes.
+              </p>
+              <pre><code>explain_symbol({ symbol: "com.acme.OrderService" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_cycles</code>
+              <span class="tag analytics">analytics</span>
+              <p>Strongly connected components in the call graph, plus direct recursion.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>edge_kinds</code></td><td>string[]</td><td>no</td><td>Edge kinds to follow. Default <code>CALLS</code> and <code>DYNAMIC_DISPATCH</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>min_size</code></td><td>number</td><td>no</td><td>Smallest cycle to report, 1–100. Default <code>2</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max cycles returned, 1–500. Default <code>100</code>.</td></tr>
+                    <tr><td><code>max_tokens</code></td><td>number</td><td>no</td><td>Token budget for the <code>cycles[]</code> list.</td></tr>
+                    <tr><td><code>cursor</code></td><td>number</td><td>no</td><td>Offset into the list, from a previous <code>page.nextCursor</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>cycleCount</code>, <code>cycles[]</code> (with <code>size</code>,
+                <code>members[]</code>, and a closed <code>sample</code> walk),
+                <code>selfRecursive[]</code>, and the <code>scannedNodes</code>/<code>scannedEdges</code>
+                counts used.
+              </p>
+              <pre><code>find_cycles({ min_size: 3 })</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              Direct recursion is reported separately in <code>selfRecursive</code> rather than as
+              a one-node cycle, because a self-loop is usually deliberate and a 3-cycle usually is
+              not. Detection runs on an iterative Tarjan pass, so deep call chains cannot overflow
+              the stack.
+            </p>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>export_graph</code>
+              <span class="tag analytics">analytics</span>
+              <p>Render a neighborhood as a Mermaid or Graphviz diagram.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>no</td><td>Center symbol. Omit to export the whole graph.</td></tr>
+                    <tr><td><code>radius</code></td><td>number</td><td>no</td><td>Traversal radius around the center, 1–5. Default <code>2</code>.</td></tr>
+                    <tr><td><code>edge_kinds</code></td><td>string[]</td><td>no</td><td>Edge kinds to include.</td></tr>
+                    <tr><td><code>format</code></td><td>string</td><td>no</td><td><code>mermaid</code> (default) or <code>dot</code>.</td></tr>
+                    <tr><td><code>direction</code></td><td>string</td><td>no</td><td><code>LR</code> (default), <code>TB</code>, <code>RL</code>, or <code>BT</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max nodes rendered, 1–1000. Default <code>200</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Returns <code>format</code>, <code>diagram</code>, <code>nodeCount</code>,
+                <code>edgeCount</code>, <code>truncated</code>, and <code>center</code>.
+              </p>
+              <pre><code>export_graph({ symbol: "com.acme.Main#main", format: "mermaid" })</code></pre>
+            </div>
           </div>
         </div>
       </section>

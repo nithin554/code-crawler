@@ -37,14 +37,17 @@ async function callTool<T = Record<string, unknown>>(name: string, args: Record<
 }
 
 describe("MCP server tools", () => {
-  it("exposes all 22 tools", async () => {
+  it("exposes all 27 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "clear_index",
         "crawl_project",
+        "explain_symbol",
+        "export_graph",
         "find_annotated",
         "find_aspects",
+        "find_cycles",
         "find_dead_code",
         "find_entry_points",
         "find_external_dependencies",
@@ -53,12 +56,14 @@ describe("MCP server tools", () => {
         "find_injections",
         "find_reflections",
         "find_routes",
+        "find_unresolved",
         "get_callers",
         "get_callees",
         "get_decorators",
         "get_node",
         "get_schema",
         "get_subgraph",
+        "impact_analysis",
         "index_status",
         "search_symbols",
         "trace_execution",
@@ -164,6 +169,189 @@ describe("MCP server tools", () => {
     const status = await callTool<{ nodes: number; edges: number }>("index_status");
     expect(status.nodes).toBe(0);
     expect(status.edges).toBe(0);
+  });
+});
+
+describe("MCP server P3 analysis tools", () => {
+  it("find_unresolved reports the fixture's unresolved call", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{
+      total: number;
+      byReason: { reason: string; count: number }[];
+      unresolved: { caller: { id: string }; target: string; line?: number }[];
+    }>("find_unresolved");
+    expect(r.total).toBe(1);
+    expect(r.unresolved[0]?.caller.id).toBe("com.acme.Tracking#dispatch");
+    expect(r.unresolved[0]?.target).toBe("System.out.println");
+    expect(r.unresolved[0]?.line).toBe(11);
+    expect(r.byReason[0]?.count).toBe(1);
+  });
+
+  it("get_node includes unresolved outgoing calls", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{ unresolved?: { calls: { target: string }[] } }>("get_node", {
+      qualified_name: "com.acme.Tracking#dispatch",
+    });
+    expect(r.unresolved?.calls.map((c) => c.target)).toEqual(["System.out.println"]);
+  });
+
+  it("omits the unresolved block when a node has none", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<Record<string, unknown>>("get_node", {
+      qualified_name: "com.acme.Main#main",
+    });
+    expect(r).not.toHaveProperty("unresolved");
+  });
+
+  it("impact_analysis bundles risk, entry points and callers", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{
+      summary: { risk: string; directCallers: number; totalCallers: number };
+      entryPoints: { symbol: { id: string } }[];
+    }>("impact_analysis", { symbol: "com.acme.OrderService#place" });
+    expect(r.summary.totalCallers).toBe(1);
+    expect(r.summary.risk).toBe("high");
+    expect(r.entryPoints.map((e) => e.symbol.id)).toContain("com.acme.Main#main");
+  });
+
+  it("impact_analysis aggregates the callers of a type's members", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{ summary: { totalCallers: number; risk: string } }>("impact_analysis", {
+      symbol: "com.acme.OrderService",
+    });
+    expect(r.summary.totalCallers).toBeGreaterThan(0);
+    expect(r.summary.risk).toBe("high");
+  });
+
+  it("impact_analysis returns an error for an unknown symbol", async () => {
+    const r = await callTool<{ ok: boolean; error: string }>("impact_analysis", { symbol: "com.nope.X" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("com.nope.X");
+  });
+
+  it("explain_symbol lists members and decorators", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{
+      symbol: { id: string };
+      members: { symbol: { id: string } }[];
+      summary: Record<string, number>;
+    }>("explain_symbol", { symbol: "com.acme.OrderService" });
+    expect(r.symbol.id).toBe("com.acme.OrderService");
+    expect(r.members.map((m) => m.symbol.id)).toContain("com.acme.OrderService#place");
+  });
+
+  it("find_cycles reports no cycles in the acyclic fixture", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{ cycleCount: number }>("find_cycles");
+    expect(r.cycleCount).toBe(0);
+  });
+
+  it("export_graph renders Mermaid and DOT", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const mermaid = await callTool<{ diagram: string }>("export_graph", {
+      symbol: "com.acme.Main#main",
+      format: "mermaid",
+    });
+    expect(mermaid.diagram).toContain("graph LR");
+
+    const dot = await callTool<{ diagram: string }>("export_graph", {
+      symbol: "com.acme.Main#main",
+      format: "dot",
+    });
+    expect(dot.diagram.startsWith("digraph")).toBe(true);
+  });
+});
+
+describe("MCP server token budgeting", () => {
+  it("keeps the unbudgeted payload shape unchanged", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<Record<string, unknown>>("find_entry_points");
+    expect(r).toHaveProperty("entryPoints");
+    expect(r).not.toHaveProperty("page");
+  });
+
+  it("adds page metadata and truncates when max_tokens is small", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const full = await callTool<{ hotspots: unknown[] }>("find_hotspots");
+    expect(full.hotspots.length).toBeGreaterThan(1);
+
+    const seen: unknown[] = [];
+    let cursor: number | undefined = 0;
+    let truncated = false;
+    let pages = 0;
+    while (pages < 100) {
+      const page = await callTool<{
+        hotspots: unknown[];
+        page: { truncated: boolean; totalCount: number; nextCursor?: number };
+      }>("find_hotspots", { max_tokens: 100, ...(cursor !== undefined ? { cursor } : {}) });
+      expect(page.page.totalCount).toBe(full.hotspots.length);
+      seen.push(...page.hotspots);
+      truncated = page.page.truncated;
+      pages++;
+      if (!truncated) break;
+      expect(page.page.nextCursor).toBeGreaterThan(cursor ?? 0);
+      cursor = page.page.nextCursor;
+    }
+
+    expect(pages).toBeGreaterThan(1);
+    expect(seen).toHaveLength(full.hotspots.length);
+  });
+
+  it("paginates callers of a widely called method", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{ count: number; callers: unknown[]; page: { truncated: boolean } }>("get_callers", {
+      symbol: "com.acme.OrderService#place",
+      max_tokens: 120,
+    });
+    expect(r.count).toBeGreaterThan(0);
+    expect(r.callers.length).toBeLessThanOrEqual(r.count);
+  });
+
+  it("accepts a budget on the remaining list tools", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ["trace_execution", { symbol: "com.acme.Main#main" }, "steps"],
+      ["trace_path", { source: "com.acme.Main#main", target: "com.acme.OrderService#place" }, "paths"],
+      ["find_aspects", {}, "aspects"],
+      ["get_decorators", { symbol: "com.acme.OrderService", include_members: true }, "members"],
+      ["find_external_dependencies", {}, "packages"],
+    ];
+    for (const [tool, args, key] of cases) {
+      const r = await callTool<Record<string, unknown>>(tool, { ...args, max_tokens: 200 });
+      expect(r, tool).toHaveProperty("page");
+      expect(r, tool).toHaveProperty(key);
+      const page = r.page as { totalCount: number; returnedCount: number };
+      expect(Array.isArray(r[key]), tool).toBe(true);
+      expect(page.returnedCount, tool).toBeLessThanOrEqual(page.totalCount);
+    }
+  });
+
+  it("paginates implementations of an interface", async () => {
+    await callTool("crawl_project", {
+      path: path.join(__dirname, "fixtures", "java", "dynamic"),
+    });
+    const full = await callTool<{ implementations: unknown[] }>("find_implementations", {
+      symbol: "com.acme.Payment",
+    });
+    expect(full.implementations.length).toBeGreaterThan(0);
+    const budgeted = await callTool<{
+      implementations: unknown[];
+      page: { totalCount: number; returnedCount: number };
+    }>("find_implementations", { symbol: "com.acme.Payment", max_tokens: 100 });
+    expect(budgeted.page.totalCount).toBe(full.implementations.length);
+    expect(budgeted.implementations.length).toBeGreaterThan(0);
+  });
+
+  it("only adds a count key to payloads that already had one", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const budgeted = await callTool<Record<string, unknown>>("find_aspects", { max_tokens: 200 });
+    expect(budgeted).toHaveProperty("aspectCount");
+    expect(budgeted).not.toHaveProperty("count");
+    const decorators = await callTool<Record<string, unknown>>("get_decorators", {
+      symbol: "com.acme.OrderService",
+    });
+    expect(decorators).not.toHaveProperty("count");
+    expect(decorators).not.toHaveProperty("page");
   });
 });
 

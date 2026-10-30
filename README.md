@@ -107,7 +107,7 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (174 tests; run with CODECRAWLER_BENCH=1 for the scale test)
+npm test             # vitest (215 tests; run with CODECRAWLER_BENCH=1 for the scale test)
 npm run bench        # crawl/query benchmark on a generated ~137k-line project
 ```
 
@@ -321,12 +321,31 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 | `find_injections` | DI-supplied dependencies (`@Autowired`, NestJS, FastAPI `Depends`) |
 | `find_reflections` | Run-time lookups: `Class.forName`, `getattr`, `importlib`, dynamic `import()` |
 | `find_external_dependencies` | Third-party packages with reference and file counts |
+| `find_unresolved` | Call sites the resolver could not bind, grouped by failure reason |
+| `impact_analysis` | Callers + entry points + routes + overrides + risk band in one call |
+| `explain_symbol` | One-shot digest: members, decorators, callers, callees, wiring |
+| `find_cycles` | Call cycles (SCCs) with a sample closed path, plus direct recursion |
+| `export_graph` | Neighborhood rendered as Mermaid or Graphviz DOT |
 | `get_subgraph` | Neighborhood extraction for visualization |
 | `get_schema` | Describe the graph model |
 | `clear_index` | Reset the database |
 
 **Resources**: `codecrawler://schema`, `codecrawler://status`
 **Prompt**: `trace-call-path(from, to)`
+
+**Token budgeting.** The 18 list-returning query tools — every tool whose payload is a
+single result list — accept `max_tokens` (100–200000) and `cursor`. Passing either adds a
+`page` block with `totalCount`, `returnedCount`, `truncated`, `estimatedTokens`, and
+`nextCursor`; omit both and the response shape is unchanged, so existing clients keep
+working. Paging never returns an empty page while items remain, so a continuation loop
+always terminates. Token counts are estimates from JSON length (~4 characters per token) —
+no tokenizer dependency, deterministic across models.
+
+`get_subgraph` is the one exception: its `nodes` and `edges` are two views of the same slice,
+so cutting one list would leave edges pointing at omitted nodes. It is bounded by `radius` and
+`limit` instead. Aggregate tools (`impact_analysis`, `explain_symbol`, `export_graph`) and
+single-object tools (`get_node`, `index_status`, `get_schema`) return one object and take no
+budget.
 
 ## Graph model
 

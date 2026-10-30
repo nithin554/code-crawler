@@ -17,8 +17,8 @@
 | Parsing | `LanguageConfig` per language over tree-sitter WASM grammars |
 | Resolution | `javaResolver.ts` + `genericResolver.ts` (module-based languages) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
-| Tools | 22 MCP tools |
-| Tests | 18 files / 174 tests, per-language fixtures, migration + index-plan + scale checks |
+| Tools | 27 MCP tools |
+| Tests | 19 files / 215 tests, per-language fixtures, migration + index-plan + scale checks |
 
 The biggest structural gap is that **adding a language currently means writing two
 parallel implementations** — a `LanguageConfig` and a resolver — and teaching each parser
