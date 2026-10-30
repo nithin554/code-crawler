@@ -581,8 +581,9 @@ Not yet modelled, by design:
 - Runtime DI graphs assembled from configuration files rather than code.
 - Receiver inference from an expression rather than a name — `getService().run()`,
   `items[0].run()`, a ternary, or a cast — so those calls report as unresolved.
-- Overload selection by argument count only, so same-arity overloads can bind to the
-  wrong declaration.
+- Overload selection by argument count only. Variadic declarations (`String...`,
+  `...rest`, `*args`) match against their fixed prefix, but parameter types are not
+  compared, so same-arity overloads bind to the first declaration in source order.
 
 The full list, and what is modelled in exchange for each gap, is in
 [`USAGE.md`](USAGE.md#7-what-is-and-is-not-modelled).

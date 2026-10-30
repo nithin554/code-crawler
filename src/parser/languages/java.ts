@@ -275,6 +275,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       name,
       isConstructor: false,
       params: extractParams(node),
+      variadic: hasVarargs(node),
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
       returnType: extractReturnType(node),
@@ -323,6 +324,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       name: "<init>",
       isConstructor: true,
       params: extractParams(node),
+      variadic: hasVarargs(node),
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
       returnType: "",
@@ -486,13 +488,36 @@ function extractParams(node: TSNode): { name: string; type: string }[] {
   const params = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
   if (!params) return [];
   const out: { name: string; type: string }[] = [];
-  for (const fp of childrenOfType(params, "formal_parameter")) {
+  for (const fp of params.namedChildren) {
+    // `String... names` parses as `spread_parameter`, not `formal_parameter`.
+    // Collecting only the latter dropped the parameter, so every varargs
+    // method looked like it took fewer arguments than it really does.
+    if (fp.type !== "formal_parameter" && fp.type !== "spread_parameter") continue;
     const typeNode = typeNodeOf(fp);
-    const name = childOfType(fp, "identifier")?.text;
+    const name =
+      fp.type === "spread_parameter"
+        ? firstIdentifier(fp)?.text
+        : childOfType(fp, "identifier")?.text;
     const type = typeNode ? baseTypeName(typeNode.text) : "";
     if (name) out.push({ name, type });
   }
   return out;
+}
+
+/** First `identifier` in a subtree; a varargs name sits inside a declarator. */
+function firstIdentifier(node: TSNode): TSNode | null {
+  if (node.type === "identifier") return node;
+  for (const child of node.namedChildren) {
+    const found = firstIdentifier(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** True when a declaration's parameter list ends in `Type... names`. */
+function hasVarargs(node: TSNode): boolean {
+  const params = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
+  return params ? params.namedChildren.some((p) => p.type === "spread_parameter") : false;
 }
 
 function extractReturnType(node: TSNode): string {

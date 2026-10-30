@@ -382,6 +382,18 @@ export const typescriptConfig: LanguageConfig = {
       return out;
     }
 
+    /** True when a parameter list ends in `...rest`. */
+    function isVariadicParams(paramsNode: TSNode | null): boolean {
+      if (!paramsNode) return false;
+      // A typed rest parameter is a `required_parameter` wrapping a
+      // `rest_pattern`; an untyped one appears as a bare `rest_pattern`.
+      return paramsNode.namedChildren.some(
+        (param) =>
+          param.type === "rest_pattern" ||
+          (fieldChild(param, "pattern") ?? param.namedChildren[0])?.type === "rest_pattern"
+      );
+    }
+
     function modifiersOf(node: TSNode): string[] {
       const modifiers: string[] = [];
       for (const child of node.children) {
@@ -588,14 +600,15 @@ export const typescriptConfig: LanguageConfig = {
       if (!nameNode) return;
       const rawName = nameNode.text;
       const id = `${classId}#${rawName}`;
+      const signatureParams =
+        fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
       methods.push({
         id,
         typeId: classId,
         name: rawName,
         isConstructor: false,
-        params: parseParams(
-          fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters")
-        ),
+        params: parseParams(signatureParams),
+        variadic: isVariadicParams(signatureParams),
         startLine: node.startPosition.row,
         endLine: node.endPosition.row,
         returnType: annotationTypeText(fieldChild(node, "return_type")),
@@ -636,6 +649,7 @@ export const typescriptConfig: LanguageConfig = {
         name: isConstructor ? "<init>" : name,
         isConstructor,
         params,
+        variadic: isVariadicParams(paramsNode),
         startLine: node.startPosition.row,
         endLine: node.endPosition.row,
         returnType: annotationTypeText(returnTypeNode),
