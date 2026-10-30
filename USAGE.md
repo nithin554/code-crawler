@@ -505,6 +505,59 @@ walkthrough.
 - **Types changed at runtime** — monkey-patching, `__getattr__`-based proxies, and
   `Object.defineProperty` tricks.
 
+### Per-language gaps
+
+Everything above is shared by every language. These are on top of it, and are the ones
+that most often explain a surprising "unresolved" result.
+
+#### `java`
+
+- **Records are not extracted.** A `record` declaration matches none of the declaration
+  kinds the parser handles, so the file is indexed but the record type, its components
+  and its accessors do not exist in the graph.
+- **Method references have no call edge.** `this::handle` and `Foo::bar` are not treated
+  as call targets, so they never appear in `get_callers`. Calls *inside* a lambda body
+  are indexed normally — it is the reference itself that is invisible.
+- **Initialiser blocks are not extracted.** Code in `static {}` or an instance
+  initialiser block has no node, so it cannot be an entry point and its calls belong to
+  no method.
+- **Generic type parameters are erased.** A local or field declared `T`, `List<T>`, or
+  `Map<K, V>` is normalised without substituting the arguments, so a call through it
+  binds to the declared bound (or stays unresolved) instead of the concrete type.
+
+#### `python`
+
+- **Generated members have no declaration.** `@dataclass` synthesises `__init__`,
+  `__repr__` and `__eq__`; a metaclass can add anything. Nothing is written in the
+  source, so there is no node, and calls to those members stay unresolved.
+- **No descriptor or `__getattr__` modelling.** Attribute access that only works
+  because of `__getattr__`, a descriptor's `__get__`, or a metaclass
+  `__getattribute__` is not linked to whatever eventually answers it.
+- **Import-time monkey-patching is not tracked.** Assigning to another module's
+  attribute — or to a class — changes behaviour at run time; the graph keeps the
+  original declaration.
+- **Lambdas invoked later have no target.** A `lambda` bound to an attribute and called
+  through it resolves to nothing static.
+
+#### `typescript`
+
+- **`namespace` blocks create no module node.** Members declared inside `namespace X {}`
+  are not addressable by name; use ES modules instead.
+- **JSX is parsed, not modelled.** `.tsx` and `.jsx` files use the TSX grammar so they
+  parse cleanly, but element trees and component props produce no nodes or edges.
+- **Type-level constructs are not evaluated.** Conditional, mapped, template-literal and
+  intersection types are not resolved, so a receiver whose declared type is one of them
+  stays unresolved.
+- **`static {}` blocks and `accessor` fields are not extracted.**
+
+#### `javascript`
+
+Handled by the TypeScript parser — same grammar family, same extractor — so every gap in
+the `typescript` list applies unchanged. The additional cost is that there are no type
+annotations to infer from: receivers come only from `new`, from assigned initialisers,
+and from the language-agnostic heuristics, so dynamically typed code resolves less often
+than annotated code does.
+
 ---
 
 ## 8. Troubleshooting

@@ -18,7 +18,7 @@
 | Resolution | `javaResolver.ts` + `genericResolver.ts` (module-based languages) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 21 files / 250 tests, per-language fixtures, migration + index-plan + scale checks |
+| Tests | 23 test files, per-language fixtures, migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is that **adding a language currently means writing two
@@ -37,7 +37,7 @@ about framework conventions. Phase 0 removes that before any new language lands.
 | 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M |
 | 0.3 | One language descriptor: extensions → grammar → resolver → frameworks → fixture path | S |
 | 0.4 | Conformance suite every language must pass (types, calls, imports, one route, one reflection) | S |
-| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots | S |
+| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots — **partly done**: discovery globs and language overrides ship in `loadCrawlerRc`; module roots and tsconfig paths are still open | S |
 
 **Exit criteria:** a new language needs no edits to existing language modules, and CI
 fails if the conformance suite regresses.

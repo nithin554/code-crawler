@@ -36,6 +36,7 @@ import {
 } from "./graph/queries.js";
 import { EDGE_KINDS, NODE_KINDS } from "./graph/schema.js";
 import type { GraphStore } from "./graph/store.js";
+import { SERVER_VERSION } from "./version.js";
 
 /**
  * MCP server surface for code-crawler.
@@ -46,7 +47,7 @@ import type { GraphStore } from "./graph/store.js";
  */
 
 export const SERVER_NAME = "code-crawler";
-export const SERVER_VERSION = "0.1.0";
+export { SERVER_VERSION };
 
 /** The subset of the MCP handler `extra` used for progress reporting. */
 interface ProgressExtra {
