@@ -107,7 +107,7 @@ Requires Node.js ≥ 22.12 (`better-sqlite3@13` and the Vitest toolchain both ne
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (250 tests; run with CODECRAWLER_BENCH=1 for the scale test)
+npm test             # vitest (full suite; set CODECRAWLER_BENCH=1 for the scale test)
 npm run lint         # biome check (lint + format, fails CI)
 npm run format       # biome format --write
 npm run coverage     # vitest run --coverage (thresholds in vitest.config.ts)
@@ -539,7 +539,7 @@ Each resolved edge carries a `confidence` score and a human-readable `reason` tr
 
 | Language | Extensions | Extracted | Dynamic features |
 | --- | --- | --- | --- |
-| Java | `.java` | packages, classes, interfaces, enums, records, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
+| Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
 | Python | `.py` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask routes, `getattr`, `importlib`, `__main__`, tests |
 | TypeScript | `.ts`, `.tsx` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
@@ -559,6 +559,17 @@ The graph schema, store, traversal queries, and MCP surface stay the same for ev
 language. Candidate next languages, and the modelling each one needs, are ranked in
 [`ROADMAP.md`](ROADMAP.md) Phase 3.
 
+## What is not modelled
+
+Language-specific gaps, in addition to the shared ones below:
+
+| Language | Not modelled |
+| --- | --- |
+| `java` | `record` declarations are skipped entirely — a record contributes no type node, so its components and accessors never appear. Lambda bodies are indexed, but a method reference such as `this::handle` has no static target and produces no call edge. `static {}` and instance initialiser blocks are not extracted. Generic type parameters are erased, so a call through a `List<T>` field binds to the declared bound rather than the concrete argument. |
+| `python` | No metaclass, descriptor, `__getattr__`, or `__getattribute__` modelling. Members a decorator generates rather than writes — `@dataclass`'s `__init__` and `__eq__`, anything a metaclass adds — have no declaration to point at, so calls to them stay unresolved. Monkey-patching at import time is not tracked. A `lambda` stored on an attribute and invoked later has no target. |
+| `typescript` | A `namespace X {}` block produces no module node, so members declared inside one are not reachable by name. JSX parses cleanly but the element tree is not modelled. Type-level constructs — conditional, mapped, template-literal, intersection — are not evaluated, so a receiver typed that way falls back to unresolved. `static {}` blocks and `accessor` fields are not extracted. |
+| `javascript` | Handled by the TypeScript parser, so every gap above applies. With no annotations available, receivers come only from `new`, assigned initialisers, and the language-agnostic heuristics — dynamically typed code resolves less often than annotated code does. |
+
 Not yet modelled, by design:
 
 - Value flow and branch feasibility — edges say *that* a call is conditional and record
@@ -568,6 +579,10 @@ Not yet modelled, by design:
 - Fully dynamic targets (`getattr(obj, name)`, `require(userInput)`) point at a
   `__reflect__:` marker instead of a symbol; there is nothing static to point at.
 - Runtime DI graphs assembled from configuration files rather than code.
+- Receiver inference from an expression rather than a name — `getService().run()`,
+  `items[0].run()`, a ternary, or a cast — so those calls report as unresolved.
+- Overload selection by argument count only, so same-arity overloads can bind to the
+  wrong declaration.
 
 The full list, and what is modelled in exchange for each gap, is in
 [`USAGE.md`](USAGE.md#7-what-is-and-is-not-modelled).
