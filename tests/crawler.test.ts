@@ -25,7 +25,7 @@ describe("crawlProject", () => {
 
     const stats = store.stats();
     expect(stats.nodes).toBe(39);
-    expect(stats.edges).toBe(58);
+    expect(stats.edges).toBe(61);
     expect(stats.files).toBe(8);
   });
 

@@ -477,6 +477,20 @@ export function buildCallEdges(
         };
         phantomNodes.push(synthetic);
         knownNodeIds.add(rc.targetId);
+        // An implicit constructor has no declaration to hang a CONTAINS edge on,
+        // so attach one here. Without it the type's own constructor is not
+        // reachable from the type when the graph is traversed.
+        if (rc.targetId.endsWith("#<init>")) {
+          const ownerType = rc.targetId.slice(0, -"#<init>".length);
+          if (knownNodeIds.has(ownerType)) {
+            edges.push({
+              source: ownerType,
+              target: rc.targetId,
+              kind: "CONTAINS",
+              properties: { line: rc.callSite.line, synthetic: true },
+            });
+          }
+        }
       }
       edges.push({
         source,

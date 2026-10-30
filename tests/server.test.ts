@@ -89,7 +89,7 @@ describe("MCP server tools", () => {
 
     const status = await callTool<{ nodes: number; edges: number }>("index_status");
     expect(status.nodes).toBe(39);
-    expect(status.edges).toBe(58);
+    expect(status.edges).toBe(61);
   });
 
   it("search_symbols finds methods", async () => {
