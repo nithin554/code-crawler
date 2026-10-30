@@ -67,14 +67,55 @@ MCP client:
 | `CODECRAWLER_DB` | `~/.code-crawler/index.db` | SQLite file that holds the graph |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Directories skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default cap on result lists |
-| `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap |
+| `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
+| `CODECRAWLER_MAX_FILE_BYTES` | `1000000` | Files larger than this are skipped instead of parsed (1 KB–64 MB) |
+| `CODECRAWLER_RESPECT_GITIGNORE` | `true` | Honor the project's `.gitignore` during file discovery |
 | `CODECRAWLER_HELPFUL_ERRORS` | `true` | Return fuzzy suggestions when a symbol is missing |
+
+Invalid values are never fatal: booleans fall back to their default, integers are clamped
+to their range, and both emit a one-line warning on stderr.
 
 Use a separate `CODECRAWLER_DB` per repository. A database holds exactly one project:
 crawling a different path fails with a `clear_index` hint rather than replacing the existing
 index. Re-crawling the same database is safe and cheap: file-scoped upserts replace only
 what changed. A full crawl also removes files that disappeared; scoped crawls (`fileFilter`
 or a forced `language`) skip stale removal and report `pruned: false`.
+
+### What discovery skips
+
+Beyond `CODECRAWLER_EXCLUDE_DIRS`, discovery honors two project-local conventions:
+
+- **`.gitignore`** in the project root (disable with `CODECRAWLER_RESPECT_GITIGNORE=false`).
+  Nested `.gitignore` files are not read yet.
+- **`.crawlerrc`** — optional JSON with gitignore-style globs:
+
+  ```json
+  { "include": ["src/", "packages/core/"], "exclude": ["**/generated/"] }
+  ```
+
+  A non-empty `include` restricts indexing to matching files. A malformed file is skipped
+  with a warning; it never fails the crawl.
+
+Files above `CODECRAWLER_MAX_FILE_BYTES` and files whose first 8 KB contain NUL bytes are
+skipped. Every crawl result reports them:
+
+| Field | Meaning |
+| --- | --- |
+| `filesSkipped` | Count of skipped files |
+| `skippedFiles` | `[{ path, reason }]`, reason is `too-large` or `binary` |
+| `parseErrors` | Per-file parse failures (capped at 50); a bad file never aborts the crawl |
+
+`crawl_project` also accepts MCP progress tokens and streams
+`notifications/progress` with `parse n/total` and `persist n/total` messages.
+
+### Error shape
+
+Every tool answers with either a success payload (`ok: true` plus results) or a uniform
+failure payload — handlers never throw across the MCP boundary:
+
+```json
+{ "ok": false, "error": "…message…", "hint": "Check the tool arguments and the index state (index_status); …" }
+```
 
 ### Wiring it into an MCP client
 

@@ -30,6 +30,8 @@ Environment:
   CODECRAWLER_EXCLUDE_DIRS     Comma-separated dirs to skip during crawl
   CODECRAWLER_DEFAULT_LIMIT    Default result limit for list queries
   CODECRAWLER_MAX_DEPTH        Traversal depth cap
+  CODECRAWLER_MAX_FILE_BYTES   Skip source files larger than this (default 1000000)
+  CODECRAWLER_RESPECT_GITIGNORE Honor .gitignore during crawl (default true)
 `);
 }
 
@@ -64,13 +66,40 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       }
       const store = makeStore(config);
       try {
-        const result = await crawlProject(store, target, config.excludeDirs);
+        let lastBucket = -1;
+        const result = await crawlProject(store, target, config.excludeDirs, {
+          respectGitignore: config.respectGitignore,
+          maxFileBytes: config.maxFileBytes,
+          onProgress: (progress) => {
+            const percent =
+              progress.total === 0 ? 100 : Math.floor((progress.processed / progress.total) * 100);
+            const bucket = Math.floor(percent / 10);
+            if (bucket === lastBucket) return;
+            lastBucket = bucket;
+            console.error(
+              `code-crawler: ${progress.phase} ${percent}% (${progress.processed}/${progress.total})`
+            );
+          },
+        });
         console.error(
           `code-crawler: indexed ${result.filesParsed}/${result.filesScanned} files ` +
             `(${result.nodes} nodes, ${result.edges} edges, ` +
             `${result.resolvedCalls} resolved / ${result.unresolvedCalls} unresolved calls) ` +
             `in ${result.durationMs}ms`
         );
+        if (result.filesSkipped > 0) {
+          console.error(
+            `code-crawler: skipped ${result.filesSkipped} file(s) (too large or binary)`
+          );
+        }
+        for (const failure of result.parseErrors.slice(0, 10)) {
+          console.error(`code-crawler: parse failed: ${failure}`);
+        }
+        if (result.parseErrors.length > 10) {
+          console.error(
+            `code-crawler: ...and ${result.parseErrors.length - 10} more parse failure(s)`
+          );
+        }
       } catch (err) {
         console.error(`code-crawler: ${(err as Error).message}`);
         process.exitCode = 1;

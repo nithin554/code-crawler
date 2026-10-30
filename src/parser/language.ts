@@ -236,6 +236,8 @@ export interface ParsedFile {
   routes?: RouteRegistration[];
   /** Entry point when the whole file is one (e.g. `__main__` script). */
   entryPoint?: EntryPointInfo;
+  /** Total source lines, when the crawler already read the file. */
+  lineCount?: number;
 }
 
 export interface ParseContext {

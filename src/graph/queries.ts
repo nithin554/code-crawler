@@ -103,7 +103,7 @@ export function getCallers(
   const kinds = traversalEdgeKinds(opts);
 
   if (!transitive) {
-    const rows = store.raw(
+    const rows = store.raw<(RowWithEdge & { edge_kind: EdgeKind })>(
       `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
               e.properties AS edge_props, e.kind AS edge_kind
        FROM edges e
@@ -113,7 +113,7 @@ export function getCallers(
        LIMIT ?`,
       target.id,
       limit
-    ) as (RowWithEdge & { edge_kind: EdgeKind })[];
+    );
     return {
       target: nodeToRef(target),
       callers: rows.map((r) => ({
@@ -126,7 +126,7 @@ export function getCallers(
     };
   }
 
-  const rows = store.raw(
+  const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
     `WITH RECURSIVE callers(id, depth, path, edge_kind, edge_props) AS (
        SELECT e.source, 1, e.source || '/' || e.target, e.kind, e.properties
        FROM edges e
@@ -148,7 +148,7 @@ export function getCallers(
     target.id,
     maxDepth,
     limit
-  ) as (RowWithEdge & { depth: number; edge_kind: EdgeKind })[];
+  );
 
   return {
     target: nodeToRef(target),
@@ -189,7 +189,7 @@ export function getCallees(
   const kinds = traversalEdgeKinds(opts);
 
   if (!transitive) {
-    const rows = store.raw(
+    const rows = store.raw<(RowWithEdge & { edge_kind: EdgeKind })>(
       `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
               e.properties AS edge_props, e.kind AS edge_kind
        FROM edges e
@@ -199,7 +199,7 @@ export function getCallees(
        LIMIT ?`,
       source.id,
       limit
-    ) as (RowWithEdge & { edge_kind: EdgeKind })[];
+    );
     return {
       source: nodeToRef(source),
       callees: rows.map((r) => ({
@@ -212,7 +212,7 @@ export function getCallees(
     };
   }
 
-  const rows = store.raw(
+  const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
     `WITH RECURSIVE callees(id, depth, path, edge_kind, edge_props) AS (
        SELECT e.target, 1, e.source || '/' || e.target, e.kind, e.properties
        FROM edges e
@@ -234,7 +234,7 @@ export function getCallees(
     source.id,
     maxDepth,
     limit
-  ) as (RowWithEdge & { depth: number; edge_kind: EdgeKind })[];
+  );
 
   return {
     source: nodeToRef(source),
@@ -285,7 +285,7 @@ export function tracePath(
   const kinds = sqlKinds(traversalEdgeKinds(opts));
 
   // BFS in SQL via recursive CTE that accumulates the path taken.
-  const rows = store.raw(
+  const rows = store.raw<{ path: string; edge_path: string; depth: number }>(
     `WITH RECURSIVE paths(id, depth, path, edge_path) AS (
        SELECT e.target, 1, e.source || '/' || e.target,
               e.source || '>' || e.target || '>' || e.kind
@@ -309,7 +309,7 @@ export function tracePath(
     maxDepth,
     goal.id,
     limit
-  ) as { path: string; edge_path: string; depth: number }[];
+  );
 
   return rows.map((r) => {
     const ids = r.path.split("/");
@@ -324,12 +324,12 @@ export function tracePath(
         callSiteLine: undefined as number | undefined,
         resolved: undefined as boolean | undefined,
       };
-      const props = store.raw(
+      const props = store.raw<{ properties: string }>(
         "SELECT properties FROM edges WHERE source = ? AND target = ? AND kind = ? LIMIT 1",
         edge.source,
         edge.target,
         edge.kind
-      ) as { properties: string }[];
+      );
       const parsed = props[0]
         ? (JSON.parse(props[0].properties) as { line?: number; resolved?: boolean })
         : undefined;
@@ -385,7 +385,7 @@ export function traceExecution(
        WHERE a.kind = 'ADVISES'`
     : "";
 
-  const rows = store.raw(
+  const rows = store.raw<(RowWithEdge & { depth: number; via: EdgeKind | "INTERCEPT" | null; step_props: string | null })>(
     `WITH RECURSIVE flow(source, target, kind, properties, advice_hop) AS (
        SELECT source, target, kind, properties, 0 FROM edges WHERE kind IN (${base})
        ${interceptJoin}
@@ -410,7 +410,7 @@ export function traceExecution(
     root.id,
     maxDepth,
     limit
-  ) as (RowWithEdge & { depth: number; via: EdgeKind | "INTERCEPT" | null; step_props: string | null })[];
+  );
 
   // Multiple runtime paths can reach the same symbol; report it once at the
   // shallowest depth so the trace reads as execution order, not all paths.
@@ -475,7 +475,7 @@ export function getSubgraph(
   const limit = opts.limit ?? 500;
 
   const kinds = edgeKinds.map((k) => `'${k}'`).join(",");
-  const rows = store.raw(
+  const rows = store.raw<Row>(
     `WITH RECURSIVE reach(id, depth) AS (
        SELECT ? , 0
        UNION
@@ -498,14 +498,14 @@ export function getSubgraph(
     radius,
     radius,
     limit
-  ) as Row[];
+  );
 
   const nodes = rows.map(rowToRef);
   const ids = nodes.map((n) => n.id);
   if (ids.length === 0) return { center: nodeToRef(center), nodes, edges: [] };
 
   const placeholders = ids.map(() => "?").join(",");
-  const edgeRows = store.raw(
+  const edgeRows = store.raw<{ source: string; target: string; kind: EdgeKind; properties: string }>(
     `SELECT source, target, kind, properties
      FROM edges
      WHERE kind IN (${kinds})
@@ -514,7 +514,7 @@ export function getSubgraph(
     ...ids,
     ...ids,
     limit
-  ) as { source: string; target: string; kind: EdgeKind; properties: string }[];
+  );
 
   return {
     center: nodeToRef(center),
@@ -556,7 +556,7 @@ export function searchSymbols(
   if (opts.kind) params.push(opts.kind);
   params.push(q, q, q, prefix, prefix, limit);
 
-  const rows = store.raw(
+  const rows = store.raw<Row>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM nodes n
      WHERE (LOWER(n.id) LIKE ? OR LOWER(n.qualified_name) LIKE ?)
@@ -576,7 +576,7 @@ export function searchSymbols(
        n.id
      LIMIT ?`,
     ...params
-  ) as Row[];
+  );
 
   return rows.map((r) => rowToRef(r));
 }
@@ -615,7 +615,7 @@ export function findImplementations(
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
 
-  const rows = store.raw(
+  const rows = store.raw<(Row & { depth: number; via: "EXTENDS" | "IMPLEMENTS" })>(
     `WITH RECURSIVE impl(id, depth, path, via) AS (
        SELECT e.source, 1, e.source || '/' || e.target, e.kind
        FROM edges e
@@ -638,7 +638,7 @@ export function findImplementations(
     target.id,
     maxDepth,
     limit
-  ) as (Row & { depth: number; via: "EXTENDS" | "IMPLEMENTS" })[];
+  );
 
   return {
     target: nodeToRef(target),
@@ -665,18 +665,18 @@ export interface AspectDetail {
 /** List aspects, their advice methods, and the methods each advice intercepts. */
 export function getAspects(store: GraphStore, opts: { limit?: number } = {}): AspectDetail[] {
   const limit = opts.limit ?? store.defaultLimit ?? 50;
-  const aspectRows = store.raw(
+  const aspectRows = store.raw<Row>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM nodes n
      WHERE n.kind = 'aspect'
      ORDER BY n.qualified_name
      LIMIT ?`,
     limit
-  ) as Row[];
+  );
 
   return aspectRows.map((row) => {
     const aspect = rowToRef(row);
-    const members = store.raw(
+    const members = store.raw<Row>(
       `SELECT m.id, m.qualified_name, m.kind, m.file_path, m.properties
        FROM edges e
        JOIN nodes m ON m.id = e.target
@@ -684,7 +684,7 @@ export function getAspects(store: GraphStore, opts: { limit?: number } = {}): As
          AND m.kind = 'method'
        ORDER BY m.qualified_name`,
       aspect.id
-    ) as Row[];
+    );
 
     const advice: AdviceDetail[] = [];
     for (const member of members) {
@@ -692,14 +692,14 @@ export function getAspects(store: GraphStore, opts: { limit?: number } = {}): As
         adviceKind?: string;
         pointcut?: string;
       };
-      const advisedRows = store.raw(
+      const advisedRows = store.raw<Row>(
         `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
          FROM edges e
          JOIN nodes n ON n.id = e.target
          WHERE e.source = ? AND e.kind = 'ADVISES'
          ORDER BY n.qualified_name`,
         member.id
-      ) as Row[];
+      );
       if (!props.adviceKind && advisedRows.length === 0) continue;
       advice.push({
         method: rowToRef(member),
@@ -730,14 +730,14 @@ export interface SymbolDecorators {
 function decoratorsFor(store: GraphStore, ids: string[]): DecoratorInfo[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => "?").join(",");
-  const rows = store.raw(
+  const rows = store.raw<{ qualified_name: string; ann_props: string; edge_props: string }>(
     `SELECT a.qualified_name, a.properties AS ann_props, e.properties AS edge_props
      FROM edges e
      JOIN nodes a ON a.id = e.target
      WHERE e.kind = 'ANNOTATED_WITH' AND e.source IN (${placeholders})
      ORDER BY a.qualified_name`,
     ...ids
-  ) as { qualified_name: string; ann_props: string; edge_props: string }[];
+  );
 
   return rows.map((r) => {
     const ann = JSON.parse(r.ann_props) as {
@@ -771,7 +771,7 @@ export function getDecorators(
   const decorators = decoratorsFor(store, [node.id]);
   if (!opts.includeMembers) return { symbol: nodeToRef(node), decorators, members: [] };
 
-  const memberRows = store.raw(
+  const memberRows = store.raw<Row>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM edges e
      JOIN nodes n ON n.id = e.target
@@ -779,7 +779,7 @@ export function getDecorators(
        AND n.kind IN ('method', 'constructor', 'field')
      ORDER BY n.qualified_name`,
     node.id
-  ) as Row[];
+  );
 
   return {
     symbol: nodeToRef(node),
@@ -824,7 +824,7 @@ export function findAnnotated(
   if (opts.kind) params.push(opts.kind);
   params.push(limit);
 
-  const rows = store.raw(
+  const rows = store.raw<(Row & { ann_props: string; edge_props: string })>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
             a.properties AS ann_props, e.properties AS edge_props
      FROM edges e
@@ -836,7 +836,7 @@ export function findAnnotated(
      ORDER BY n.qualified_name
      LIMIT ?`,
     ...params
-  ) as (Row & { ann_props: string; edge_props: string })[];
+  );
 
   return rows.map((r) => {
     const ann = JSON.parse(r.ann_props) as { name?: string; fqn?: string };
@@ -866,7 +866,7 @@ export function hotspots(
   const minFanIn = opts.minFanIn ?? 0;
   const kinds = sqlKinds(traversalEdgeKinds({ includeDynamic: opts.includeDynamic ?? true }));
 
-  const rows = store.raw(
+  const rows = store.raw<(Row & { fan_in: number; fan_out: number; advice_count: number })>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
        (SELECT COUNT(DISTINCT e.source) FROM edges e
           WHERE e.target = n.id AND e.kind IN (${kinds})) AS fan_in,
@@ -879,7 +879,7 @@ export function hotspots(
      ORDER BY fan_in DESC, fan_out DESC, n.qualified_name
      LIMIT ?`,
     limit * 4
-  ) as (Row & { fan_in: number; fan_out: number; advice_count: number })[];
+  );
 
   return rows
     .filter((r) => r.fan_in >= minFanIn)
@@ -945,14 +945,14 @@ export function deadCode(
     );
   }
 
-  const rows = store.raw(
+  const rows = store.raw<Row>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM nodes n
      WHERE ${conditions.join(" AND ")}
      ORDER BY n.qualified_name
      LIMIT ?`,
     limit
-  ) as Row[];
+  );
 
   return rows.map((r) => ({
     symbol: rowToRef(r),
@@ -982,7 +982,7 @@ export function findEntryPoints(
     conditions.push("json_extract(n.properties, '$.entryPointKind') = ?");
     params.push(opts.kind);
   }
-  const rows = store.raw(
+  const rows = store.raw<Row>(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM nodes n
      WHERE ${conditions.join(" AND ")}
@@ -990,7 +990,7 @@ export function findEntryPoints(
      LIMIT ?`,
     ...params,
     limit
-  ) as Row[];
+  );
 
   return rows.map((r) => {
     const props = JSON.parse(r.properties) as { entryPointKind?: string; entryPointDetail?: string };
@@ -1026,7 +1026,7 @@ function wiringEdges(
 ): WiringEdge[] {
   const anchor = symbol ? resolveNode(store, symbol) : null;
   if (symbol && !anchor) return [];
-  const rows = store.raw(
+  const rows = store.raw<WiringRow>(
     `SELECT e.properties AS edge_props, e.source AS source_id, e.target AS target_id,
             s.id AS s_id, s.qualified_name AS s_qn, s.kind AS s_kind, s.file_path AS s_file, s.properties AS s_props,
             t.id AS t_id, t.qualified_name AS t_qn, t.kind AS t_kind, t.file_path AS t_file, t.properties AS t_props
@@ -1038,7 +1038,7 @@ function wiringEdges(
      ORDER BY s.qualified_name, t.qualified_name
      LIMIT ?`,
     ...(anchor ? [kind, anchor.id, anchor.id, limit] : [kind, limit])
-  ) as WiringRow[];
+  );
 
   return rows.map((r) => {
     const props = JSON.parse(r.edge_props ?? "{}") as {
@@ -1116,7 +1116,7 @@ export function externalDependencies(
   opts: { limit?: number } = {}
 ): ExternalDependency[] {
   const limit = opts.limit ?? store.defaultLimit ?? 50;
-  const rows = store.raw(
+  const rows = store.raw<{ package: string; references: number; files: number; kinds: string }>(
     `SELECT t.qualified_name AS package,
             COUNT(*) AS "references",
             COUNT(DISTINCT s.file_path) AS "files",
@@ -1129,7 +1129,7 @@ export function externalDependencies(
      ORDER BY "references" DESC, package
      LIMIT ?`,
     limit
-  ) as { package: string; references: number; files: number; kinds: string }[];
+  );
 
   return rows.map((r) => ({
     package: r.package.replace(/^ext:/, ""),

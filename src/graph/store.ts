@@ -59,6 +59,21 @@ CREATE TABLE IF NOT EXISTS crawl_meta (
 );
 `;
 
+/**
+ * Bumped whenever a migration below changes the on-disk shape. Databases
+ * created before versioning was introduced are stamped at this version when
+ * first opened, because the schema is already idempotent.
+ */
+const SCHEMA_VERSION = 1;
+
+interface Migration {
+  version: number;
+  up(db: Database.Database): void;
+}
+
+/** Ordered, idempotent upgrades. Append new entries; never rewrite history. */
+const MIGRATIONS: Migration[] = [];
+
 export interface StoreStats {
   nodes: number;
   edges: number;
@@ -115,6 +130,47 @@ export class GraphStore {
       `INSERT INTO crawl_meta (key, value) VALUES (@key, @value)
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`
     );
+
+    try {
+      this.migrate();
+    } catch (err) {
+      // A failed open must not keep the SQLite handle (and its WAL files)
+      // alive, or the offending database cannot even be deleted by the user.
+      this.db.close();
+      throw err;
+    }
+  }
+
+  /**
+   * Bring the database up to SCHEMA_VERSION, or fail loudly when it was
+   * written by a newer build. Never silently tolerate an unknown shape.
+   */
+  private migrate(): void {
+    const stored = this.getMeta("schema_version");
+    const found = stored === null ? 0 : Number.parseInt(stored, 10);
+    if (!Number.isInteger(found) || found < 0) {
+      throw new Error(
+        `index has an unreadable schema_version (${JSON.stringify(stored)}); ` +
+          `run clear_index and crawl again`
+      );
+    }
+    if (found > SCHEMA_VERSION) {
+      throw new Error(
+        `index schema version ${found} is newer than this build supports (${SCHEMA_VERSION}); ` +
+          `upgrade code-crawler or point CODECRAWLER_DB at a separate database`
+      );
+    }
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= found) continue;
+      migration.up(this.db);
+      this.setMeta("schema_version", String(migration.version));
+    }
+    this.setMeta("schema_version", String(SCHEMA_VERSION));
+  }
+
+  /** Schema version stamped into this database. */
+  get schemaVersion(): number {
+    return SCHEMA_VERSION;
   }
 
   close(): void {
@@ -302,6 +358,7 @@ export class GraphStore {
   clearAll(): void {
     const tx = this.db.transaction(() => {
       this.db.exec("DELETE FROM edges; DELETE FROM nodes; DELETE FROM crawl_meta;");
+      this.setMeta("schema_version", String(SCHEMA_VERSION));
     });
     tx();
   }
@@ -321,8 +378,12 @@ export class GraphStore {
    * Store and expose tree-sitter-compatible positions (0-based line) and let
    * the presentation layer add +1 where humans expect 1-based lines.
    */
-  raw(sql: string, ...params: unknown[]): unknown {
-    return this.db.prepare(sql).all(...params);
+  /**
+   * Escape hatch for ad-hoc SQL. The row shape is the caller's contract, so
+   * pass it as a type parameter instead of casting the result at every call.
+   */
+  raw<T = unknown>(sql: string, ...params: unknown[]): T[] {
+    return this.db.prepare(sql).all(...params) as T[];
   }
 }
 
