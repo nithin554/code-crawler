@@ -80,9 +80,19 @@ and answers them with bounded recursive SQL queries.
   bare/`this`/`super` calls, static/qualified calls, and superclass chains.
   Unresolvable calls become `unknown_symbol` phantom nodes with `resolved:false` edges,
   so the graph stays traversable.
-- **Idempotent, file-scoped indexing** — a full re-crawl refreshes changed files, rebuilds
-  derived dynamic edges, and removes files that disappeared, without duplicating the graph.
-  Scoped crawls (`fileFilter` or a forced `language`) never remove files outside their scope.
+- **Incremental, file-scoped indexing** — each crawl records a per-file manifest
+  (`size`, mtime, SHA-256) and replays the cached parse result for files whose content is
+  unchanged, so a re-crawl re-parses only what actually changed. Changes are reported as
+  `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`. Derived dynamic edges
+  and orphan pruning are rebuilt only when something changed. A full re-crawl still removes
+  files that disappeared, without duplicating the graph, and scoped crawls (`fileFilter` or a
+  forced `language`) never remove files outside their scope.
+- **FTS5-backed symbol search** — symbol lookup runs against an external-content FTS5 index
+  with BM25 ranking and exact/prefix boosting, falling back to a `LIKE` scan only when FTS
+  finds nothing. Search does not degrade as the graph grows.
+- **Versioned schema with automatic migration** — the database carries a schema version and
+  upgrades itself in place on open. A database written by a newer build is rejected with a
+  clear message instead of being read as if the shape were known.
 - **One project per database** — indexing a different project into the same database fails
   with a `clear_index` hint instead of silently wiping the first index.
 - **Analytics** — hotspots (fan-in/fan-out/advice counts) and dead-code candidates.
@@ -97,7 +107,8 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (158 tests)
+npm test             # vitest (174 tests; run with CODECRAWLER_BENCH=1 for the scale test)
+npm run bench        # crawl/query benchmark on a generated ~137k-line project
 ```
 
 ## CLI
@@ -148,6 +159,68 @@ other `CODECRAWLER_EXCLUDE_DIRS` entries. On top of that:
 
 Only the root `.gitignore` is read — nested `.gitignore` files are not yet
 supported.
+
+## Incremental crawls
+
+A crawl records a manifest row per file (`size`, mtime, SHA-256, language). On the
+next crawl a file whose size and truncated mtime both match is served from a cached
+parse result instead of being re-read and re-parsed; a file whose mtime changed but
+whose hash did not is also replayed from cache. Resolution, phantom-node creation and
+derived edges still run over the whole in-memory file set, so cross-file edges stay
+correct — only I/O, parsing and database writes are skipped.
+
+`crawl_project` reports the split:
+
+| Field | Meaning |
+| --- | --- |
+| `filesAdded` | First seen by this crawl |
+| `filesUpdated` | Content changed, re-parsed |
+| `filesUnchanged` | Replayed from the parse cache |
+| `filesRemoved` | Disappeared from disk and were pruned |
+
+**Known limitation:** because an unchanged file's edges are not rewritten, a call that
+becomes *newly resolvable* only because some other file changed (for example a method
+gained an overload, or a class was introduced that a previously-ambiguous call could
+now bind to) will not be upgraded in the untouched file. Touch that file, or run
+`clear_index`, to force full resolution.
+
+## Benchmarks
+
+`npm run bench` generates a synthetic TypeScript project (575 modules, ~137k lines,
+~9.8k methods), crawls it, and reports crawl phases and query latency percentiles.
+`tests/perf.test.ts` asserts the same budgets and is opt-in, because a realistic
+corpus takes time to crawl:
+
+```bash
+npm run bench                                        # human-readable report
+CODECRAWLER_BENCH=1 npm test -- tests/perf.test.ts   # enforce the budgets
+CODECRAWLER_BENCH_LINES=20000 npm run bench          # smaller corpus
+```
+
+Measured on a Windows dev laptop (Node 20, warm disk cache); absolute numbers vary,
+the *ratios* and the index usage are what matter:
+
+| Phase | Duration | Added | Updated | Unchanged |
+| --- | --- | --- | --- | --- |
+| Cold crawl | 22.5 s | 575 | 0 | 0 |
+| Re-crawl, nothing changed | 0.91 s | 0 | 0 | 575 |
+| Re-crawl after a one-file edit | 0.75 s | 0 | 1 | 574 |
+
+| Query | p50 | p95 | Budget (p95) |
+| --- | --- | --- | --- |
+| `search_symbols` (exact) | 0.69 ms | 1.96 ms | 50 ms |
+| `search_symbols` (prefix) | 1.60 ms | 4.09 ms | 50 ms |
+| `get_callers` (depth 2) | 0.16 ms | 0.21 ms | 50 ms |
+| `get_callees` (depth 2) | 0.11 ms | 0.15 ms | 50 ms |
+| `get_subgraph` (radius 2) | 0.16 ms | 0.27 ms | 50 ms |
+| `find_entry_points` | 0.12 ms | 0.29 ms | 50 ms |
+| `find_hotspots` | 145.5 ms | 181.4 ms | 1000 ms |
+| `find_dead_code` | 99.8 ms | 290.3 ms | 1000 ms |
+
+The index is 66 MB for those 14.4k nodes / 38.8k edges. `find_hotspots` and
+`find_dead_code` are whole-project aggregations over every edge and node, which is why
+their band is an order of magnitude looser than the symbol lookups; both were profiled
+with `EXPLAIN QUERY PLAN` and are served by `idx_edges_target_kind`.
 
 ## CI & publishing
 

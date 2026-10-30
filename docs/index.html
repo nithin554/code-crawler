@@ -77,7 +77,7 @@
             </div>
             <div class="hero-badges">
               <span class="badge"><b>22</b> MCP tools</span>
-              <span class="badge"><b>158</b> tests passing</span>
+              <span class="badge"><b>174</b> tests passing</span>
               <span class="badge"><b>0</b> external services</span>
               <span class="badge">TypeScript · Node ≥ 20</span>
             </div>
@@ -156,10 +156,18 @@
               </p>
             </article>
             <article class="card">
+              <h3><span class="icon" aria-hidden="true">↻</span> Incremental crawls</h3>
+              <p>
+                A per-file manifest of size, mtime, and SHA-256 lets a re-crawl replay
+                unchanged files instead of re-parsing them — 0.9&nbsp;s instead of 22&nbsp;s
+                on a 137k-line project. Reports added, updated, unchanged, and removed.
+              </p>
+            </article>
+            <article class="card">
               <h3><span class="icon" aria-hidden="true">▣</span> One SQLite file</h3>
               <p>
-                Persistent, idempotent, file-scoped indexing. No server, no docker, no
-                external database — just <code>index.db</code>.
+                Persistent, file-scoped indexing with a versioned, self-migrating schema.
+                No server, no docker, no external database — just <code>index.db</code>.
               </p>
             </article>
           </div>
@@ -254,7 +262,10 @@ npm run build</code></pre>
             </div>
             <div class="step">
               <h3>Index a project</h3>
-              <p>Re-run any time; the crawl is idempotent and refreshes changed files.</p>
+              <p>
+                Re-run any time; the crawl is incremental and only re-parses files whose
+                content changed.
+              </p>
               <pre><code>node dist/index.js crawl /absolute/path/to/your-project
 node dist/index.js status</code></pre>
             </div>

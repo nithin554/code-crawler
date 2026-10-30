@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   id             TEXT PRIMARY KEY,
   kind           TEXT NOT NULL,
   qualified_name TEXT NOT NULL,
+  name           TEXT,
   file_path      TEXT,
   properties     TEXT NOT NULL DEFAULT '{}',
   updated_at     INTEGER NOT NULL DEFAULT (unixepoch())
@@ -49,9 +50,11 @@ CREATE TABLE IF NOT EXISTS edges (
   FOREIGN KEY (source) REFERENCES nodes (id) ON DELETE CASCADE,
   FOREIGN KEY (target) REFERENCES nodes (id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_edges_source ON edges (source);
-CREATE INDEX IF NOT EXISTS idx_edges_target ON edges (target);
-CREATE INDEX IF NOT EXISTS idx_edges_kind   ON edges (kind);
+-- Traversals always filter on one endpoint *and* an edge-kind list, so the
+-- composite indexes replace the single-column ones of schema version 1.
+CREATE INDEX IF NOT EXISTS idx_edges_source_kind ON edges (source, kind);
+CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON edges (target, kind);
+CREATE INDEX IF NOT EXISTS idx_edges_kind        ON edges (kind);
 
 CREATE TABLE IF NOT EXISTS crawl_meta (
   key   TEXT PRIMARY KEY,
@@ -60,11 +63,64 @@ CREATE TABLE IF NOT EXISTS crawl_meta (
 `;
 
 /**
+ * Full-text index over node names. External-content FTS5 keeps the text in
+ * `nodes` (no duplication) and triggers keep the index in sync with every
+ * write path, including cascading deletes.
+ */
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+  id,
+  qualified_name,
+  name,
+  content='nodes',
+  content_rowid='rowid',
+  tokenize='unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS nodes_fts_ai AFTER INSERT ON nodes BEGIN
+  INSERT INTO nodes_fts (rowid, id, qualified_name, name)
+  VALUES (new.rowid, new.id, new.qualified_name, COALESCE(new.name, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
+  INSERT INTO nodes_fts (nodes_fts, rowid, id, qualified_name, name)
+  VALUES ('delete', old.rowid, old.id, old.qualified_name, COALESCE(old.name, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
+  INSERT INTO nodes_fts (nodes_fts, rowid, id, qualified_name, name)
+  VALUES ('delete', old.rowid, old.id, old.qualified_name, COALESCE(old.name, ''));
+  INSERT INTO nodes_fts (rowid, id, qualified_name, name)
+  VALUES (new.rowid, new.id, new.qualified_name, COALESCE(new.name, ''));
+END;
+`;
+
+/** Per-file crawl manifest: change detection plus the cached parse result. */
+const FILES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS files (
+  path       TEXT PRIMARY KEY,
+  size       INTEGER NOT NULL,
+  mtime_ms   INTEGER NOT NULL,
+  sha256     TEXT NOT NULL,
+  language   TEXT NOT NULL,
+  summary    TEXT,
+  indexed_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+`;
+
+/** Indexes that match the shapes the query layer actually asks for. */
+const QUERY_INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_nodes_name_col    ON nodes (name);
+CREATE INDEX IF NOT EXISTS idx_edges_source_kind ON edges (source, kind);
+CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON edges (target, kind);
+-- find_entry_points used to scan every node through json_extract().
+CREATE INDEX IF NOT EXISTS idx_nodes_entry_point
+  ON nodes (json_extract(properties, '$.entryPoint'));
+`;
+
+/**
  * Bumped whenever a migration below changes the on-disk shape. Databases
  * created before versioning was introduced are stamped at this version when
  * first opened, because the schema is already idempotent.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 interface Migration {
   version: number;
@@ -72,13 +128,56 @@ interface Migration {
 }
 
 /** Ordered, idempotent upgrades. Append new entries; never rewrite history. */
-const MIGRATIONS: Migration[] = [];
+const MIGRATIONS: Migration[] = [
+  {
+    version: 2,
+    up(db) {
+      db.exec(FILES_SCHEMA);
+      const columns = db.prepare("PRAGMA table_info(nodes)").all() as { name: string }[];
+      if (!columns.some((c) => c.name === "name")) {
+        db.exec("ALTER TABLE nodes ADD COLUMN name TEXT");
+      }
+      // Backfill the denormalised display name for rows written by v1.
+      const pending = db
+        .prepare("SELECT rowid AS rid, qualified_name AS qn FROM nodes WHERE name IS NULL")
+        .all() as { rid: number; qn: string }[];
+      if (pending.length > 0) {
+        const update = db.prepare("UPDATE nodes SET name = ? WHERE rowid = ?");
+        for (const row of pending) update.run(displayName(row.qn), row.rid);
+      }
+      db.exec("DROP INDEX IF EXISTS idx_edges_source; DROP INDEX IF EXISTS idx_edges_target;");
+      db.exec(QUERY_INDEXES);
+      db.exec(FTS_SCHEMA);
+      // Populate the FTS index from existing content (no-op on a fresh DB).
+      db.exec("INSERT INTO nodes_fts (nodes_fts) VALUES ('rebuild')");
+    },
+  },
+];
+
+/** The short display name: the last `#` or `.` segment of a qualified name. */
+function displayName(qualifiedName: string): string {
+  const hash = qualifiedName.lastIndexOf("#");
+  if (hash >= 0) return qualifiedName.slice(hash + 1);
+  const dot = qualifiedName.lastIndexOf(".");
+  return dot >= 0 ? qualifiedName.slice(dot + 1) : qualifiedName;
+}
 
 export interface StoreStats {
   nodes: number;
   edges: number;
   files: number;
   lastCrawl: string | null;
+}
+
+/** One row of the crawl manifest, used to skip unchanged files. */
+export interface FileRecord {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  sha256: string;
+  language: string;
+  /** Serialised `ParsedFile` (see `parser/cache.ts`), when one was stored. */
+  summary: string | null;
 }
 
 export class GraphStore {
@@ -104,35 +203,36 @@ export class GraphStore {
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);
 
-    this.insertNodeStmt = this.db.prepare(`
-      INSERT INTO nodes (id, kind, qualified_name, file_path, properties)
-      VALUES (@id, @kind, @qualifiedName, @filePath, @properties)
-      ON CONFLICT (id) DO UPDATE SET
-        kind = excluded.kind,
-        qualified_name = excluded.qualified_name,
-        file_path = excluded.file_path,
-        properties = excluded.properties,
-        updated_at = unixepoch()
-    `);
-
-    this.insertEdgeStmt = this.db.prepare(`
-      INSERT INTO edges (source, target, kind, properties)
-      VALUES (@source, @target, @kind, @properties)
-      ON CONFLICT (source, target, kind) DO UPDATE SET
-        properties = excluded.properties,
-        created_at = unixepoch()
-    `);
-
-    this.deleteFileNodesStmt = this.db.prepare(
-      "DELETE FROM nodes WHERE file_path = ?"
-    );
-    this.updateMetaStmt = this.db.prepare(
-      `INSERT INTO crawl_meta (key, value) VALUES (@key, @value)
-       ON CONFLICT (key) DO UPDATE SET value = excluded.value`
-    );
-
     try {
+      // Migrations may add columns the prepared statements below depend on, so
+      // they must run first. Only the meta statement is safe before them.
+      this.updateMetaStmt = this.db.prepare(
+        `INSERT INTO crawl_meta (key, value) VALUES (@key, @value)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+      );
       this.migrate();
+
+      this.insertNodeStmt = this.db.prepare(`
+        INSERT INTO nodes (id, kind, qualified_name, name, file_path, properties)
+        VALUES (@id, @kind, @qualifiedName, @name, @filePath, @properties)
+        ON CONFLICT (id) DO UPDATE SET
+          kind = excluded.kind,
+          qualified_name = excluded.qualified_name,
+          name = excluded.name,
+          file_path = excluded.file_path,
+          properties = excluded.properties,
+          updated_at = unixepoch()
+      `);
+
+      this.insertEdgeStmt = this.db.prepare(`
+        INSERT INTO edges (source, target, kind, properties)
+        VALUES (@source, @target, @kind, @properties)
+        ON CONFLICT (source, target, kind) DO UPDATE SET
+          properties = excluded.properties,
+          created_at = unixepoch()
+      `);
+
+      this.deleteFileNodesStmt = this.db.prepare("DELETE FROM nodes WHERE file_path = ?");
     } catch (err) {
       // A failed open must not keep the SQLite handle (and its WAL files)
       // alive, or the offending database cannot even be deleted by the user.
@@ -185,6 +285,7 @@ export class GraphStore {
       id: node.id,
       kind: node.kind,
       qualifiedName: node.qualifiedName,
+      name: node.properties.name ?? displayName(node.qualifiedName),
       filePath: node.filePath,
       properties: JSON.stringify(node.properties),
     });
@@ -254,6 +355,74 @@ export class GraphStore {
    */
   removeFile(filePath: string): void {
     this.deleteFileNodesStmt.run(filePath);
+    this.db.prepare("DELETE FROM files WHERE path = ?").run(filePath);
+  }
+
+  /** Crawl manifest of every indexed file, keyed by absolute path. */
+  listFileRecords(): Map<string, FileRecord> {
+    const rows = this.db
+      .prepare("SELECT path, size, mtime_ms, sha256, language, summary FROM files")
+      .all() as {
+      path: string;
+      size: number;
+      mtime_ms: number;
+      sha256: string;
+      language: string;
+      summary: string | null;
+    }[];
+    const out = new Map<string, FileRecord>();
+    for (const row of rows) {
+      out.set(row.path, {
+        path: row.path,
+        size: row.size,
+        mtimeMs: row.mtime_ms,
+        sha256: row.sha256,
+        language: row.language,
+        summary: row.summary,
+      });
+    }
+    return out;
+  }
+
+  putFileRecord(record: FileRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO files (path, size, mtime_ms, sha256, language, summary, indexed_at)
+         VALUES (@path, @size, @mtimeMs, @sha256, @language, @summary, unixepoch())
+         ON CONFLICT (path) DO UPDATE SET
+           size = excluded.size,
+           mtime_ms = excluded.mtime_ms,
+           sha256 = excluded.sha256,
+           language = excluded.language,
+           summary = excluded.summary,
+           indexed_at = unixepoch()`
+      )
+      .run({
+        path: record.path,
+        size: record.size,
+        mtimeMs: record.mtimeMs,
+        sha256: record.sha256,
+        language: record.language,
+        summary: record.summary,
+      });
+  }
+
+  /**
+   * Flag a symbol as a framework-invoked entry point without rewriting the
+   * rest of its properties. Used for symbols in files that were not re-parsed,
+   * whose persisted row still needs the cross-file route annotation.
+   */
+  markEntryPoint(id: string, kind: string, detail: string): boolean {
+    const info = this.db
+      .prepare(
+        `UPDATE nodes
+         SET properties = json_set(properties, '$.entryPoint', json('true'),
+                                   '$.entryPointKind', ?, '$.entryPointDetail', ?),
+             updated_at = unixepoch()
+         WHERE id = ? AND COALESCE(json_extract(properties, '$.entryPoint'), 0) <> 1`
+      )
+      .run(kind, detail, id);
+    return info.changes > 0;
   }
 
   /**
@@ -357,7 +526,7 @@ export class GraphStore {
 
   clearAll(): void {
     const tx = this.db.transaction(() => {
-      this.db.exec("DELETE FROM edges; DELETE FROM nodes; DELETE FROM crawl_meta;");
+      this.db.exec("DELETE FROM edges; DELETE FROM nodes; DELETE FROM files; DELETE FROM crawl_meta;");
       this.setMeta("schema_version", String(SCHEMA_VERSION));
     });
     tx();
