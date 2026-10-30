@@ -102,7 +102,7 @@ and answers them with bounded recursive SQL queries.
 
 ## Install & build
 
-Requires Node.js ≥ 20.
+Requires Node.js ≥ 22.12 (`better-sqlite3@13` and the Vitest toolchain both need it).
 
 ```bash
 npm install
