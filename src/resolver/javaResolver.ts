@@ -1,4 +1,5 @@
 import type { JavaParsedFile } from "../parser/languages/java.js";
+import { type ArgumentTypeHints, inferArgumentTypes, pickOverload } from "./common.js";
 import { phantomNodeId, type ResolvedCall, type TypeIndex } from "./types.js";
 
 /**
@@ -55,12 +56,14 @@ function resolveCall(
     if (types.length === 0) {
       return { ...phantom, reason: `type "${call.name}" not found in project` };
     }
+    const argTypes = inferArgumentTypes(call.argumentTexts);
     for (const fqn of types) {
-      const ctor = `${fqn}#<init>`;
-      if (index.methodsByFqn.get(fqn)?.some((m) => m.id === ctor)) {
+      const ctors = (index.methodsByFqn.get(fqn) ?? []).filter((m) => m.name === "<init>");
+      const match = pickOverload(ctors, call.argumentTexts.length, argTypes);
+      if (match) {
         return {
           callSite: call,
-          targetId: ctor,
+          targetId: match.id,
           resolved: true,
           confidence: 1.0,
           reason: `constructor of ${fqn}`,
@@ -86,11 +89,13 @@ function resolveCall(
     };
   }
 
+  const argTypes = inferArgumentTypes(call.argumentTexts);
   for (const typeFqn of candidates.types) {
     const found = findMethod(
       typeFqn,
       call.name,
       call.argumentTexts.length,
+      argTypes,
       index,
       searchInheritance
     );
@@ -223,15 +228,16 @@ function findMethod(
   typeFqn: string,
   methodName: string,
   argCount: number,
+  argTypes: ArgumentTypeHints,
   index: TypeIndex,
   searchInheritance: boolean
 ): FoundMethod | null {
   const direct = (index.methodsByFqn.get(typeFqn) ?? []).filter((m) => m.name === methodName);
-  const match = pickOverload(direct, argCount);
+  const match = pickOverload(direct, argCount, argTypes);
   if (match) return { method: { id: match.id }, confidence: 1.0, inherited: false };
 
   if (searchInheritance) {
-    const inherited = findInherited(typeFqn, methodName, argCount, index, new Set(), 0);
+    const inherited = findInherited(typeFqn, methodName, argCount, argTypes, index, new Set(), 0);
     if (inherited) return inherited;
   }
   return null;
@@ -241,6 +247,7 @@ function findInherited(
   typeFqn: string,
   methodName: string,
   argCount: number,
+  argTypes: ArgumentTypeHints,
   index: TypeIndex,
   visited: Set<string>,
   depth: number
@@ -252,25 +259,23 @@ function findInherited(
       const candidates = (index.methodsByFqn.get(parent) ?? []).filter(
         (m) => m.name === methodName
       );
-      const match = pickOverload(candidates, argCount);
+      const match = pickOverload(candidates, argCount, argTypes);
       if (match) {
         return { method: { id: match.id }, confidence: 0.9, inherited: true };
       }
-      const deeper = findInherited(parent, methodName, argCount, index, visited, depth + 1);
+      const deeper = findInherited(
+        parent,
+        methodName,
+        argCount,
+        argTypes,
+        index,
+        visited,
+        depth + 1
+      );
       if (deeper) return deeper;
     }
   }
   return null;
-}
-
-/** Pick the overload with matching arity; fall back to the first candidate. */
-function pickOverload(
-  methods: { id: string; name: string; params: unknown[] }[],
-  argCount: number
-) {
-  const exact = methods.find((m) => m.params.length === argCount);
-  if (exact) return exact;
-  return methods[0] ?? null;
 }
 
 /** Enclosing type + all ancestors, deduped, in order. */

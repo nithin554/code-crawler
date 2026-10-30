@@ -366,26 +366,124 @@ export function findInherited(index: TypeIndex, typeId: string, name: string): M
 }
 
 /**
- * Pick the overload whose arity best matches the call site.
- *
- * Ordered by how much the declaration proves about the call. A fixed-arity
- * declaration taking exactly this many arguments is the strongest signal, so
- * it wins over a variadic one. A variadic declaration is next, and accepts
- * anything at or above its fixed prefix. Only then do we fall back to looser
- * guesses, which is where ambiguity actually lives: parameter *types* are not
- * compared, so same-arity overloads resolve to the first declared.
+ * Inferred type name for each argument expression, or null when the text
+ * carries no type signal (an identifier, a field access, a method call).
  */
-export function pickOverload(methods: MethodInfo[], argCount: number): MethodInfo | undefined {
+export type ArgumentTypeHints = Array<string | null>;
+
+const STRING_LITERAL = /^"(?:[^"\\]|\\.)*"$/;
+const CHAR_LITERAL = /^'(?:[^'\\]|\\.)'$/;
+const LONG_LITERAL = /^-?\d+[lL]$/;
+const INT_LITERAL = /^-?\d+$/;
+const DOUBLE_LITERAL = /^-?(?:(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)[fFdD]?$/;
+const NEW_EXPRESSION = /^new\s+([\w.$]+)/;
+const CAST_EXPRESSION = /^\(\s*([A-Z][\w.$]*)\s*\)/;
+
+/** Strip type arguments, array brackets, and package qualification from a type name. */
+function simpleTypeName(type: string): string {
+  // Cut at the first `<` rather than matching `<...>` pairs: type arguments nest
+  // (`Map<String,List<Integer>>`), so a pairwise strip would leave a stray `>`.
+  const open = type.indexOf("<");
+  const head = (open === -1 ? type : type.slice(0, open)).replace(/\[\]/g, "").trim();
+  return head.split(".").pop() ?? head;
+}
+
+/**
+ * Infer the type of a single argument expression from its source text.
+ *
+ * Only literal and constructor forms are recognised, which is what makes this
+ * a safe signal: anything else returns null and leaves the choice to arity.
+ */
+export function inferArgumentType(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === "" || trimmed === "null") return null;
+  const newExpression = trimmed.match(NEW_EXPRESSION);
+  if (newExpression?.[1]) return simpleTypeName(newExpression[1]);
+  const cast = trimmed.match(CAST_EXPRESSION);
+  if (cast?.[1]) return simpleTypeName(cast[1]);
+  if (STRING_LITERAL.test(trimmed)) return "String";
+  if (CHAR_LITERAL.test(trimmed)) return "char";
+  if (trimmed === "true" || trimmed === "false") return "boolean";
+  if (LONG_LITERAL.test(trimmed)) return "long";
+  if (INT_LITERAL.test(trimmed)) return "int";
+  if (DOUBLE_LITERAL.test(trimmed)) return "double";
+  return null;
+}
+
+/** Infer a type hint for every argument expression. */
+export function inferArgumentTypes(texts: string[]): ArgumentTypeHints {
+  return texts.map(inferArgumentType);
+}
+
+/** Parameter types an inferred argument type converts to without a cast. */
+const WIDENS_TO: Record<string, string[]> = {
+  int: ["long", "double", "float", "Integer", "Long", "Number", "Object"],
+  long: ["double", "float", "Long", "Number", "Object"],
+  double: ["float", "Double", "Number", "Object"],
+  char: ["int", "Character", "Object"],
+  boolean: ["Boolean", "Object"],
+  String: ["CharSequence", "Object"],
+};
+
+/** 2 for an exact type match, 1 for a legal widening, 0 for anything else. */
+function typeMatchWeight(paramType: string, hint: string): number {
+  const param = simpleTypeName(paramType);
+  if (param === hint) return 2;
+  return WIDENS_TO[hint]?.includes(param) ? 1 : 0;
+}
+
+/** Highest-scoring candidate, or undefined when no argument type distinguishes them. */
+function bestByArgumentTypes(
+  candidates: MethodInfo[],
+  hints: ArgumentTypeHints
+): MethodInfo | undefined {
+  if (!hints.some((hint) => hint !== null)) return undefined;
+  let best: MethodInfo | undefined;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    let score = 0;
+    for (let i = 0; i < Math.min(candidate.params.length, hints.length); i++) {
+      const hint = hints[i];
+      if (hint === null || hint === undefined) continue;
+      score += typeMatchWeight(candidate.params[i]?.type ?? "", hint);
+    }
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * Pick the overload that best matches the call site.
+ *
+ * Candidates are grouped by how much the call proves about the callee: a
+ * fixed-arity declaration taking exactly this many arguments is the strongest
+ * signal, a variadic declaration accepting this many is next, and only then do
+ * looser guesses apply. Within a group, argument type hints break same-arity
+ * ties (`f(1)` prefers `f(int)` over `f(String)`); when no hint applies the
+ * first declaration wins.
+ */
+export function pickOverload(
+  methods: MethodInfo[],
+  argCount: number,
+  argTypes: ArgumentTypeHints = []
+): MethodInfo | undefined {
   if (methods.length === 0) return undefined;
   if (methods.length === 1) return methods[0];
-  const exact = methods.find((m) => !m.variadic && m.params.length === argCount);
-  if (exact) return exact;
-  const variadic = methods.find((m) => m.variadic && argCount >= m.params.length - 1);
-  if (variadic) return variadic;
-  const relaxed = methods.find((m) => m.params.length === argCount);
-  if (relaxed) return relaxed;
-  const shorter = methods.find((m) => m.params.length < argCount);
-  if (shorter) return shorter;
+
+  const groups: Array<(method: MethodInfo) => boolean> = [
+    (m) => m.variadic !== true && m.params.length === argCount,
+    (m) => m.variadic === true && argCount >= m.params.length - 1,
+    (m) => m.params.length === argCount,
+    (m) => m.params.length < argCount,
+  ];
+  for (const inGroup of groups) {
+    const pool = methods.filter(inGroup);
+    if (pool.length === 0) continue;
+    return bestByArgumentTypes(pool, argTypes) ?? pool[0];
+  }
   return methods.slice().sort((a, b) => a.params.length - b.params.length)[0];
 }
 

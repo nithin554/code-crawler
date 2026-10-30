@@ -220,6 +220,36 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   const reflectiveRefs: ReflectiveRef[] = [];
   const injections: InjectionPoint[] = [];
   const localsByMethod = new Map<string, Map<string, string>>();
+  /** Method ids emitted so far, so overloads stay distinct instead of collapsing. */
+  const usedMethodIds = new Set<string>();
+
+  /**
+   * `Type#name` for the first declaration of a name and `Type#name(int,String)`
+   * for each later overload. Single-declaration methods (the common case) keep
+   * the bare id; overloads stay individually addressable in the graph.
+   */
+  function methodIdFor(
+    typeId: string,
+    name: string,
+    params: { type: string }[],
+    variadic = false
+  ): string {
+    const base = `${typeId}#${name}`;
+    if (!usedMethodIds.has(base)) {
+      usedMethodIds.add(base);
+      return base;
+    }
+    const signature = params
+      .map((param, index) =>
+        variadic && index === params.length - 1 ? `${param.type}...` : param.type || "?"
+      )
+      .join(",");
+    let candidate = `${base}(${signature})`;
+    for (let nth = 2; usedMethodIds.has(candidate); nth++)
+      candidate = `${base}(${signature})#${nth}`;
+    usedMethodIds.add(candidate);
+    return candidate;
+  }
 
   // === Pass A: structural extraction with nesting stack for type FQNs. ===
   const nestingStack: string[] = [];
@@ -310,9 +340,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     line: number
   ): void {
     for (const component of components) {
-      const id = `${typeId}#${component.name}`;
       // An explicit accessor in the body wins.
-      if (methods.some((m) => m.id === id)) continue;
+      if (methods.some((m) => m.typeId === typeId && m.name === component.name)) continue;
+      const id = methodIdFor(typeId, component.name, []);
       methods.push({
         id,
         typeId,
@@ -330,7 +360,8 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
 
   function extractMethod(node: TSNode, typeId: string): void {
     const name = childOfType(node, "identifier")?.text ?? "";
-    const id = `${typeId}#${name}`;
+    const params = extractParams(node);
+    const id = methodIdFor(typeId, name, params, hasVarargs(node));
     const annotations = extractAnnotations(node);
     const advice = adviceOf(annotations);
     const modifiers = extractModifiers(node);
@@ -340,7 +371,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       typeId,
       name,
       isConstructor: false,
-      params: extractParams(node),
+      params,
       variadic: hasVarargs(node),
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
@@ -382,14 +413,15 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   }
 
   function extractConstructor(node: TSNode, typeId: string): void {
-    const id = `${typeId}#<init>`;
+    const params = extractParams(node);
+    const id = methodIdFor(typeId, "<init>", params, hasVarargs(node));
     const annotations = extractAnnotations(node);
     methods.push({
       id,
       typeId,
       name: "<init>",
       isConstructor: true,
-      params: extractParams(node),
+      params,
       variadic: hasVarargs(node),
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
@@ -408,7 +440,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     typeId: string,
     components: { name: string; type: string }[]
   ): void {
-    const id = `${typeId}#<init>`;
+    const id = methodIdFor(typeId, "<init>", components);
     methods.push({
       id,
       typeId,
