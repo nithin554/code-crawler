@@ -130,9 +130,45 @@ jobs:
 
       - name: Publish package to npm
         shell: bash
+        env:
+          PKG: '@nithin554/code-crawler'
+          VERSION: ${{ needs.create-release.outputs.version }}
         # Trusted publishing (OIDC): no token needed. Requires "Trusted
         # Publishing" to be enabled for the package on npmjs.com.
-        run: npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+
+          published() {
+            npm view "$PKG@$VERSION" version >/dev/null 2>&1
+          }
+
+          if published; then
+            echo "$PKG@$VERSION is already on npm; nothing to publish."
+            exit 0
+          fi
+
+          # The provenance flow uploads to the Rekor transparency log before
+          # the registry upload and reports an "equivalent entry already
+          # exists" 409 as fatal when an upload is retried after a timeout.
+          # That, and ordinary registry hiccups, are transient: retry, and
+          # treat "version is now on npm" as success.
+          for attempt in 1 2 3; do
+            echo "npm publish attempt $attempt"
+            if npm publish --provenance --access public; then
+              exit 0
+            fi
+            echo "::warning::npm publish attempt $attempt failed"
+            if published; then
+              echo "$PKG@$VERSION reached npm despite the error; continuing."
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 15))
+            fi
+          done
+
+          echo "::error::could not publish $PKG@$VERSION to npm after 3 attempts"
+          exit 1
 
   publish-mcp-registry:
     runs-on: ubuntu-latest
