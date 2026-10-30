@@ -6,6 +6,8 @@ import { GraphStore } from "../src/graph/store.js";
 import { createServer } from "../src/server.js";
 import { loadConfig } from "../src/config.js";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
@@ -180,5 +182,39 @@ describe("MCP server resources & prompts", () => {
   it("exposes the trace-call-path prompt", async () => {
     const { prompts } = await client.listPrompts();
     expect(prompts.map((p) => p.name)).toContain("trace-call-path");
+  });
+});
+
+describe("MCP server error boundary", () => {
+  it("returns a structured error instead of throwing when a handler fails", async () => {
+    const first = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-srv-a-"));
+    const second = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-srv-b-"));
+    try {
+      fs.writeFileSync(path.join(first, "a.py"), "def a():\n    return 1\n");
+      fs.writeFileSync(path.join(second, "b.py"), "def b():\n    return 2\n");
+
+      const ok = await callTool<{ ok: boolean }>("crawl_project", { path: first });
+      expect(ok.ok).toBe(true);
+
+      const failure = await callTool<{ ok: boolean; error: string; hint: string }>("crawl_project", {
+        path: second,
+      });
+      expect(failure.ok).toBe(false);
+      expect(failure.error).toMatch(/already contains/);
+      expect(failure.hint.length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(first, { recursive: true, force: true });
+      fs.rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a structured error for an unknown symbol lookup", async () => {
+    await callTool("crawl_project", { path: FIXTURES });
+    const r = await callTool<{ ok: boolean; error: string; hint: string }>("get_node", {
+      qualified_name: "com.acme.DoesNotExist",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not found/);
+    expect(r.hint.length).toBeGreaterThan(0);
   });
 });

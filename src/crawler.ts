@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ignore from "ignore";
 import type { GraphStore } from "./graph/store.js";
 import type { GraphEdge, GraphNode, NodeKind } from "./graph/schema.js";
 import { annotationNodeId, externalNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
@@ -22,6 +23,24 @@ export interface CrawlOptions {
   language?: string;
   /** Optional include filter: path must contain this substring. */
   fileFilter?: string;
+  /** Honor the project's .gitignore (default true). */
+  respectGitignore?: boolean;
+  /** Skip files larger than this many bytes. */
+  maxFileBytes?: number;
+  /** Called as parsing/persisting advances, for progress reporting. */
+  onProgress?: (progress: CrawlProgress) => void;
+}
+
+export interface CrawlProgress {
+  phase: "parse" | "persist";
+  processed: number;
+  total: number;
+}
+
+/** A discovered file that was deliberately not parsed. */
+export interface SkippedFile {
+  path: string;
+  reason: "too-large" | "binary";
 }
 
 export interface CrawlResult {
@@ -29,6 +48,11 @@ export interface CrawlResult {
   filesScanned: number;
   filesParsed: number;
   filesRemoved: number;
+  /** Files skipped because they are too large or look binary. */
+  filesSkipped: number;
+  skippedFiles: SkippedFile[];
+  /** Per-file parse failures (paths and messages, capped for output size). */
+  parseErrors: string[];
   /** False when the crawl was scoped (fileFilter/language) and stale pruning was skipped. */
   pruned: boolean;
   /** File-less shared nodes deleted because nothing references them anymore. */
@@ -59,13 +83,85 @@ export interface CrawlResult {
   durationMs: number;
 }
 
-/** Discover source files under a project, respecting exclusion dirs. */
+export interface DiscoverOptions {
+  language?: string;
+  /** Honor the project's .gitignore (default true). */
+  respectGitignore?: boolean;
+}
+
+/** Optional project-local crawl configuration. */
+const CRAWLER_RC = ".crawlerrc";
+
+interface CrawlerRc {
+  include?: string[];
+  exclude?: string[];
+}
+
+function loadCrawlerRc(projectPath: string): CrawlerRc {
+  const file = path.join(projectPath, CRAWLER_RC);
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+    const record = parsed as Record<string, unknown>;
+    const strings = (value: unknown, field: string): string[] | undefined => {
+      if (value === undefined) return undefined;
+      if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+        throw new Error(`"${field}" must be an array of strings`);
+      }
+      return value as string[];
+    };
+    return {
+      include: strings(record.include, "include"),
+      exclude: strings(record.exclude, "exclude"),
+    };
+  } catch (err) {
+    process.stderr.write(`code-crawler: ignoring ${CRAWLER_RC}: ${(err as Error).message}\n`);
+    return {};
+  }
+}
+
+/**
+ * Discover source files under a project.
+ *
+ * Honors the hardcoded/configured exclusion directory names, the project's
+ * `.gitignore`, and an optional `.crawlerrc` with gitignore-style `include`
+ * and `exclude` globs. When `include` is present only matching files are
+ * indexed.
+ */
 export function discoverSourceFiles(
   projectPath: string,
   excludeDirs: string[],
-  language?: string
+  options: string | DiscoverOptions = {}
 ): string[] {
+  const opts: DiscoverOptions = typeof options === "string" ? { language: options } : options;
   const excluded = new Set(excludeDirs.map((d) => d.replace(/\/+$/, "")));
+
+  const rc = loadCrawlerRc(projectPath);
+  const excludeMatcher = ignore().add(rc.exclude ?? []);
+  const includeMatcher = ignore().add(rc.include ?? []);
+  const hasIncludes = (rc.include?.length ?? 0) > 0;
+
+  if (opts.respectGitignore !== false) {
+    try {
+      const gitignorePath = path.join(projectPath, ".gitignore");
+      if (fs.existsSync(gitignorePath)) {
+        excludeMatcher.add(fs.readFileSync(gitignorePath, "utf8"));
+      }
+    } catch {
+      // Unreadable .gitignore: fall back to indexing everything.
+    }
+  }
+
+  const ignored = (rel: string, isDir: boolean): boolean => {
+    const candidate = isDir ? `${rel}/` : rel;
+    if (excludeMatcher.ignores(candidate)) return true;
+    if (hasIncludes && !includeMatcher.ignores(candidate)) return true;
+    return false;
+  };
+
   const out: string[] = [];
 
   function walk(dir: string): void {
@@ -77,9 +173,15 @@ export function discoverSourceFiles(
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
+      const rel = path.relative(projectPath, full).split(path.sep).join("/");
       if (entry.isDirectory()) {
-        if (!excluded.has(entry.name)) walk(full);
-      } else if (entry.isFile() && languageForFile(entry.name, language)) {
+        if (excluded.has(entry.name) || ignored(rel, true)) continue;
+        walk(full);
+      } else if (
+        entry.isFile() &&
+        languageForFile(entry.name, opts.language) &&
+        !ignored(rel, false)
+      ) {
         out.push(full);
       }
     }
@@ -95,7 +197,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[];
   const edges: GraphEdge[] = [];
 
   const fileId = parsed.filePath;
-  const fileLines = sourceLineCount(parsed.filePath);
+  const fileLines = parsed.lineCount ?? sourceLineCount(parsed.filePath);
   nodes.push({
     id: fileId,
     kind: "file",
@@ -706,7 +808,10 @@ export async function crawlProject(
   // language narrow the scan, so files outside that scope must be left alone.
   const scopedScan = Boolean(options.fileFilter || options.language);
 
-  const files = discoverSourceFiles(absPath, excludeDirs, options.language);
+  const files = discoverSourceFiles(absPath, excludeDirs, {
+    language: options.language,
+    respectGitignore: options.respectGitignore,
+  });
   if (options.fileFilter) {
     const filter = options.fileFilter;
     files.splice(
@@ -716,17 +821,43 @@ export async function crawlProject(
     );
   }
 
+  const maxFileBytes = options.maxFileBytes ?? 1_000_000;
+  const skipSampleBytes = 8192;
+
   // Parse every file (grammar is cached, so subsequent parses are fast).
+  // Each file is read once: the same buffer provides the size check, the
+  // binary sniff, the source text, and the line count.
   const parsedFiles: ParsedFile[] = [];
   const parseErrors: string[] = [];
+  const skippedFiles: SkippedFile[] = [];
+  let processedFiles = 0;
   for (const file of files) {
     try {
-      const source = fs.readFileSync(file, "utf8");
+      const size = fs.statSync(file).size;
+      if (size > maxFileBytes) {
+        skippedFiles.push({ path: file, reason: "too-large" });
+        continue;
+      }
+      const buffer = fs.readFileSync(file);
+      if (buffer.subarray(0, skipSampleBytes).includes(0)) {
+        skippedFiles.push({ path: file, reason: "binary" });
+        continue;
+      }
+      const source = buffer.toString("utf8");
       const config = languageForFile(file, options.language);
       if (!config) continue;
-      parsedFiles.push(await config.parseFile(source, file, { projectRoot: absPath }));
+      const parsed = await config.parseFile(source, file, { projectRoot: absPath });
+      parsedFiles.push({ ...parsed, lineCount: source.split("\n").length });
     } catch (err) {
-      parseErrors.push(`${file}: ${(err as Error).message}`);
+      if (parseErrors.length < 50) {
+        parseErrors.push(`${file}: ${(err as Error).message}`);
+      }
+    } finally {
+      processedFiles++;
+      options.onProgress?.({ phase: "parse", processed: processedFiles, total: files.length });
+      // Parsing is synchronous once a grammar is loaded; yield so the stdio
+      // server can answer requests during long crawls.
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
 
@@ -735,9 +866,11 @@ export async function crawlProject(
 
   // Build nodes + edges per file and persist file-scoped.
   const previouslyIndexed = new Set(
-    (store.raw("SELECT DISTINCT file_path FROM nodes WHERE file_path IS NOT NULL") as { file_path: string }[]).map(
-      (r) => r.file_path
-    )
+    store
+      .raw<{ file_path: string }>(
+        "SELECT DISTINCT file_path FROM nodes WHERE file_path IS NOT NULL"
+      )
+      .map((r) => r.file_path)
   );
   const currentFiles = new Set(files);
   let filesRemoved = 0;
@@ -831,6 +964,7 @@ export async function crawlProject(
     return resolved ? { ...edge, target: resolved } : edge;
   };
 
+  let persistedFiles = 0;
   store.withTransaction(() => {
     for (const parsed of parsedFiles) {
       const decl = declarations.get(parsed.filePath)!;
@@ -865,6 +999,12 @@ export async function crawlProject(
       totalResolved += calls.resolved;
       totalUnresolved += calls.unresolved;
       previouslyIndexed.delete(parsed.filePath);
+      persistedFiles++;
+      options.onProgress?.({
+        phase: "persist",
+        processed: persistedFiles,
+        total: parsedFiles.length,
+      });
     }
 
     // Remove files that disappeared from the project. Only a full scan knows
@@ -899,6 +1039,9 @@ export async function crawlProject(
     filesScanned: files.length,
     filesParsed: parsedFiles.length,
     filesRemoved,
+    filesSkipped: skippedFiles.length,
+    skippedFiles,
+    parseErrors,
     pruned: !scopedScan,
     orphansRemoved,
     nodes: stats.nodes,

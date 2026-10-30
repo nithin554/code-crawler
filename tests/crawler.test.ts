@@ -196,3 +196,164 @@ describe("crawlProject", () => {
     ).rejects.toThrow(/not a directory/);
   });
 });
+
+describe("crawl hardening", () => {
+  function withProject(fn: (dir: string) => Promise<void>): () => Promise<void> {
+    return async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-hardening-"));
+      try {
+        await fn(tmp);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    };
+  }
+
+  it(
+    "honors .gitignore by default",
+    withProject(async (tmp) => {
+      fs.writeFileSync(path.join(tmp, "keep.py"), "def keep():\n    return 1\n");
+      fs.writeFileSync(path.join(tmp, "skip.py"), "def skip():\n    return 2\n");
+      fs.writeFileSync(path.join(tmp, ".gitignore"), "skip.py\n");
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+
+      expect(result.filesParsed).toBe(1);
+      expect(store.getNode(path.join(tmp, "keep.py"))).not.toBeNull();
+      expect(store.getNode(path.join(tmp, "skip.py"))).toBeNull();
+    })
+  );
+
+  it(
+    "indexes ignored files when respectGitignore is disabled",
+    withProject(async (tmp) => {
+      fs.writeFileSync(path.join(tmp, "keep.py"), "def keep():\n    return 1\n");
+      fs.writeFileSync(path.join(tmp, "skip.py"), "def skip():\n    return 2\n");
+      fs.writeFileSync(path.join(tmp, ".gitignore"), "skip.py\n");
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {
+        respectGitignore: false,
+      });
+
+      expect(result.filesParsed).toBe(2);
+      expect(store.getNode(path.join(tmp, "skip.py"))).not.toBeNull();
+    })
+  );
+
+  it(
+    "honors .crawlerrc exclude globs",
+    withProject(async (tmp) => {
+      fs.mkdirSync(path.join(tmp, "generated"));
+      fs.writeFileSync(path.join(tmp, "a.py"), "def a():\n    return 1\n");
+      fs.writeFileSync(path.join(tmp, "generated", "b.py"), "def b():\n    return 2\n");
+      fs.writeFileSync(path.join(tmp, ".crawlerrc"), JSON.stringify({ exclude: ["generated/"] }));
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+
+      expect(result.filesParsed).toBe(1);
+      expect(store.getNode(path.join(tmp, "a.py"))).not.toBeNull();
+      expect(store.getNode(path.join(tmp, "generated", "b.py"))).toBeNull();
+    })
+  );
+
+  it(
+    "restricts discovery to .crawlerrc include globs",
+    withProject(async (tmp) => {
+      fs.mkdirSync(path.join(tmp, "src"));
+      fs.writeFileSync(path.join(tmp, "src", "in.py"), "def inside():\n    return 1\n");
+      fs.writeFileSync(path.join(tmp, "outside.py"), "def outside():\n    return 2\n");
+      fs.writeFileSync(path.join(tmp, ".crawlerrc"), JSON.stringify({ include: ["src/"] }));
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+
+      expect(result.filesParsed).toBe(1);
+      expect(store.getNode(path.join(tmp, "src", "in.py"))).not.toBeNull();
+      expect(store.getNode(path.join(tmp, "outside.py"))).toBeNull();
+    })
+  );
+
+  it(
+    "warns about a malformed .crawlerrc and indexes everything",
+    withProject(async (tmp) => {
+      const warnings: string[] = [];
+      const write = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((chunk: unknown) => {
+        warnings.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write;
+      try {
+        fs.writeFileSync(path.join(tmp, "a.py"), "def a():\n    return 1\n");
+        fs.writeFileSync(path.join(tmp, ".crawlerrc"), "{ not json");
+
+        const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+
+        expect(result.filesParsed).toBe(1);
+        expect(warnings.join("")).toMatch(/\.crawlerrc/);
+      } finally {
+        process.stderr.write = write;
+      }
+    })
+  );
+
+  it(
+    "skips files above maxFileBytes",
+    withProject(async (tmp) => {
+      const small = path.join(tmp, "small.py");
+      const big = path.join(tmp, "big.py");
+      fs.writeFileSync(small, "def small():\n    return 1\n");
+      fs.writeFileSync(big, `def big():\n    return "${"x".repeat(4000)}"\n`);
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, { maxFileBytes: 1024 });
+
+      expect(result.filesSkipped).toBe(1);
+      expect(result.skippedFiles).toEqual([{ path: big, reason: "too-large" }]);
+      expect(result.filesParsed).toBe(1);
+      expect(store.getNode(big)).toBeNull();
+    })
+  );
+
+  it(
+    "skips binary files",
+    withProject(async (tmp) => {
+      const text = path.join(tmp, "text.py");
+      const binary = path.join(tmp, "binary.py");
+      fs.writeFileSync(text, "def text():\n    return 1\n");
+      fs.writeFileSync(binary, Buffer.from([0x70, 0x72, 0x00, 0x69, 0x6e, 0x74]));
+
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+
+      expect(result.skippedFiles).toEqual([{ path: binary, reason: "binary" }]);
+      expect(result.filesParsed).toBe(1);
+      expect(store.getNode(binary)).toBeNull();
+    })
+  );
+
+  it(
+    "reports progress for every discovered file in both phases",
+    withProject(async (tmp) => {
+      fs.writeFileSync(path.join(tmp, "a.py"), "def a():\n    return 1\n");
+      fs.writeFileSync(path.join(tmp, "b.py"), "def b():\n    return 2\n");
+
+      const seen: { phase: string; processed: number; total: number }[] = [];
+      await crawlProject(store, tmp, loadConfig().excludeDirs, {
+        onProgress: (p) => seen.push({ ...p }),
+      });
+
+      const parse = seen.filter((p) => p.phase === "parse");
+      const persist = seen.filter((p) => p.phase === "persist");
+      expect(parse.map((p) => p.processed)).toEqual([1, 2]);
+      expect(parse.every((p) => p.total === 2)).toBe(true);
+      expect(persist.map((p) => p.processed)).toEqual([1, 2]);
+      expect(parse.length).toBeGreaterThan(0);
+    })
+  );
+
+  it(
+    "reports no parse errors for a clean project",
+    withProject(async (tmp) => {
+      fs.writeFileSync(path.join(tmp, "a.py"), "def a():\n    return 1\n");
+      const result = await crawlProject(store, tmp, loadConfig().excludeDirs, {});
+      expect(result.parseErrors).toEqual([]);
+    })
+  );
+});

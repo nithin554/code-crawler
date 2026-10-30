@@ -97,7 +97,7 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (135 tests)
+npm test             # vitest (158 tests)
 ```
 
 ## CLI
@@ -116,8 +116,38 @@ Environment variables:
 | `CODECRAWLER_DB` | `~/.code-crawler/index.db` | Database path |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Dirs skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
-| `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap |
+| `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
+| `CODECRAWLER_MAX_FILE_BYTES` | `1000000` | Files larger than this are skipped, not parsed |
+| `CODECRAWLER_RESPECT_GITIGNORE` | `true` | Honor the project's `.gitignore` during discovery |
 | `CODECRAWLER_HELPFUL_ERRORS` | `true` | Fuzzy suggestions on symbol misses |
+
+Invalid values never crash the server: booleans fall back to their default and
+integers are clamped to their documented range, each with a one-line warning on
+stderr.
+
+## What gets indexed
+
+`crawl` walks the project and skips `.git`, `node_modules`, build output, and
+other `CODECRAWLER_EXCLUDE_DIRS` entries. On top of that:
+
+- the project's **`.gitignore`** is honored (disable with
+  `CODECRAWLER_RESPECT_GITIGNORE=false`),
+- an optional **`.crawlerrc`** in the project root can narrow or widen discovery
+  with gitignore-style globs:
+
+  ```json
+  { "include": ["src/", "packages/core/"], "exclude": ["**/generated/"] }
+  ```
+
+  When `include` is non-empty, only matching files are indexed. A malformed
+  `.crawlerrc` is ignored with a warning rather than failing the crawl.
+- files above `CODECRAWLER_MAX_FILE_BYTES` and files that look binary are
+  skipped; `crawl_project` reports them in `skippedFiles` with a reason.
+- per-file parse failures never abort the crawl; they are reported in
+  `parseErrors`.
+
+Only the root `.gitignore` is read — nested `.gitignore` files are not yet
+supported.
 
 ## CI & publishing
 

@@ -171,3 +171,63 @@ describe("GraphStore", () => {
     expect(fieldNodeId("com.acme.Foo", "repo")).toBe("com.acme.Foo$repo");
   });
 });
+
+describe("schema versioning", () => {
+  function tempDb(name: string): { file: string; cleanup: () => void } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-schema-"));
+    return {
+      file: path.join(dir, name),
+      cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  it("stamps the current schema version on a new database", () => {
+    expect(store.getMeta("schema_version")).toBe(String(store.schemaVersion));
+  });
+
+  it("re-stamps the schema version after clearAll", () => {
+    store.clearAll();
+    expect(store.getMeta("schema_version")).toBe(String(store.schemaVersion));
+  });
+
+  it("reopens a database written by the same schema version", () => {
+    const { file, cleanup } = tempDb("same.db");
+    try {
+      const first = new GraphStore(file);
+      const version = first.schemaVersion;
+      first.close();
+      const second = new GraphStore(file);
+      expect(second.getMeta("schema_version")).toBe(String(version));
+      second.close();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("refuses a database written by a newer build", () => {
+    const { file, cleanup } = tempDb("newer.db");
+    try {
+      const first = new GraphStore(file);
+      const version = first.schemaVersion;
+      first.setMeta("schema_version", String(version + 1));
+      first.close();
+
+      expect(() => new GraphStore(file)).toThrow(/newer than this build/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("refuses an unreadable schema version", () => {
+    const { file, cleanup } = tempDb("broken.db");
+    try {
+      const first = new GraphStore(file);
+      first.setMeta("schema_version", "banana");
+      first.close();
+
+      expect(() => new GraphStore(file)).toThrow(/unreadable schema_version/);
+    } finally {
+      cleanup();
+    }
+  });
+});
