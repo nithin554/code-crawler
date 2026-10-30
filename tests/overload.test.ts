@@ -179,6 +179,28 @@ describe("type-aware overload selection", () => {
     // One known argument must not pull the two-argument declaration in.
     expect(pickOverload([twoArgs, asInt], 1, ["String"])?.id).toBe("T#f(int)");
   });
+
+  it("matches a parameter type on its erased name", () => {
+    const generic = { ...method("f", ["Map<string, number>"]), id: "T#f(Map)" };
+    const other = { ...method("f", ["Set<string>"]), id: "T#f(Set)" };
+    expect(inferArgumentType("new Map<string, number>()")).toBe("Map");
+    expect(pickOverload([other, generic], 1, ["Map"])?.id).toBe("T#f(Map)");
+  });
+
+  it("erases nested type arguments without leaving a stray bracket", () => {
+    // A pairwise `<...>` strip turned `List<Map<String,Integer>>` into `List>`,
+    // which then matched no argument type at all.
+    const nested = { ...method("f", ["List<Map<String,Integer>>"]), id: "T#f(List)" };
+    const other = { ...method("f", ["Collection"]), id: "T#f(Collection)" };
+    expect(pickOverload([other, nested], 1, ["List"])?.id).toBe("T#f(List)");
+    expect(pickOverload([nested, other], 1, ["Collection"])?.id).toBe("T#f(Collection)");
+  });
+
+  it("erases array brackets from a parameter type", () => {
+    const arrayParam = { ...method("f", ["String[]"]), id: "T#f(String[])" };
+    const other = { ...method("f", ["Object"]), id: "T#f(Object)" };
+    expect(pickOverload([other, arrayParam], 1, ["String"])?.id).toBe("T#f(String[])");
+  });
 });
 
 describe("overloaded declarations keep distinct ids", () => {

@@ -379,13 +379,13 @@ const DOUBLE_LITERAL = /^-?(?:(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d
 const NEW_EXPRESSION = /^new\s+([\w.$]+)/;
 const CAST_EXPRESSION = /^\(\s*([A-Z][\w.$]*)\s*\)/;
 
-/** Strip generics, array brackets, and package qualification from a type name. */
+/** Strip type arguments, array brackets, and package qualification from a type name. */
 function simpleTypeName(type: string): string {
-  const withoutGenerics = type
-    .replace(/<[^>]*>/g, "")
-    .replace(/\[\]/g, "")
-    .trim();
-  return withoutGenerics.split(".").pop() ?? withoutGenerics;
+  // Cut at the first `<` rather than matching `<...>` pairs: type arguments nest
+  // (`Map<String,List<Integer>>`), so a pairwise strip would leave a stray `>`.
+  const open = type.indexOf("<");
+  const head = (open === -1 ? type : type.slice(0, open)).replace(/\[\]/g, "").trim();
+  return head.split(".").pop() ?? head;
 }
 
 /**
