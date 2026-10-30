@@ -128,7 +128,9 @@ if green, **auto-releases**:
    computes the next patch version, and pushes a `vX.Y.Z` tag.
 2. Creates a matching GitHub release.
 3. Publishes the package to the npm registry with **provenance** (OIDC
-   trusted publishing) — no token or repository secret is needed.
+   trusted publishing) — no token or repository secret is needed. The step is
+   idempotent and retries: it skips versions npm already has, and a transient
+   transparency-log or registry failure no longer aborts the release.
 4. Publishes [`server.json`](server.json) to the
    [official MCP Registry](https://registry.modelcontextprotocol.io) as
    `io.github.nithin554/code-crawler` from a separate, re-runnable job using
