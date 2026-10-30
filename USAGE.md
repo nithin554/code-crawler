@@ -199,14 +199,17 @@ flowchart TD
     F --> G[find_hotspots / find_dead_code]
 ```
 
-1. **`crawl_project`** — index once per session. Re-run after edits.
+1. **`crawl_project`** — index once per session. Re-run after edits: it is incremental,
+   so the second crawl only re-parses files whose content actually changed and reports the
+   split as `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`.
 2. **`find_entry_points`** — see what the framework actually invokes. This is the honest
    starting set for "where does this app begin?", because `main` is often not the answer
    in a server-side framework.
-3. **`search_symbols`** — locate a symbol by fuzzy name. Unknown symbols come back with
-   suggestions instead of an error. Tools that take a `symbol` argument then resolve an
-   exact id or exact qualified name only — pass the `qualifiedName` that `search_symbols`
-   returned, or the call comes back `null`.
+3. **`search_symbols`** — locate a symbol by name. Backed by FTS5 with BM25 ranking, so
+   exact qualified names and exact display names rank above prefix matches. Unknown symbols
+   come back with suggestions instead of an error. Tools that take a `symbol` argument then
+   resolve an exact id or exact qualified name only — pass the `qualifiedName` that
+   `search_symbols` returned, or the call comes back `null`.
 4. **`get_callers` / `get_callees` / `trace_path`** — walk the static call graph. Results
    include `resolved`, `confidence`, and `reason` on each edge.
 5. **`trace_execution`** — follow *runtime* order from a root: virtual dispatch fans out to
@@ -530,5 +533,20 @@ That is `CODECRAWLER_HELPFUL_ERRORS` working as intended. Set it to `false` for 
 lookups in scripts.
 
 **The index looks stale.**
-Re-run `crawl_project`; it is idempotent and file-scoped. If you changed the crawl root or
-switched branches substantially, `clear_index` then crawl again.
+Re-run `crawl_project`; it is incremental and file-scoped, so only changed files are
+re-parsed. If you changed the crawl root or switched branches substantially, `clear_index`
+then crawl again. A scoped crawl (`fileFilter` or a forced `language`) never removes files
+outside its scope — use a full crawl to prune.
+
+**A call that should resolve is still `resolved:false` after an edit.**
+Incremental crawls do not rewrite the edges of untouched files, so a call can only become
+newly resolvable when *its own* file is re-parsed. Touch that file's mtime (or change it),
+or run `clear_index` and crawl again to force full resolution.
+
+**A crawl fails with "database was written by a newer version".**
+The index carries a schema version and upgrades itself in place. A database written by a
+newer build of the crawler is rejected rather than misread; run `clear_index` to start over.
+
+**The index is much larger than the source tree.**
+The SQLite file also holds the FTS5 index and the per-file manifest. It is a cache — delete
+it and re-crawl if disk matters more than the re-index time.

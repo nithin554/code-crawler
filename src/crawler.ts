@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import ignore from "ignore";
-import type { GraphStore } from "./graph/store.js";
+import type { FileRecord, GraphStore } from "./graph/store.js";
 import type { GraphEdge, GraphNode, NodeKind } from "./graph/schema.js";
 import { annotationNodeId, externalNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
 import { languageForFile } from "./parser/languages/index.js";
+import { decodeParsedFile, encodeParsedFile } from "./parser/cache.js";
 import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
 import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
 import { resolveJavaFile } from "./resolver/javaResolver.js";
@@ -46,7 +48,14 @@ export interface SkippedFile {
 export interface CrawlResult {
   projectPath: string;
   filesScanned: number;
+  /** Files whose parse result is in the index after this crawl. */
   filesParsed: number;
+  /** Files parsed for the first time by this crawl. */
+  filesAdded: number;
+  /** Files re-parsed because their content changed. */
+  filesUpdated: number;
+  /** Files replayed from the parse cache because their content was identical. */
+  filesUnchanged: number;
   filesRemoved: number;
   /** Files skipped because they are too large or look binary. */
   filesSkipped: number;
@@ -824,37 +833,108 @@ export async function crawlProject(
   const maxFileBytes = options.maxFileBytes ?? 1_000_000;
   const skipSampleBytes = 8192;
 
-  // Parse every file (grammar is cached, so subsequent parses are fast).
-  // Each file is read once: the same buffer provides the size check, the
-  // binary sniff, the source text, and the line count.
+  // Incremental crawl: the manifest records size + mtime + content hash for
+  // every indexed file, together with its parse result. A file whose metadata
+  // is unchanged is replayed from the cache; a file whose metadata changed but
+  // whose hash matches was only touched and is replayed too.
+  const manifest = store.listFileRecords();
   const parsedFiles: ParsedFile[] = [];
   const parseErrors: string[] = [];
   const skippedFiles: SkippedFile[] = [];
-  let processedFiles = 0;
+  const changedPaths = new Set<string>();
+  const recordsToWrite = new Map<string, FileRecord>();
+  let filesAdded = 0;
+  let filesUpdated = 0;
+  let filesUnchanged = 0;
+
+  interface PendingParse {
+    path: string;
+    size: number;
+    mtimeMs: number;
+  }
+  const pendingParses: PendingParse[] = [];
+
+  // Pass 1: stat only. Cheap enough to run over every discovered file and it
+  // decides whether any real parsing (or indexing) work is needed at all.
   for (const file of files) {
     try {
-      const size = fs.statSync(file).size;
-      if (size > maxFileBytes) {
+      const stat = fs.statSync(file);
+      if (stat.size > maxFileBytes) {
         skippedFiles.push({ path: file, reason: "too-large" });
         continue;
       }
+      const record = manifest.get(file);
+      const mtimeMs = Math.trunc(stat.mtimeMs);
+      if (record && record.size === stat.size && record.mtimeMs === mtimeMs) {
+        const cached = decodeParsedFile(record.summary);
+        if (cached) {
+          filesUnchanged++;
+          parsedFiles.push(cached);
+          continue;
+        }
+      }
+      pendingParses.push({ path: file, size: stat.size, mtimeMs });
+    } catch (err) {
+      if (parseErrors.length < 50) {
+        parseErrors.push(`${file}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // Pass 2: read, hash and (only when the content really changed) parse.
+  // Each file is read once: the same buffer provides the binary sniff, the
+  // content hash, the source text, and the line count.
+  let processedFiles = 0;
+  for (const pending of pendingParses) {
+    const file = pending.path;
+    try {
       const buffer = fs.readFileSync(file);
       if (buffer.subarray(0, skipSampleBytes).includes(0)) {
         skippedFiles.push({ path: file, reason: "binary" });
         continue;
       }
-      const source = buffer.toString("utf8");
       const config = languageForFile(file, options.language);
       if (!config) continue;
+
+      const sha256 = createHash("sha256").update(buffer).digest("hex");
+      const record = manifest.get(file);
+      if (record && record.sha256 === sha256) {
+        const cached = decodeParsedFile(record.summary);
+        if (cached) {
+          // Same content, new timestamp: refresh metadata without re-parsing.
+          filesUnchanged++;
+          parsedFiles.push(cached);
+          recordsToWrite.set(file, { ...record, size: pending.size, mtimeMs: pending.mtimeMs });
+          continue;
+        }
+      }
+
+      const source = buffer.toString("utf8");
       const parsed = await config.parseFile(source, file, { projectRoot: absPath });
-      parsedFiles.push({ ...parsed, lineCount: source.split("\n").length });
+      const full: ParsedFile = { ...parsed, lineCount: source.split("\n").length };
+      parsedFiles.push(full);
+      changedPaths.add(file);
+      if (record) filesUpdated++;
+      else filesAdded++;
+      recordsToWrite.set(file, {
+        path: file,
+        size: pending.size,
+        mtimeMs: pending.mtimeMs,
+        sha256,
+        language: full.language,
+        summary: encodeParsedFile(full),
+      });
     } catch (err) {
       if (parseErrors.length < 50) {
         parseErrors.push(`${file}: ${(err as Error).message}`);
       }
     } finally {
       processedFiles++;
-      options.onProgress?.({ phase: "parse", processed: processedFiles, total: files.length });
+      options.onProgress?.({
+        phase: "parse",
+        processed: processedFiles,
+        total: pendingParses.length,
+      });
       // Parsing is synchronous once a grammar is loaded; yield so the stdio
       // server can answer requests during long crawls.
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -935,6 +1015,16 @@ export async function crawlProject(
     }
   }
 
+  // Nodes owned by files this crawl rewrote; their rows already carry the
+  // markers computed above, so only the rest need a targeted update.
+  const changedNodeIds = new Set<string>();
+  for (const parsed of parsedFiles) {
+    if (!changedPaths.has(parsed.filePath)) continue;
+    for (const node of declarations.get(parsed.filePath)?.nodes ?? []) {
+      changedNodeIds.add(node.id);
+    }
+  }
+
   // Hierarchy metadata is emitted with whatever name the source used
   // (`implements Payment`), which is not always the fully-qualified node id.
   // Resolve imports first, then fall back to unique simple names.
@@ -975,17 +1065,21 @@ export async function crawlProject(
 
       for (const p of calls.phantomNodes) allNodeIds.add(p.id);
 
-      // Phantom nodes must exist as edge endpoints (FK constraint).
-      for (const p of calls.phantomNodes) store.ensureNode(p);
+      // Unchanged files keep their existing rows: re-resolving them would
+      // rewrite identical data and defeat the point of an incremental crawl.
+      if (changedPaths.has(parsed.filePath)) {
+        // Phantom nodes must exist as edge endpoints (FK constraint).
+        for (const p of calls.phantomNodes) store.ensureNode(p);
 
-      // Drop edges whose endpoints aren't part of the indexed project
-      // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
-      const edges = decl.edges
-        .map((edge) => normalizeHierarchyTarget(edge, parsed.filePath))
-        .concat(calls.edges, deps.edges)
-        .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
-      const nodes = decl.nodes.concat(calls.phantomNodes, deps.nodes);
-      store.replaceFile(parsed.filePath, nodes, edges);
+        // Drop edges whose endpoints aren't part of the indexed project
+        // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
+        const edges = decl.edges
+          .map((edge) => normalizeHierarchyTarget(edge, parsed.filePath))
+          .concat(calls.edges, deps.edges)
+          .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
+        const nodes = decl.nodes.concat(calls.phantomNodes, deps.nodes);
+        store.replaceFile(parsed.filePath, nodes, edges);
+      }
 
       for (const edge of calls.edges) {
         if (allNodeIds.has(edge.source) && allNodeIds.has(edge.target)) {
@@ -1017,17 +1111,31 @@ export async function crawlProject(
       }
     }
 
-    // Rebuild project-wide derived edges: virtual dispatch and AOP advice.
-    store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES"]);
-    const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
-    store.upsertEdges(dynamic.edges);
-    dynamicDispatchCount = dynamic.dispatchCount;
-    adviceCount = dynamic.adviceCount;
-    aspectCount = dynamic.aspects;
+    // Refresh the manifest for parsed files and for untouched-but-retimed ones.
+    for (const record of recordsToWrite.values()) store.putFileRecord(record);
 
-    // Shared file-less nodes (packages, annotations, external symbols) outlive
-    // the files that created them; collect the ones nothing references now.
-    orphansRemoved = store.pruneOrphanNodes();
+    // Entry points can be registered in one file and declared in another. Only
+    // changed files were rewritten, so handlers living in unchanged files need
+    // the marker applied directly.
+    for (const [id, mark] of entryPointMarks) {
+      if (changedNodeIds.has(id)) continue;
+      store.markEntryPoint(id, mark.kind, mark.detail ?? mark.kind);
+    }
+
+    // Rebuild project-wide derived edges: virtual dispatch and AOP advice.
+    // Nothing changed, so the existing derived edges are still correct.
+    if (changedPaths.size > 0 || filesRemoved > 0) {
+      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES"]);
+      const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
+      store.upsertEdges(dynamic.edges);
+      dynamicDispatchCount = dynamic.dispatchCount;
+      adviceCount = dynamic.adviceCount;
+      aspectCount = dynamic.aspects;
+
+      // Shared file-less nodes (packages, annotations, external symbols)
+      // outlive the files that created them; collect the unreferenced ones.
+      orphansRemoved = store.pruneOrphanNodes();
+    }
   });
 
   store.setMeta("last_crawl_at", new Date().toISOString());
@@ -1038,6 +1146,9 @@ export async function crawlProject(
     projectPath: absPath,
     filesScanned: files.length,
     filesParsed: parsedFiles.length,
+    filesAdded,
+    filesUpdated,
+    filesUnchanged,
     filesRemoved,
     filesSkipped: skippedFiles.length,
     skippedFiles,

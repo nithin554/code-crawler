@@ -18,7 +18,7 @@
 | Resolution | `javaResolver.ts` + `genericResolver.ts` (module-based languages) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 22 MCP tools |
-| Tests | 14 files / 158 tests, per-language fixtures |
+| Tests | 18 files / 174 tests, per-language fixtures, migration + index-plan + scale checks |
 
 The biggest structural gap is that **adding a language currently means writing two
 parallel implementations** — a `LanguageConfig` and a resolver — and teaching each parser
@@ -102,17 +102,24 @@ another general-purpose language:
 
 ## Phase 4 — Scale
 
-- **Incremental indexing.** Content hashes plus dependency-aware invalidation;
-  `crawl_project` reports `added` / `updated` / `removed`. Today it is a full re-crawl.
+- ✅ **Incremental indexing.** Per-file manifest (size, mtime, SHA-256) plus a cache of the
+  serialised parse result; unchanged files are replayed instead of re-read and re-parsed.
+  `crawl_project` reports `filesAdded` / `filesUpdated` / `filesUnchanged` / `filesRemoved`.
+- ✅ **Benchmark fixture.** `bench/` generates a ~137k-line project; `npm run bench` reports
+  crawl phases and query percentiles, and `tests/perf.test.ts` enforces the budgets
+  (measured: 22.5 s cold, 0.9 s no-op re-crawl, 0.75 s after a one-file edit).
 - **Parallel parsing** with worker threads; batched transactions (WAL and core indexes
   already exist in `store.ts`).
 - **Budget caps and progress** for very large repositories; a `code-crawler watch` mode.
-- **Benchmark fixture** with an explicit target, e.g. 100k LOC in under 60 seconds.
+  Progress notifications exist; the worker pool is still deferred because tree-sitter WASM
+  grammars/parsers are cached module state.
+- **Nested `.gitignore` support** — only the root file is read today.
 
 ## Phase 5 — Agent ergonomics
 
-- **`search_symbols` on SQLite FTS5** with fuzzy fallback and an optional semantic tier.
-  It is currently a `LIKE '%query%'` scan in `queries.ts`.
+- ✅ **`search_symbols` on SQLite FTS5.** External-content FTS5 index with BM25 ranking and
+  exact/prefix boosting, falling back to a `LIKE` scan only when FTS returns nothing. The
+  optional semantic tier is still open.
 - **New tools.** `find_unresolved`, `explain_symbol` (one-shot context bundle),
   `diff_graph`, `impact_analysis`, `find_cycles`, `export_graph` (Mermaid, DOT, GraphML).
 - **Token budgets.** A `max_tokens` option on list-returning tools — MCP clients are

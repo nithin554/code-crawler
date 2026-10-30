@@ -127,26 +127,28 @@ export function getCallers(
   }
 
   const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
-    `WITH RECURSIVE callers(id, depth, path, edge_kind, edge_props) AS (
-       SELECT e.source, 1, e.source || '/' || e.target, e.kind, e.properties
+    `WITH RECURSIVE callers(id, depth, edge_kind, edge_props) AS (
+       SELECT e.source, 1, e.kind, e.properties
        FROM edges e
        WHERE e.target = ? AND e.kind IN (${sqlKinds(kinds)})
-       UNION ALL
-       SELECT e.source, c.depth + 1, c.path || '/' || e.source, e.kind, e.properties
+       UNION
+       SELECT e.source, c.depth + 1, e.kind, e.properties
        FROM edges e
        JOIN callers c ON e.target = c.id
        WHERE e.kind IN (${sqlKinds(kinds)})
          AND c.depth < ?
-         AND instr('|' || c.path || '|', '|' || e.source || '|') = 0
      )
      SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
-            c.depth, c.edge_kind, c.edge_props
+            MIN(c.depth) AS depth, c.edge_kind, c.edge_props
      FROM callers c
      JOIN nodes n ON n.id = c.id
-     ORDER BY c.depth, n.id
+     WHERE c.id <> ?
+     GROUP BY c.id
+     ORDER BY depth, n.id
      LIMIT ?`,
     target.id,
     maxDepth,
+    target.id,
     limit
   );
 
@@ -213,26 +215,28 @@ export function getCallees(
   }
 
   const rows = store.raw<(RowWithEdge & { depth: number; edge_kind: EdgeKind })>(
-    `WITH RECURSIVE callees(id, depth, path, edge_kind, edge_props) AS (
-       SELECT e.target, 1, e.source || '/' || e.target, e.kind, e.properties
+    `WITH RECURSIVE callees(id, depth, edge_kind, edge_props) AS (
+       SELECT e.target, 1, e.kind, e.properties
        FROM edges e
        WHERE e.source = ? AND e.kind IN (${sqlKinds(kinds)})
-       UNION ALL
-       SELECT e.target, c.depth + 1, c.path || '/' || e.target, e.kind, e.properties
+       UNION
+       SELECT e.target, c.depth + 1, e.kind, e.properties
        FROM edges e
        JOIN callees c ON e.source = c.id
        WHERE e.kind IN (${sqlKinds(kinds)})
          AND c.depth < ?
-         AND instr('|' || c.path || '|', '|' || e.target || '|') = 0
      )
      SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
-            c.depth, c.edge_kind, c.edge_props
+            MIN(c.depth) AS depth, c.edge_kind, c.edge_props
      FROM callees c
      JOIN nodes n ON n.id = c.id
-     ORDER BY c.depth, n.id
+     WHERE c.id <> ?
+     GROUP BY c.id
+     ORDER BY depth, n.id
      LIMIT ?`,
     source.id,
     maxDepth,
+    source.id,
     limit
   );
 
@@ -534,11 +538,14 @@ export interface SearchOptions {
 }
 
 /**
- * Fuzzy symbol lookup by short name or FQN. Matches a substring of the id or
- * qualified name only; metadata properties are never treated as symbol names.
- * Ranking happens in SQL before LIMIT so good matches cannot be truncated
- * away: exact qualified name, exact id, exact display name, then prefixes,
- * then substrings.
+ * Fuzzy symbol lookup by short name or FQN. Matches the id or qualified name
+ * only; metadata properties are never treated as symbol names.
+ *
+ * The FTS5 index answers the common case (token prefixes such as `place` or
+ * `com.acme.Ord`) in one index lookup, and the older substring scan is kept as
+ * a fallback so queries that start mid-token (`lace`) still work. Ranking
+ * happens in SQL before LIMIT, so good matches cannot be truncated away: exact
+ * qualified name, exact id, exact display name, then prefixes, then the rest.
  */
 export function searchSymbols(
   store: GraphStore,
@@ -548,12 +555,58 @@ export function searchSymbols(
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const limit = opts.limit ?? store.defaultLimit ?? 50;
+
+  const match = ftsPrefixQuery(q);
+  if (match) {
+    const rows = store.raw<Row>(
+      `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
+       FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid
+       WHERE nodes_fts MATCH ?
+       ${opts.kind ? "AND n.kind = ?" : ""}
+       ORDER BY
+         CASE
+           WHEN LOWER(n.qualified_name) = ? THEN 0
+           WHEN LOWER(n.id) = ? THEN 1
+           WHEN LOWER(n.name) = ? THEN 2
+           WHEN LOWER(n.qualified_name) LIKE ? THEN 3
+           WHEN LOWER(n.id) LIKE ? THEN 4
+           ELSE 5
+         END,
+         bm25(nodes_fts),
+         LENGTH(n.qualified_name),
+         n.qualified_name,
+         n.id
+       LIMIT ?`,
+      ...(opts.kind
+        ? [match, opts.kind, q, q, q, `${q}%`, `${q}%`, limit]
+        : [match, q, q, q, `${q}%`, `${q}%`, limit])
+    );
+    if (rows.length > 0) return rows.map((r) => rowToRef(r));
+  }
+
+  return searchBySubstring(store, q, opts.kind, limit);
+}
+
+/** Turn a free-text query into an FTS5 prefix expression, e.g. `"com"* AND "ord"*`. */
+function ftsPrefixQuery(q: string): string | null {
+  const tokens = q.split(/[^a-z0-9_]+/).filter(Boolean).slice(0, 8);
+  if (tokens.length === 0) return null;
+  return tokens.map((t) => `"${t}"*`).join(" AND ");
+}
+
+/** Substring scan used when no FTS token matches. */
+function searchBySubstring(
+  store: GraphStore,
+  q: string,
+  kind: NodeKind | null | undefined,
+  limit: number
+): SymbolRef[] {
   const like = `%${q}%`;
   const prefix = `${q}%`;
 
-  const kindClause = opts.kind ? "AND n.kind = ?" : "";
+  const kindClause = kind ? "AND n.kind = ?" : "";
   const params: unknown[] = [like, like];
-  if (opts.kind) params.push(opts.kind);
+  if (kind) params.push(kind);
   params.push(q, q, q, prefix, prefix, limit);
 
   const rows = store.raw<Row>(
@@ -616,27 +669,29 @@ export function findImplementations(
   const limit = opts.limit ?? 100;
 
   const rows = store.raw<(Row & { depth: number; via: "EXTENDS" | "IMPLEMENTS" })>(
-    `WITH RECURSIVE impl(id, depth, path, via) AS (
-       SELECT e.source, 1, e.source || '/' || e.target, e.kind
+    `WITH RECURSIVE impl(id, depth, via) AS (
+       SELECT e.source, 1, e.kind
        FROM edges e
        WHERE e.target = ? AND e.kind IN ('EXTENDS', 'IMPLEMENTS')
-       UNION ALL
-       SELECT e.source, i.depth + 1, i.path || '/' || e.source, e.kind
+       UNION
+       SELECT e.source, i.depth + 1, e.kind
        FROM edges e
        JOIN impl i ON e.target = i.id
        WHERE e.kind IN ('EXTENDS', 'IMPLEMENTS')
          AND i.depth < ?
-         AND instr('|' || i.path || '|', '|' || e.source || '|') = 0
      )
      SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
-            i.depth, i.via
+            MIN(i.depth) AS depth, i.via
      FROM impl i
      JOIN nodes n ON n.id = i.id
      WHERE n.kind IN ('class', 'interface', 'enum', 'aspect', 'annotation_type')
-     ORDER BY i.depth, n.qualified_name
+       AND i.id <> ?
+     GROUP BY i.id
+     ORDER BY depth, n.qualified_name
      LIMIT ?`,
     target.id,
     maxDepth,
+    target.id,
     limit
   );
 
@@ -866,30 +921,46 @@ export function hotspots(
   const minFanIn = opts.minFanIn ?? 0;
   const kinds = sqlKinds(traversalEdgeKinds({ includeDynamic: opts.includeDynamic ?? true }));
 
+  // Pre-aggregate both directions in one scan each, then join the summaries to
+  // the callable nodes. The previous form ran three correlated subqueries per
+  // candidate row and had to over-fetch `limit * 4` rows because `minFanIn`
+  // was applied in JS.
   const rows = store.raw<(Row & { fan_in: number; fan_out: number; advice_count: number })>(
-    `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
-       (SELECT COUNT(DISTINCT e.source) FROM edges e
-          WHERE e.target = n.id AND e.kind IN (${kinds})) AS fan_in,
-       (SELECT COUNT(DISTINCT e.target) FROM edges e
-          WHERE e.source = n.id AND e.kind IN (${kinds})) AS fan_out,
-       (SELECT COUNT(*) FROM edges e
-          WHERE e.target = n.id AND e.kind = 'ADVISES') AS advice_count
+    `WITH inbound AS (
+       SELECT e.target AS id,
+              COUNT(DISTINCT CASE WHEN e.kind IN (${kinds}) THEN e.source END) AS fan_in,
+              COUNT(CASE WHEN e.kind = 'ADVISES' THEN 1 END) AS advice_count
+       FROM edges e
+       WHERE e.kind IN (${kinds}, 'ADVISES')
+       GROUP BY e.target
+     ),
+     outbound AS (
+       SELECT e.source AS id, COUNT(DISTINCT e.target) AS fan_out
+       FROM edges e
+       WHERE e.kind IN (${kinds})
+       GROUP BY e.source
+     )
+     SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties,
+            COALESCE(i.fan_in, 0) AS fan_in,
+            COALESCE(o.fan_out, 0) AS fan_out,
+            COALESCE(i.advice_count, 0) AS advice_count
      FROM nodes n
+     LEFT JOIN inbound i ON i.id = n.id
+     LEFT JOIN outbound o ON o.id = n.id
      WHERE n.kind IN ('method', 'constructor')
+       AND COALESCE(i.fan_in, 0) >= ?
      ORDER BY fan_in DESC, fan_out DESC, n.qualified_name
      LIMIT ?`,
-    limit * 4
+    minFanIn,
+    limit
   );
 
-  return rows
-    .filter((r) => r.fan_in >= minFanIn)
-    .slice(0, limit)
-    .map((r) => ({
-      symbol: rowToRef(r),
-      fanIn: r.fan_in,
-      fanOut: r.fan_out,
-      adviceCount: r.advice_count,
-    }));
+  return rows.map((r) => ({
+    symbol: rowToRef(r),
+    fanIn: r.fan_in,
+    fanOut: r.fan_out,
+    adviceCount: r.advice_count,
+  }));
 }
 
 export interface DeadSymbol {

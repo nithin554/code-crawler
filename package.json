@@ -24,7 +24,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.bench.json",
+    "bench": "tsx bench/run.ts",
     "dev": "tsx src/index.ts",
     "serve": "tsx src/index.ts serve",
     "start": "node dist/index.js",
