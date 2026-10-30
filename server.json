@@ -1,0 +1,55 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.nithin554/code-crawler",
+  "title": "Code Crawler",
+  "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase",
+  "version": "0.1.0",
+  "websiteUrl": "https://nithin554.github.io/code-crawler/",
+  "repository": {
+    "url": "https://github.com/nithin554/code-crawler",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@nithin554/code-crawler",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CODECRAWLER_DB",
+          "description": "Path to the SQLite graph database (default ~/.code-crawler/index.db)",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "CODECRAWLER_EXCLUDE_DIRS",
+          "description": "Comma-separated directories to skip during crawl",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "CODECRAWLER_DEFAULT_LIMIT",
+          "description": "Default result cap for list queries (default 50)",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "CODECRAWLER_MAX_DEPTH",
+          "description": "Traversal depth cap (default 10)",
+          "format": "number",
+          "isRequired": false
+        },
+        {
+          "name": "CODECRAWLER_HELPFUL_ERRORS",
+          "description": "Fuzzy suggestions on unknown symbols (default true)",
+          "format": "boolean",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
