@@ -149,15 +149,16 @@ describe("incremental crawl", () => {
     // and putting the mtime back hides the edit from the timestamp check too.
     // This is the state `git checkout`, `rsync -t` and unzip leave behind.
     fs.writeFileSync(target, source.replaceAll("place", "fetch"));
-    // libuv rounds the requested timestamp down by a fraction of a millisecond,
-    // so nudge until the filesystem reports the millisecond the crawler stored.
-    for (let delta = 0; delta < 5; delta++) {
-      fs.utimesSync(target, record.mtimeMs / 1000, record.mtimeMs / 1000 + delta);
-      if (Math.trunc(fs.statSync(target).mtimeMs) === record.mtimeMs) break;
+    // The filesystem rounds the timestamp we request, so nudge in half
+    // millisecond steps until it reports the millisecond the crawler stored.
+    const seconds = record.mtimeMs / 1000;
+    let restored = false;
+    for (let step = 0; step < 20 && !restored; step++) {
+      fs.utimesSync(target, seconds, seconds + step / 2000);
+      restored = Math.trunc(fs.statSync(target).mtimeMs) === record.mtimeMs;
     }
-    const patched = fs.statSync(target);
-    expect(patched.size).toBe(record.size);
-    expect(Math.trunc(patched.mtimeMs)).toBe(record.mtimeMs);
+    expect(restored).toBe(true);
+    expect(fs.statSync(target).size).toBe(record.size);
 
     const stale = await crawl();
     expect(stale.filesUnchanged).toBe(8);
