@@ -140,6 +140,11 @@ jobs:
       - create-release
       - build-and-publish
     if: github.actor != 'dependabot[bot]'
+    # The environment's deployment branch policy allows only `main`, so this
+    # job cannot publish from another ref.
+    environment:
+      name: mcp-registry-publish
+      url: https://registry.modelcontextprotocol.io
     permissions:
       contents: read
       id-token: write # Required for the registry's GitHub OIDC login
