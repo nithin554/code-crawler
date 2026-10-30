@@ -107,7 +107,10 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (215 tests; run with CODECRAWLER_BENCH=1 for the scale test)
+npm test             # vitest (250 tests; run with CODECRAWLER_BENCH=1 for the scale test)
+npm run lint         # biome check (lint + format, fails CI)
+npm run format       # biome format --write
+npm run coverage     # vitest run --coverage (thresholds in vitest.config.ts)
 npm run bench        # crawl/query benchmark on a generated ~137k-line project
 ```
 
