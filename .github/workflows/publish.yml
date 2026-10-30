@@ -121,9 +121,25 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          # Publishing uses OIDC trusted publishing (no token secret), which
+          # needs npm >= 11.5.1. The Node 22 line still bundles npm 10.x, and an
+          # older CLI publishes unauthenticated, which the registry answers
+          # with a bare 404 instead of a 401. Node 24 bundles npm 11.x.
+          node-version: '24'
           registry-url: https://registry.npmjs.org
           cache: 'npm'
+
+      - name: Verify npm supports trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEED="11.5.1"
+          HAVE="$(npm --version)"
+          echo "npm $HAVE (need >= $NEED for OIDC trusted publishing)"
+          if [ "$(printf '%s\n%s\n' "$NEED" "$HAVE" | sort -V | head -1)" != "$NEED" ]; then
+            echo "::error::npm $HAVE predates trusted publishing; pin a newer Node or install npm >= $NEED"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
