@@ -534,8 +534,11 @@ export interface SearchOptions {
 }
 
 /**
- * Fuzzy symbol lookup by short name or FQN. Matches substring of either the
- * id, the qualified name, or the display name.
+ * Fuzzy symbol lookup by short name or FQN. Matches a substring of the id or
+ * qualified name only; metadata properties are never treated as symbol names.
+ * Ranking happens in SQL before LIMIT so good matches cannot be truncated
+ * away: exact qualified name, exact id, exact display name, then prefixes,
+ * then substrings.
  */
 export function searchSymbols(
   store: GraphStore,
@@ -546,40 +549,36 @@ export function searchSymbols(
   if (!q) return [];
   const limit = opts.limit ?? store.defaultLimit ?? 50;
   const like = `%${q}%`;
+  const prefix = `${q}%`;
 
   const kindClause = opts.kind ? "AND n.kind = ?" : "";
-  const params: unknown[] = [like, like, like];
+  const params: unknown[] = [like, like];
   if (opts.kind) params.push(opts.kind);
-  // ORDER BY CASE params: exact-qualified-name, then prefix/name match
-  params.push(q, like, limit);
+  params.push(q, q, q, prefix, prefix, limit);
 
   const rows = store.raw(
     `SELECT n.id, n.qualified_name, n.kind, n.file_path, n.properties
      FROM nodes n
-     WHERE LOWER(n.id) LIKE ? OR LOWER(n.qualified_name) LIKE ? OR LOWER(n.properties) LIKE ?
+     WHERE (LOWER(n.id) LIKE ? OR LOWER(n.qualified_name) LIKE ?)
      ${kindClause}
      ORDER BY
-       CASE WHEN LOWER(n.qualified_name) = ? THEN 0
-            WHEN LOWER(n.id) LIKE ? THEN 1
-            ELSE 2 END,
-       n.qualified_name
+       CASE
+         WHEN LOWER(n.qualified_name) = ? THEN 0
+         WHEN LOWER(n.id) = ? THEN 1
+         WHEN json_valid(n.properties)
+           AND LOWER(json_extract(n.properties, '$.name')) = ? THEN 2
+         WHEN LOWER(n.qualified_name) LIKE ? THEN 3
+         WHEN LOWER(n.id) LIKE ? THEN 4
+         ELSE 5
+       END,
+       LENGTH(n.qualified_name),
+       n.qualified_name,
+       n.id
      LIMIT ?`,
     ...params
   ) as Row[];
 
-  // Re-rank: exact name matches first, then keep alphabetical ordering so the
-  // SQL ordering is not silently discarded.
-  return rows
-    .map((r) => rowToRef(r))
-    .sort((a, b) => rank(a, q) - rank(b, q) || a.qualifiedName.localeCompare(b.qualifiedName));
-}
-
-function rank(ref: SymbolRef, q: string): number {
-  if (ref.qualifiedName.toLowerCase() === q) return 0;
-  const name = ref.name?.toLowerCase() ?? "";
-  if (name === q) return 1;
-  if (ref.qualifiedName.toLowerCase().startsWith(q)) return 2;
-  return 3;
+  return rows.map((r) => rowToRef(r));
 }
 
 /** Suggest similar symbols when an exact lookup fails. */

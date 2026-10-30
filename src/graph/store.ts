@@ -35,8 +35,9 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_kind         ON nodes (kind);
 CREATE INDEX IF NOT EXISTS idx_nodes_qualified    ON nodes (qualified_name);
-CREATE INDEX IF NOT EXISTS idx_nodes_name         ON nodes (qualified_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file         ON nodes (file_path);
+-- Migration: idx_nodes_name was an exact duplicate of idx_nodes_qualified.
+DROP INDEX IF EXISTS idx_nodes_name;
 
 CREATE TABLE IF NOT EXISTS edges (
   source     TEXT NOT NULL,
@@ -171,9 +172,14 @@ export class GraphStore {
     return row ? rowToNode(row) : null;
   }
 
+  /**
+   * Look up a node by qualified name. Qualified names are not unique across
+   * kinds (e.g. a constructor and its class), so order deterministically
+   * instead of letting SQLite pick an arbitrary row.
+   */
   getNodeByQualifiedName(qn: string): GraphNode | null {
     const row = this.db
-      .prepare("SELECT * FROM nodes WHERE qualified_name = ? LIMIT 1")
+      .prepare("SELECT * FROM nodes WHERE qualified_name = ? ORDER BY kind, id LIMIT 1")
       .get(qn) as Row | undefined;
     return row ? rowToNode(row) : null;
   }
@@ -192,6 +198,23 @@ export class GraphStore {
    */
   removeFile(filePath: string): void {
     this.deleteFileNodesStmt.run(filePath);
+  }
+
+  /**
+   * Delete file-less shared nodes (package, annotation, external symbol) that
+   * no longer participate in any edge. Returns the number of nodes removed.
+   * Call inside the crawl transaction so pruning cannot partially apply.
+   */
+  pruneOrphanNodes(): number {
+    const info = this.db
+      .prepare(
+        `DELETE FROM nodes
+         WHERE file_path IS NULL
+           AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.source = nodes.id)
+           AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.target = nodes.id)`
+      )
+      .run();
+    return info.changes;
   }
 
   /**
