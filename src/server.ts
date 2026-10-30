@@ -24,7 +24,17 @@ import {
   findRoutes,
   externalDependencies,
   type SymbolRef,
+  type WiringEdge,
 } from "./graph/queries.js";
+import { applyBudget, pageMeta } from "./graph/budget.js";
+import {
+  explainSymbol,
+  exportGraph,
+  findCycles,
+  findUnresolved,
+  impactAnalysis,
+  unresolvedForNode,
+} from "./graph/insights.js";
 import { loadConfig } from "./config.js";
 
 /**
@@ -73,6 +83,19 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     filePath: s.filePath,
   });
 
+  /** Project a framework-wiring edge (route, injection, reflection). */
+  const wiring = (e: WiringEdge) => ({
+    source: ref(e.source),
+    target: ref(e.target),
+    ...(e.httpMethod ? { httpMethod: e.httpMethod } : {}),
+    ...(e.path ? { path: e.path } : {}),
+    ...(e.framework ? { framework: e.framework } : {}),
+    ...(e.mechanism ? { mechanism: e.mechanism } : {}),
+    ...(e.injectedName ? { injectedName: e.injectedName } : {}),
+    ...(e.external ? { external: true } : {}),
+    ...(e.line !== undefined ? { line: line(e.line) } : {}),
+  });
+
   const notFound = (symbol: string) => {
     const suggestions = suggestSymbols(store, symbol);
     return text({
@@ -90,6 +113,47 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       error: message,
       hint: "Check the tool arguments and the index state (index_status); if the index is from an older version, run clear_index and crawl again.",
     });
+  };
+
+  /**
+   * Opt-in pagination parameters. When neither is supplied the response shape
+   * is byte-identical to the pre-pagination shape.
+   */
+  const budgetParams = {
+    max_tokens: z
+      .number()
+      .int()
+      .min(100)
+      .max(200000)
+      .optional()
+      .describe(
+        "Soft cap on the estimated token cost of the returned list (about 4 characters per token). When the list does not fit, the response gains a `page` block carrying `nextCursor`."
+      ),
+    cursor: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Offset into the list; pass page.nextCursor from a previous response to continue."),
+  };
+
+  /**
+   * Attach a `page` block and cut the list when the caller asked for a budget.
+   * Counting keys keep reporting the full window size so clients can decide
+   * whether to ask for the next page. Each tool keeps its own counting key name,
+   * so a payload only gains `count` when it already had one.
+   */
+  const paged = <T>(
+    payload: Record<string, unknown>,
+    key: string,
+    items: T[],
+    args: { max_tokens?: number; cursor?: number }
+  ): Record<string, unknown> => {
+    if (args.max_tokens === undefined && args.cursor === undefined) return payload;
+    const page = applyBudget(items, { maxTokens: args.max_tokens, cursor: args.cursor });
+    const next: Record<string, unknown> = { ...payload, [key]: page.items, page: pageMeta(page) };
+    if ("count" in payload) next.count = items.length;
+    return next;
   };
 
   /**
@@ -192,20 +256,23 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Restrict results to a node kind (class, method, field, ...)."),
       limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)."),
+      ...budgetParams,
     },
-    async ({ query, kind, limit }) => {
+    async ({ query, kind, limit, max_tokens, cursor }) => {
       const results = searchSymbols(store, query, { kind, limit });
-      return text({
-        query,
-        count: results.length,
-        results: results.map(ref),
-      });
+      const refs = results.map(ref);
+      return text(
+        paged({ query, count: refs.length, results: refs }, "results", refs, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
   tool(
     "get_node",
-    "Get metadata and source location for a single symbol by id or qualified name.",
+    "Get metadata and source location for a single symbol by id or qualified name. Includes an `unresolved` block when the symbol has call sites the resolver could not bind, or when unresolved calls elsewhere point at it.",
     {
       qualified_name: z
         .string()
@@ -214,6 +281,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     async ({ qualified_name }) => {
       const node = store.getNode(qualified_name) ?? store.getNodeByQualifiedName(qualified_name);
       if (!node) return notFound(qualified_name);
+      const unresolved = unresolvedForNode(store, node.id);
       return text({
         id: node.id,
         kind: node.kind,
@@ -224,6 +292,23 @@ export function createServer(store: GraphStore, config: Config): McpServer {
           startLine: line(node.properties.startLine as number),
           endLine: line(node.properties.endLine as number),
         },
+        ...(unresolved
+          ? {
+              unresolved: {
+                callerCount: unresolved.outgoing.length,
+                referencedByCount: unresolved.incoming.length,
+                calls: unresolved.outgoing.map((c) => ({
+                  target: c.targetLabel,
+                  reason: c.reason,
+                  line: line(c.line),
+                })),
+                referencedBy: unresolved.incoming.map((i) => ({
+                  caller: ref(i.caller),
+                  line: line(i.line),
+                })),
+              },
+            }
+          : {}),
       });
     }
   );
@@ -244,8 +329,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callers returned."),
+      ...budgetParams,
     },
-    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit }) => {
+    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
       const result = getCallers(store, symbol, {
         transitive,
         includeDynamic: include_dynamic,
@@ -254,15 +340,18 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         limit,
       });
       if (!result) return notFound(symbol);
-      return text({
-        target: ref(result.target),
-        callers: result.callers.map((c) => ({
-          caller: ref(c.caller),
-          depth: c.depth,
-          callSiteLine: line(c.callSiteLine),
-          edgeKind: c.edgeKind,
-        })),
-      });
+      const callers = result.callers.map((c) => ({
+        caller: ref(c.caller),
+        depth: c.depth,
+        callSiteLine: line(c.callSiteLine),
+        edgeKind: c.edgeKind,
+      }));
+      return text(
+        paged({ target: ref(result.target), count: callers.length, callers }, "callers", callers, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -282,8 +371,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callees returned."),
+      ...budgetParams,
     },
-    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit }) => {
+    async ({ symbol, transitive, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
       const result = getCallees(store, symbol, {
         transitive,
         includeDynamic: include_dynamic,
@@ -292,15 +382,18 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         limit,
       });
       if (!result) return notFound(symbol);
-      return text({
-        source: ref(result.source),
-        callees: result.callees.map((c) => ({
-          callee: ref(c.callee),
-          depth: c.depth,
-          callSiteLine: line(c.callSiteLine),
-          edgeKind: c.edgeKind,
-        })),
-      });
+      const callees = result.callees.map((c) => ({
+        callee: ref(c.callee),
+        depth: c.depth,
+        callSiteLine: line(c.callSiteLine),
+        edgeKind: c.edgeKind,
+      }));
+      return text(
+        paged({ source: ref(result.source), count: callees.length, callees }, "callees", callees, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -320,8 +413,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .describe("Also follow ADVISES edges (aspect advice methods)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Maximum path length."),
       limit: z.number().int().min(1).max(100).optional().describe("Max paths returned (default 10)."),
+      ...budgetParams,
     },
-    async ({ source, target, include_dynamic, include_advice, max_depth, limit }) => {
+    async ({ source, target, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
       const paths = tracePath(store, source, target, {
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
@@ -329,21 +423,22 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         limit,
       });
       if (!paths) return notFound(source);
-      return text({
-        source,
-        target,
-        pathCount: paths.length,
-        paths: paths.map((p) => ({
-          length: p.length,
-          path: p.path,
-          edges: p.edges.map((e) => ({
-            source: e.source,
-            target: e.target,
-            kind: e.kind,
-            callSiteLine: line(e.callSiteLine),
-          })),
+      const mapped = paths.map((p) => ({
+        length: p.length,
+        path: p.path,
+        edges: p.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          kind: e.kind,
+          callSiteLine: line(e.callSiteLine),
         })),
-      });
+      }));
+      return text(
+        paged({ source, target, pathCount: mapped.length, paths: mapped }, "paths", mapped, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -362,8 +457,9 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .describe("Weave aspect advice into the trace (default true)."),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(1000).optional().describe("Max steps returned."),
+      ...budgetParams,
     },
-    async ({ symbol, include_dynamic, include_advice, max_depth, limit }) => {
+    async ({ symbol, include_dynamic, include_advice, max_depth, limit, max_tokens, cursor }) => {
       const result = traceExecution(store, symbol, {
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
@@ -371,16 +467,18 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         limit,
       });
       if (!result) return notFound(symbol);
-      return text({
-        root: ref(result.root),
-        stepCount: result.steps.length,
-        steps: result.steps.map((s) => ({
-          symbol: ref(s.symbol),
-          depth: s.depth,
-          via: s.via,
-          callSiteLine: line(s.callSiteLine),
-        })),
-      });
+      const steps = result.steps.map((s) => ({
+        symbol: ref(s.symbol),
+        depth: s.depth,
+        via: s.via,
+        callSiteLine: line(s.callSiteLine),
+      }));
+      return text(
+        paged({ root: ref(result.root), stepCount: steps.length, steps }, "steps", steps, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -391,19 +489,28 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       symbol: z.string().describe("Interface or superclass id/qualified name."),
       max_depth: z.number().int().min(1).max(20).optional().describe("Hierarchy depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max implementations returned."),
+      ...budgetParams,
     },
-    async ({ symbol, max_depth, limit }) => {
+    async ({ symbol, max_depth, limit, max_tokens, cursor }) => {
       const result = findImplementations(store, symbol, { maxDepth: max_depth, limit });
       if (!result) return notFound(symbol);
-      return text({
-        target: ref(result.target),
-        implementationCount: result.implementations.length,
-        implementations: result.implementations.map((i) => ({
-          type: ref(i.type),
-          depth: i.depth,
-          via: i.via,
-        })),
-      });
+      const implementations = result.implementations.map((i) => ({
+        type: ref(i.type),
+        depth: i.depth,
+        via: i.via,
+      }));
+      return text(
+        paged(
+          {
+            target: ref(result.target),
+            implementationCount: implementations.length,
+            implementations,
+          },
+          "implementations",
+          implementations,
+          { max_tokens, cursor }
+        )
+      );
     }
   );
 
@@ -412,21 +519,25 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     "List aspects with their advice methods (@Before/@After/@Around/...), pointcuts, and the methods each advice intercepts.",
     {
       limit: z.number().int().min(1).max(200).optional().describe("Max aspects returned."),
+      ...budgetParams,
     },
-    async ({ limit }) => {
+    async ({ limit, max_tokens, cursor }) => {
       const aspects = getAspects(store, { limit });
-      return text({
-        aspectCount: aspects.length,
-        aspects: aspects.map((a) => ({
-          aspect: ref(a.aspect),
-          advice: a.advice.map((adv) => ({
-            method: ref(adv.method),
-            adviceKind: adv.adviceKind,
-            pointcut: adv.pointcut,
-            advised: adv.advised.map(ref),
-          })),
+      const mapped = aspects.map((a) => ({
+        aspect: ref(a.aspect),
+        advice: a.advice.map((adv) => ({
+          method: ref(adv.method),
+          adviceKind: adv.adviceKind,
+          pointcut: adv.pointcut,
+          advised: adv.advised.map(ref),
         })),
-      });
+      }));
+      return text(
+        paged({ aspectCount: mapped.length, aspects: mapped }, "aspects", mapped, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -439,21 +550,30 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .boolean()
         .optional()
         .describe("Include decorators on declared members (default false)."),
+      ...budgetParams,
     },
-    async ({ symbol, include_members }) => {
+    async ({ symbol, include_members, max_tokens, cursor }) => {
       const result = getDecorators(store, symbol, { includeMembers: include_members });
       if (!result) return notFound(symbol);
-      return text({
-        symbol: ref(result.symbol),
-        decorators: result.decorators.map((d) => ({
-          ...d,
-          line: line(d.line),
-        })),
-        members: result.members.map((m) => ({
-          symbol: ref(m.symbol),
-          decorators: m.decorators.map((d) => ({ ...d, line: line(d.line) })),
-        })),
-      });
+      const members = result.members.map((m) => ({
+        symbol: ref(m.symbol),
+        decorators: m.decorators.map((d) => ({ ...d, line: line(d.line) })),
+      }));
+      return text(
+        paged(
+          {
+            symbol: ref(result.symbol),
+            decorators: result.decorators.map((d) => ({
+              ...d,
+              line: line(d.line),
+            })),
+            members,
+          },
+          "members",
+          members,
+          { max_tokens, cursor }
+        )
+      );
     }
   );
 
@@ -467,19 +587,22 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Restrict results to a node kind (class, method, field, ...)."),
       limit: z.number().int().min(1).max(500).optional().describe("Max symbols returned."),
+      ...budgetParams,
     },
-    async ({ annotation, kind, limit }) => {
+    async ({ annotation, kind, limit, max_tokens, cursor }) => {
       const results = findAnnotated(store, annotation, { kind, limit });
-      return text({
-        annotation,
-        count: results.length,
-        results: results.map((r) => ({
-          symbol: ref(r.symbol),
-          annotation: r.annotation,
-          line: line(r.line),
-          arguments: r.arguments,
-        })),
-      });
+      const symbols = results.map((r) => ({
+        symbol: ref(r.symbol),
+        annotation: r.annotation,
+        line: line(r.line),
+        arguments: r.arguments,
+      }));
+      return text(
+        paged({ annotation, count: symbols.length, results: symbols }, "results", symbols, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -493,22 +616,23 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .boolean()
         .optional()
         .describe("Count dynamic-dispatch callers too (default true)."),
+      ...budgetParams,
     },
-    async ({ limit, min_fan_in, include_dynamic }) => {
+    async ({ limit, min_fan_in, include_dynamic, max_tokens, cursor }) => {
       const results = hotspots(store, {
         limit,
         minFanIn: min_fan_in,
         includeDynamic: include_dynamic,
       });
-      return text({
-        count: results.length,
-        hotspots: results.map((h) => ({
-          symbol: ref(h.symbol),
-          fanIn: h.fanIn,
-          fanOut: h.fanOut,
-          adviceCount: h.adviceCount,
-        })),
-      });
+      const list = results.map((h) => ({
+        symbol: ref(h.symbol),
+        fanIn: h.fanIn,
+        fanOut: h.fanOut,
+        adviceCount: h.adviceCount,
+      }));
+      return text(
+        paged({ count: list.length, hotspots: list }, "hotspots", list, { max_tokens, cursor })
+      );
     }
   );
 
@@ -523,21 +647,19 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .boolean()
         .optional()
         .describe("Treat dynamic-dispatch edges as callers (default true)."),
+      ...budgetParams,
     },
-    async ({ limit, include_constructors, include_tests, include_dynamic }) => {
+    async ({ limit, include_constructors, include_tests, include_dynamic, max_tokens, cursor }) => {
       const results = deadCode(store, {
         limit,
         includeConstructors: include_constructors,
         includeTests: include_tests,
         includeDynamic: include_dynamic,
       });
-      return text({
-        count: results.length,
-        unused: results.map((d) => ({
-          symbol: ref(d.symbol),
-          reason: d.reason,
-        })),
-      });
+      const unused = results.map((d) => ({ symbol: ref(d.symbol), reason: d.reason }));
+      return text(
+        paged({ count: unused.length, unused }, "unused", unused, { max_tokens, cursor })
+      );
     }
   );
 
@@ -577,17 +699,23 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Filter by entry-point kind: http, messaging, scheduler, event, cli, test, route."),
       limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
     },
-    async ({ kind, limit }) => {
+    async ({ kind, limit, max_tokens, cursor }) => {
       const results = findEntryPoints(store, { kind, limit });
-      return text({
-        count: results.length,
-        entryPoints: results.map((e) => ({
-          symbol: ref(e.symbol),
-          entryPointKind: e.entryPointKind,
-          ...(e.detail ? { detail: e.detail } : {}),
-        })),
-      });
+      const entryPoints = results.map((e) => ({
+        symbol: ref(e.symbol),
+        entryPointKind: e.entryPointKind,
+        ...(e.detail ? { detail: e.detail } : {}),
+      }));
+      return text(
+        paged(
+          { count: entryPoints.length, entryPoints },
+          "entryPoints",
+          entryPoints,
+          { max_tokens, cursor }
+        )
+      );
     }
   );
 
@@ -600,20 +728,24 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Restrict to a single injecting or injected symbol id/qualified name."),
       limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
     },
-    async ({ symbol, limit }) => {
+    async ({ symbol, limit, max_tokens, cursor }) => {
       const results = findInjections(store, { symbol, limit });
-      return text({
-        count: results.length,
-        injections: results.map((e) => ({
-          source: ref(e.source),
-          target: ref(e.target),
-          ...(e.injectedName ? { injectedName: e.injectedName } : {}),
-          ...(e.framework ? { framework: e.framework } : {}),
-          ...(e.line !== undefined ? { line: line(e.line) } : {}),
-          ...(e.external ? { external: true } : {}),
-        })),
-      });
+      const injections = results.map((e) => ({
+        source: ref(e.source),
+        target: ref(e.target),
+        ...(e.injectedName ? { injectedName: e.injectedName } : {}),
+        ...(e.framework ? { framework: e.framework } : {}),
+        ...(e.line !== undefined ? { line: line(e.line) } : {}),
+        ...(e.external ? { external: true } : {}),
+      }));
+      return text(
+        paged({ count: injections.length, injections }, "injections", injections, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -626,18 +758,22 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Restrict to a single looking-up or looked-up symbol id/qualified name."),
       limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
     },
-    async ({ symbol, limit }) => {
+    async ({ symbol, limit, max_tokens, cursor }) => {
       const results = findReflections(store, { symbol, limit });
-      return text({
-        count: results.length,
-        reflections: results.map((e) => ({
-          source: ref(e.source),
-          target: ref(e.target),
-          ...(e.mechanism ? { mechanism: e.mechanism } : {}),
-          ...(e.line !== undefined ? { line: line(e.line) } : {}),
-        })),
-      });
+      const reflections = results.map((e) => ({
+        source: ref(e.source),
+        target: ref(e.target),
+        ...(e.mechanism ? { mechanism: e.mechanism } : {}),
+        ...(e.line !== undefined ? { line: line(e.line) } : {}),
+      }));
+      return text(
+        paged({ count: reflections.length, reflections }, "reflections", reflections, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -650,20 +786,19 @@ export function createServer(store: GraphStore, config: Config): McpServer {
         .optional()
         .describe("Restrict to a single registering or handling symbol id/qualified name."),
       limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
     },
-    async ({ symbol, limit }) => {
+    async ({ symbol, limit, max_tokens, cursor }) => {
       const results = findRoutes(store, { symbol, limit });
-      return text({
-        count: results.length,
-        routes: results.map((e) => ({
-          source: ref(e.source),
-          handler: ref(e.target),
-          ...(e.httpMethod ? { httpMethod: e.httpMethod } : {}),
-          ...(e.path ? { path: e.path } : {}),
-          ...(e.framework ? { framework: e.framework } : {}),
-          ...(e.line !== undefined ? { line: line(e.line) } : {}),
-        })),
-      });
+      const routes = results.map((e) => ({
+        source: ref(e.source),
+        handler: ref(e.target),
+        ...(e.httpMethod ? { httpMethod: e.httpMethod } : {}),
+        ...(e.path ? { path: e.path } : {}),
+        ...(e.framework ? { framework: e.framework } : {}),
+        ...(e.line !== undefined ? { line: line(e.line) } : {}),
+      }));
+      return text(paged({ count: routes.length, routes }, "routes", routes, { max_tokens, cursor }));
     }
   );
 
@@ -672,18 +807,22 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     "Summarize third-party packages the crawled source imports, with reference and file counts. External libraries are modelled as package-level nodes: the crawler records the dependency, not the library's internals.",
     {
       limit: z.number().int().min(1).max(500).optional().describe("Max packages (default 50)."),
+      ...budgetParams,
     },
-    async ({ limit }) => {
+    async ({ limit, max_tokens, cursor }) => {
       const results = externalDependencies(store, { limit });
-      return text({
-        count: results.length,
-        packages: results.map((p) => ({
-          package: p.package,
-          references: p.references,
-          files: p.files,
-          kinds: p.kinds,
-        })),
-      });
+      const packages = results.map((p) => ({
+        package: p.package,
+        references: p.references,
+        files: p.files,
+        kinds: p.kinds,
+      }));
+      return text(
+        paged({ count: packages.length, packages }, "packages", packages, {
+          max_tokens,
+          cursor,
+        })
+      );
     }
   );
 
@@ -735,6 +874,268 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     async () => {
       store.clearAll();
       return text({ ok: true, cleared: true });
+    }
+  );
+
+  tool(
+    "find_unresolved",
+    "List call sites the resolver could not bind to a symbol, grouped by reason, with the caller, source line and the callee text as written. This is the honest boundary of static analysis: dynamic receivers, untyped values, missing dependencies. Use it to judge how much of a project the index actually covers, and as the highest-signal input for improving a parser.",
+    {
+      reason: z
+        .string()
+        .optional()
+        .describe("Case-insensitive substring filter on the resolver failure reason."),
+      caller_kind: z
+        .enum(NODE_KINDS)
+        .optional()
+        .describe("Restrict to unresolved calls made by callers of this node kind."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(5000)
+        .optional()
+        .describe("Max call sites scanned (default 2000)."),
+      ...budgetParams,
+    },
+    async ({ reason, caller_kind, limit, max_tokens, cursor }) => {
+      const report = findUnresolved(store, { reason, kind: caller_kind, limit });
+      const calls = report.calls.map((c) => ({
+        caller: ref(c.caller),
+        target: c.targetLabel,
+        reason: c.reason,
+        line: line(c.line),
+      }));
+      return text(
+        paged(
+          {
+            count: calls.length,
+            total: report.total,
+            scanTruncated: report.scanTruncated,
+            byReason: report.byReason,
+            unresolved: calls,
+          },
+          "unresolved",
+          calls,
+          { max_tokens, cursor }
+        )
+      );
+    }
+  );
+
+  tool(
+    "impact_analysis",
+    "One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol, HTTP routes that serve it, and overriding implementations. Analysing a type aggregates the callers of all its methods. Returns a heuristic risk band: high when a framework entry point reaches the symbol, medium when it has direct callers, low otherwise.",
+    {
+      symbol: z.string().describe("Symbol id or qualified name."),
+      max_depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Caller traversal depth (default 10)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (default true)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .describe("Max callers returned (default 200)."),
+    },
+    async ({ symbol, max_depth, include_dynamic, limit }) => {
+      const result = impactAnalysis(store, symbol, {
+        maxDepth: max_depth,
+        includeDynamic: include_dynamic,
+        limit,
+      });
+      if (!result) return notFound(symbol);
+      return text({
+        symbol: ref(result.symbol),
+        summary: result.summary,
+        callers: result.callers.map((c) => ({
+          caller: ref(c.caller),
+          depth: c.depth,
+          callSiteLine: line(c.callSiteLine),
+          edgeKind: c.edgeKind,
+        })),
+        entryPoints: result.entryPoints.map((e) => ({
+          symbol: ref(e.symbol),
+          entryPointKind: e.entryPointKind,
+          ...(e.detail ? { detail: e.detail } : {}),
+          viaDepth: e.viaDepth,
+        })),
+        routes: result.routes.map(wiring),
+        implementations: result.implementations.map((i) => ({
+          type: ref(i.type),
+          ...(i.method ? { method: ref(i.method) } : {}),
+          depth: i.depth,
+          via: i.via,
+        })),
+        affectedFiles: result.affectedFiles,
+      });
+    }
+  );
+
+  tool(
+    "explain_symbol",
+    "One-shot digest of a symbol: kind, file and line, annotations/decorators, contained members with their decorators, direct callers and callees, overriding implementations, and the framework wiring that reaches it (routes, injections, reflections). Replaces a chain of five lookups with one round trip.",
+    {
+      symbol: z.string().describe("Symbol id or qualified name."),
+      max_depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("Caller/callee traversal depth (default 1)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (default true)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max rows per section (default 50)."),
+    },
+    async ({ symbol, max_depth, include_dynamic, limit }) => {
+      const result = explainSymbol(store, symbol, {
+        maxDepth: max_depth,
+        includeDynamic: include_dynamic,
+        limit,
+      });
+      if (!result) return notFound(symbol);
+      return text({
+        symbol: ref(result.symbol),
+        line: line(result.line),
+        isEntryPoint: result.isEntryPoint ?? false,
+        decorators: result.decorators.map((d) => ({ ...d, line: line(d.line) })),
+        members: result.members.map((m) => ({
+          symbol: ref(m.symbol),
+          line: line(m.line),
+          decorators: m.decorators.map((d) => ({ ...d, line: line(d.line) })),
+        })),
+        callers: result.callers.map((c) => ({
+          caller: ref(c.caller),
+          depth: c.depth,
+          callSiteLine: line(c.callSiteLine),
+          edgeKind: c.edgeKind,
+        })),
+        callees: result.callees.map((c) => ({
+          caller: ref(c.caller),
+          depth: c.depth,
+          callSiteLine: line(c.callSiteLine),
+          edgeKind: c.edgeKind,
+        })),
+        implementations: result.implementations.map((i) => ({
+          type: ref(i.type),
+          ...(i.method ? { method: ref(i.method) } : {}),
+          depth: i.depth,
+          via: i.via,
+        })),
+        routes: result.routes.map(wiring),
+        injections: result.injections.map(wiring),
+        reflections: result.reflections.map(wiring),
+        summary: result.summary,
+      });
+    }
+  );
+
+  tool(
+    "find_cycles",
+    "Find call cycles (strongly connected components of the call graph) with a sample closed path for each. Direct recursion is reported separately in selfRecursive. Useful for spotting layer violations, accidental mutual recursion and hard-to-test tangles. Follows CALLS edges, plus DYNAMIC_DISPATCH unless disabled.",
+    {
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Include DYNAMIC_DISPATCH edges (default true)."),
+      min_size: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Minimum cycle size to report (default 2)."),
+      edge_kinds: z
+        .array(z.enum(EDGE_KINDS))
+        .optional()
+        .describe("Explicit edge kinds to follow, overriding include_dynamic."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max cycles returned (default 100)."),
+      ...budgetParams,
+    },
+    async ({ include_dynamic, min_size, edge_kinds, limit, max_tokens, cursor }) => {
+      const report = findCycles(store, {
+        includeDynamic: include_dynamic ?? true,
+        minSize: min_size,
+        edgeKinds: edge_kinds,
+        limit,
+      });
+      const cycles = report.cycles.map((c) => ({
+        size: c.size,
+        members: c.members.map(ref),
+        sample: c.sample,
+      }));
+      return text(
+        paged(
+          {
+            count: cycles.length,
+            cycleCount: report.cycleCount,
+            edgeKinds: report.edgeKinds,
+            scannedNodes: report.scannedNodes,
+            scannedEdges: report.scannedEdges,
+            scanTruncated: report.scanTruncated,
+            selfRecursive: report.selfRecursive.map(ref),
+            cycles,
+          },
+          "cycles",
+          cycles,
+          { max_tokens, cursor }
+        )
+      );
+    }
+  );
+
+  tool(
+    "export_graph",
+    "Render a neighborhood, or a slice of the whole graph, as a Mermaid or Graphviz DOT diagram. Use it when showing the shape of the code beats listing edges. Center the export on a symbol and keep the radius small so the diagram stays readable.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Center symbol id or qualified name; omit to export a slice of the whole graph."),
+      radius: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("Neighborhood radius around the symbol (default 2)."),
+      format: z.enum(["mermaid", "dot"]).optional().describe("Diagram format (default mermaid)."),
+      direction: z
+        .enum(["LR", "TB", "RL", "BT"])
+        .optional()
+        .describe("Layout direction (default LR)."),
+      edge_kinds: z.array(z.enum(EDGE_KINDS)).optional().describe("Edge kinds to draw."),
+      limit: z.number().int().min(1).max(1000).optional().describe("Max nodes (default 200)."),
+    },
+    async ({ symbol, radius, format, direction, edge_kinds, limit }) => {
+      const result = exportGraph(store, {
+        symbol,
+        radius,
+        format,
+        direction,
+        edgeKinds: edge_kinds,
+        limit,
+      });
+      if (!result) return notFound(symbol ?? "");
+      return text(result);
     }
   );
 
