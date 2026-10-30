@@ -1,6 +1,7 @@
 {
   "name": "@nithin554/code-crawler",
   "version": "0.1.0",
+  "mcpName": "io.github.nithin554/code-crawler",
   "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase",
   "type": "module",
   "license": "MIT",

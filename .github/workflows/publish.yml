@@ -128,8 +128,48 @@ jobs:
         shell: bash
         run: npm version "${{ needs.create-release.outputs.version }}" --no-git-tag-version
 
-      - name: Publish to registry
+      - name: Publish package to npm
         shell: bash
         # Trusted publishing (OIDC): no token needed. Requires "Trusted
         # Publishing" to be enabled for the package on npmjs.com.
         run: npm publish --provenance --access public
+
+  publish-mcp-registry:
+    runs-on: ubuntu-latest
+    needs:
+      - create-release
+      - build-and-publish
+    if: github.actor != 'dependabot[bot]'
+    permissions:
+      contents: read
+      id-token: write # Required for the registry's GitHub OIDC login
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - name: Set version in server.json
+        shell: bash
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # server.json in the repo tracks the next local version; the release
+          # version is only known here, so pin it to the npm release.
+          VERSION="$VERSION" node -e '
+            const fs = require("node:fs");
+            const version = process.env.VERSION;
+            const server = JSON.parse(fs.readFileSync("server.json", "utf8"));
+            server.version = version;
+            for (const pkg of server.packages ?? []) pkg.version = version;
+            fs.writeFileSync("server.json", JSON.stringify(server, null, 2) + "\n");
+          '
+          echo "server.json pinned to $VERSION"
+
+      # Skips versions already listed and retries transient registry/npm
+      # failures, so this job can be re-run on its own after an outage.
+      - name: Publish to MCP Registry
+        uses: ExaDev/mcp-registry-publish@v1.0.7
+        with:
+          server-json: server.json

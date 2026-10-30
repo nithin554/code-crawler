@@ -129,8 +129,32 @@ if green, **auto-releases**:
 2. Creates a matching GitHub release.
 3. Publishes the package to the npm registry with **provenance** (OIDC
    trusted publishing) — no token or repository secret is needed.
+4. Publishes [`server.json`](server.json) to the
+   [official MCP Registry](https://registry.modelcontextprotocol.io) as
+   `io.github.nithin554/code-crawler` from a separate, re-runnable job using
+   [`ExaDev/mcp-registry-publish`](https://github.com/ExaDev/mcp-registry-publish).
+   The job pins `server.json` to the release version, authenticates with GitHub
+   OIDC, skips versions the registry already lists, and retries transient npm
+   propagation or registry errors. Ownership is verified through the `mcpName`
+   field in `package.json`.
 
 ## Using as an MCP server
+
+### MCP Registry / `npx`
+
+The server is listed in the MCP Registry as `io.github.nithin554/code-crawler`.
+Any `npx`-capable client can run it without a local checkout:
+
+```json
+{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler", "serve"]
+    }
+  }
+}
+```
 
 ### Claude Desktop
 
