@@ -1,0 +1,376 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`java graph snapshot > matches the recorded graph 1`] = `
+"# nodes (39)
+class com.acme.Customer
+class com.acme.CustomerService
+class com.acme.Main
+class com.acme.Order
+class com.acme.OrderRepository
+class com.acme.OrderService
+class com.acme.ShippingService
+class com.acme.Tracking
+constructor com.acme.Customer#<init>
+constructor com.acme.CustomerService#<init>
+constructor com.acme.Order#<init>
+constructor com.acme.OrderRepository#<init>
+constructor com.acme.OrderService#<init>
+constructor com.acme.ShippingService#<init>
+constructor com.acme.Tracking#<init>
+field com.acme.Customer$name
+field com.acme.Order$customer
+field com.acme.Order$item
+field com.acme.OrderService$repo
+field com.acme.Tracking$customer
+file <fixture>/com/acme/Customer.java
+file <fixture>/com/acme/CustomerService.java
+file <fixture>/com/acme/Main.java
+file <fixture>/com/acme/Order.java
+file <fixture>/com/acme/OrderRepository.java
+file <fixture>/com/acme/OrderService.java
+file <fixture>/com/acme/ShippingService.java
+file <fixture>/com/acme/Tracking.java
+method com.acme.Customer#getName
+method com.acme.CustomerService#find
+method com.acme.Main#main
+method com.acme.OrderRepository#create
+method com.acme.OrderRepository#save
+method com.acme.OrderService#notify
+method com.acme.OrderService#place
+method com.acme.ShippingService#ship
+method com.acme.Tracking#dispatch
+package com.acme
+unknown_symbol __unknown__:System.out.println
+
+# edges (61)
+<fixture>/com/acme/Customer.java -CONTAINS-> com.acme.Customer
+<fixture>/com/acme/Customer.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/CustomerService.java -CONTAINS-> com.acme.CustomerService
+<fixture>/com/acme/CustomerService.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/Main.java -CONTAINS-> com.acme.Main
+<fixture>/com/acme/Main.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/Order.java -CONTAINS-> com.acme.Order
+<fixture>/com/acme/Order.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/OrderRepository.java -CONTAINS-> com.acme.OrderRepository
+<fixture>/com/acme/OrderRepository.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/OrderService.java -CONTAINS-> com.acme.OrderService
+<fixture>/com/acme/OrderService.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/ShippingService.java -CONTAINS-> com.acme.ShippingService
+<fixture>/com/acme/ShippingService.java -DECLARED_IN-> com.acme
+<fixture>/com/acme/Tracking.java -CONTAINS-> com.acme.Tracking
+<fixture>/com/acme/Tracking.java -DECLARED_IN-> com.acme
+com.acme.Customer -CONTAINS-> com.acme.Customer#<init>
+com.acme.Customer -CONTAINS-> com.acme.Customer#getName
+com.acme.Customer -CONTAINS-> com.acme.Customer$name
+com.acme.Customer -DECLARED_IN-> com.acme
+com.acme.CustomerService -CONTAINS-> com.acme.CustomerService#<init>
+com.acme.CustomerService -CONTAINS-> com.acme.CustomerService#find
+com.acme.CustomerService -DECLARED_IN-> com.acme
+com.acme.CustomerService#find -CALLS-> com.acme.Customer#<init>
+com.acme.Main -CONTAINS-> com.acme.Main#main
+com.acme.Main -DECLARED_IN-> com.acme
+com.acme.Main#main -CALLS-> com.acme.CustomerService#<init>
+com.acme.Main#main -CALLS-> com.acme.CustomerService#find
+com.acme.Main#main -CALLS-> com.acme.OrderService#<init>
+com.acme.Main#main -CALLS-> com.acme.OrderService#place
+com.acme.Main#main -CALLS-> com.acme.ShippingService#<init>
+com.acme.Main#main -CALLS-> com.acme.ShippingService#ship
+com.acme.Order -CONTAINS-> com.acme.Order#<init>
+com.acme.Order -CONTAINS-> com.acme.Order$customer
+com.acme.Order -CONTAINS-> com.acme.Order$item
+com.acme.Order -DECLARED_IN-> com.acme
+com.acme.OrderRepository -CONTAINS-> com.acme.OrderRepository#<init>
+com.acme.OrderRepository -CONTAINS-> com.acme.OrderRepository#create
+com.acme.OrderRepository -CONTAINS-> com.acme.OrderRepository#save
+com.acme.OrderRepository -DECLARED_IN-> com.acme
+com.acme.OrderRepository#create -CALLS-> com.acme.Order#<init>
+com.acme.OrderService -CONTAINS-> com.acme.OrderService#<init>
+com.acme.OrderService -CONTAINS-> com.acme.OrderService#notify
+com.acme.OrderService -CONTAINS-> com.acme.OrderService#place
+com.acme.OrderService -CONTAINS-> com.acme.OrderService$repo
+com.acme.OrderService -DECLARED_IN-> com.acme
+com.acme.OrderService#<init> -CALLS-> com.acme.OrderRepository#<init>
+com.acme.OrderService#place -CALLS-> com.acme.OrderRepository#create
+com.acme.OrderService#place -CALLS-> com.acme.OrderRepository#save
+com.acme.OrderService#place -CALLS-> com.acme.OrderService#notify
+com.acme.ShippingService -CONTAINS-> com.acme.ShippingService#<init>
+com.acme.ShippingService -CONTAINS-> com.acme.ShippingService#ship
+com.acme.ShippingService -DECLARED_IN-> com.acme
+com.acme.ShippingService#ship -CALLS-> com.acme.Tracking#<init>
+com.acme.ShippingService#ship -CALLS-> com.acme.Tracking#dispatch
+com.acme.Tracking -CONTAINS-> com.acme.Tracking#<init>
+com.acme.Tracking -CONTAINS-> com.acme.Tracking#dispatch
+com.acme.Tracking -CONTAINS-> com.acme.Tracking$customer
+com.acme.Tracking -DECLARED_IN-> com.acme
+com.acme.Tracking#dispatch -CALLS-> __unknown__:System.out.println
+com.acme.Tracking#dispatch -CALLS-> com.acme.Customer#getName"
+`;
+
+exports[`python graph snapshot > matches the recorded graph 1`] = `
+"# nodes (49)
+annotation @injectable
+annotation @router.get
+annotation @router.post
+class app.repository.OrderRepository
+class app.service.OrderService
+constructor app.repository.OrderRepository#<init>
+constructor app.service.OrderService#<init>
+external_symbol ext:builtins
+external_symbol ext:fastapi
+external_symbol ext:importlib
+external_symbol ext:injection
+field app.repository.OrderRepository$rows
+field app.repository.OrderRepository$table
+field app.service.OrderService$repo
+field module:app$DEFAULT_REGION
+field module:app$__all__
+field module:app.api$router
+field module:app.service$AUDIT_LOG
+file <fixture>/app/__init__.py
+file <fixture>/app/api.py
+file <fixture>/app/dynamic.py
+file <fixture>/app/main.py
+file <fixture>/app/repository.py
+file <fixture>/app/service.py
+import __import__:app.repository.OrderRepository
+import __import__:app.service.OrderService
+import __import__:fastapi.APIRouter
+import __import__:fastapi.Depends
+import __import__:importlib
+import __import__:injection.injectable
+method app.repository.OrderRepository#create
+method app.repository.OrderRepository#find
+method app.service.OrderService#audit
+method app.service.OrderService#place
+method module:app.api#create_order
+method module:app.api#get_service
+method module:app.api#read_order
+method module:app.dynamic#load_plugin
+method module:app.dynamic#run
+method module:app.main#main
+module module:app
+module module:app.api
+module module:app.dynamic
+module module:app.main
+module module:app.repository
+module module:app.service
+unknown_symbol __reflect__:app.plugins.
+unknown_symbol __unknown__:plugin
+unknown_symbol __unknown__:plugin().run
+
+# edges (65)
+<fixture>/app/__init__.py -CONTAINS-> module:app
+<fixture>/app/api.py -CONTAINS-> module:app.api
+<fixture>/app/api.py -IMPORTS-> __import__:app.service.OrderService
+<fixture>/app/api.py -IMPORTS-> __import__:fastapi.APIRouter
+<fixture>/app/api.py -IMPORTS-> __import__:fastapi.Depends
+<fixture>/app/dynamic.py -CONTAINS-> module:app.dynamic
+<fixture>/app/dynamic.py -IMPORTS-> __import__:importlib
+<fixture>/app/main.py -CONTAINS-> module:app.main
+<fixture>/app/main.py -IMPORTS-> __import__:app.service.OrderService
+<fixture>/app/repository.py -CONTAINS-> app.repository.OrderRepository
+<fixture>/app/repository.py -CONTAINS-> module:app.repository
+<fixture>/app/service.py -CONTAINS-> app.service.OrderService
+<fixture>/app/service.py -CONTAINS-> module:app.service
+<fixture>/app/service.py -IMPORTS-> __import__:app.repository.OrderRepository
+<fixture>/app/service.py -IMPORTS-> __import__:injection.injectable
+__import__:fastapi.APIRouter -REFERENCES-> ext:fastapi
+__import__:fastapi.Depends -REFERENCES-> ext:fastapi
+__import__:importlib -REFERENCES-> ext:importlib
+__import__:injection.injectable -REFERENCES-> ext:injection
+app.repository.OrderRepository -CONTAINS-> app.repository.OrderRepository#<init>
+app.repository.OrderRepository -CONTAINS-> app.repository.OrderRepository#create
+app.repository.OrderRepository -CONTAINS-> app.repository.OrderRepository#find
+app.repository.OrderRepository -CONTAINS-> app.repository.OrderRepository$rows
+app.repository.OrderRepository -CONTAINS-> app.repository.OrderRepository$table
+app.repository.OrderRepository#create -CALLS-> ext:builtins
+app.repository.OrderRepository#find -CALLS-> ext:builtins
+app.service.OrderService -ANNOTATED_WITH-> @injectable
+app.service.OrderService -CONTAINS-> app.service.OrderService#<init>
+app.service.OrderService -CONTAINS-> app.service.OrderService#audit
+app.service.OrderService -CONTAINS-> app.service.OrderService#place
+app.service.OrderService -CONTAINS-> app.service.OrderService$repo
+app.service.OrderService -INJECTS-> app.repository.OrderRepository
+app.service.OrderService#audit -CALLS-> ext:builtins
+app.service.OrderService#place -CALLS-> app.repository.OrderRepository#create
+app.service.OrderService#place -CALLS-> app.service.OrderService#audit
+module:app -CONTAINS-> module:app$DEFAULT_REGION
+module:app -CONTAINS-> module:app$__all__
+module:app.api -CALLS-> ext:fastapi
+module:app.api -CONTAINS-> module:app.api#create_order
+module:app.api -CONTAINS-> module:app.api#get_service
+module:app.api -CONTAINS-> module:app.api#read_order
+module:app.api -CONTAINS-> module:app.api$router
+module:app.api -INJECTS-> app.service.OrderService
+module:app.api -ROUTES-> module:app.api#create_order
+module:app.api -ROUTES-> module:app.api#read_order
+module:app.api#create_order -ANNOTATED_WITH-> @router.post
+module:app.api#create_order -CALLS-> app.service.OrderService#place
+module:app.api#create_order -CALLS-> ext:fastapi
+module:app.api#get_service -CALLS-> app.service.OrderService#<init>
+module:app.api#read_order -ANNOTATED_WITH-> @router.get
+module:app.api#read_order -CALLS-> app.repository.OrderRepository#find
+module:app.api#read_order -CALLS-> ext:fastapi
+module:app.dynamic -CONTAINS-> module:app.dynamic#load_plugin
+module:app.dynamic -CONTAINS-> module:app.dynamic#run
+module:app.dynamic#load_plugin -CALLS-> ext:builtins
+module:app.dynamic#load_plugin -CALLS-> ext:importlib
+module:app.dynamic#load_plugin -REFLECTS-> __reflect__:app.plugins.
+module:app.dynamic#run -CALLS-> __unknown__:plugin
+module:app.dynamic#run -CALLS-> __unknown__:plugin().run
+module:app.dynamic#run -CALLS-> module:app.dynamic#load_plugin
+module:app.main -CALLS-> module:app.main#main
+module:app.main -CONTAINS-> module:app.main#main
+module:app.main#main -CALLS-> app.service.OrderService#<init>
+module:app.main#main -CALLS-> app.service.OrderService#place
+module:app.service -CONTAINS-> module:app.service$AUDIT_LOG"
+`;
+
+exports[`typescript graph snapshot > matches the recorded graph 1`] = `
+"# nodes (62)
+annotation @Controller
+annotation @Get
+annotation @Injectable
+annotation @Post
+class src.controller.OrderController
+class src.repository.OrderRepository
+class src.service.OrderService
+constructor src.controller.OrderController#<init>
+constructor src.service.OrderService#<init>
+external_symbol ext:@nestjs/common
+external_symbol ext:console
+external_symbol ext:express
+field module:src$service
+field module:src.routes$app
+field module:src.routes$service
+field src.controller.OrderController$service
+field src.repository.OrderRepository$rows
+field src.service.OrderService$repo
+file <fixture>/src/controller.ts
+file <fixture>/src/dynamic.ts
+file <fixture>/src/index.ts
+file <fixture>/src/repository.ts
+file <fixture>/src/routes.ts
+file <fixture>/src/service.ts
+import __import__:@nestjs/common.Body
+import __import__:@nestjs/common.Controller
+import __import__:@nestjs/common.Get
+import __import__:@nestjs/common.Injectable
+import __import__:@nestjs/common.Param
+import __import__:@nestjs/common.Post
+import __import__:express.default
+import __import__:service.OrderService
+import __import__:src.repository.Order
+import __import__:src.repository.OrderRepository
+import __import__:src.service.OrderService
+interface src.repository.Order
+interface src.repository.Repository
+method module:src#main
+method module:src.dynamic#loadPlugin
+method module:src.routes#<anonymous@11>
+method module:src.routes#<anonymous@7>
+method src.controller.OrderController#create
+method src.controller.OrderController#read
+method src.repository.OrderRepository#create
+method src.repository.OrderRepository#find
+method src.repository.Repository#create
+method src.repository.Repository#find
+method src.service.OrderService#audit
+method src.service.OrderService#place
+module module:src
+module module:src.controller
+module module:src.dynamic
+module module:src.repository
+module module:src.routes
+module module:src.service
+unknown_symbol __reflect__:./plugins/\${name}
+unknown_symbol __unknown__:app.get
+unknown_symbol __unknown__:app.post
+unknown_symbol __unknown__:express
+unknown_symbol __unknown__:res.json
+unknown_symbol __unknown__:this.rows.find
+unknown_symbol __unknown__:this.rows.push
+
+# edges (81)
+<fixture>/src/controller.ts -CONTAINS-> module:src.controller
+<fixture>/src/controller.ts -CONTAINS-> src.controller.OrderController
+<fixture>/src/controller.ts -IMPORTS-> __import__:@nestjs/common.Body
+<fixture>/src/controller.ts -IMPORTS-> __import__:@nestjs/common.Controller
+<fixture>/src/controller.ts -IMPORTS-> __import__:@nestjs/common.Get
+<fixture>/src/controller.ts -IMPORTS-> __import__:@nestjs/common.Param
+<fixture>/src/controller.ts -IMPORTS-> __import__:@nestjs/common.Post
+<fixture>/src/controller.ts -IMPORTS-> __import__:src.service.OrderService
+<fixture>/src/dynamic.ts -CONTAINS-> module:src.dynamic
+<fixture>/src/index.ts -CONTAINS-> module:src
+<fixture>/src/index.ts -IMPORTS-> __import__:service.OrderService
+<fixture>/src/repository.ts -CONTAINS-> module:src.repository
+<fixture>/src/repository.ts -CONTAINS-> src.repository.Order
+<fixture>/src/repository.ts -CONTAINS-> src.repository.OrderRepository
+<fixture>/src/repository.ts -CONTAINS-> src.repository.Repository
+<fixture>/src/routes.ts -CONTAINS-> module:src.routes
+<fixture>/src/routes.ts -IMPORTS-> __import__:express.default
+<fixture>/src/routes.ts -IMPORTS-> __import__:src.service.OrderService
+<fixture>/src/service.ts -CONTAINS-> module:src.service
+<fixture>/src/service.ts -CONTAINS-> src.service.OrderService
+<fixture>/src/service.ts -IMPORTS-> __import__:@nestjs/common.Injectable
+<fixture>/src/service.ts -IMPORTS-> __import__:src.repository.Order
+<fixture>/src/service.ts -IMPORTS-> __import__:src.repository.OrderRepository
+__import__:@nestjs/common.Body -REFERENCES-> ext:@nestjs/common
+__import__:@nestjs/common.Controller -REFERENCES-> ext:@nestjs/common
+__import__:@nestjs/common.Get -REFERENCES-> ext:@nestjs/common
+__import__:@nestjs/common.Injectable -REFERENCES-> ext:@nestjs/common
+__import__:@nestjs/common.Param -REFERENCES-> ext:@nestjs/common
+__import__:@nestjs/common.Post -REFERENCES-> ext:@nestjs/common
+__import__:express.default -REFERENCES-> ext:express
+module:src -CALLS-> module:src#main
+module:src -CALLS-> src.service.OrderService#<init>
+module:src -CONTAINS-> module:src#main
+module:src -CONTAINS-> module:src$service
+module:src#main -CALLS-> src.service.OrderService#place
+module:src.dynamic -CONTAINS-> module:src.dynamic#loadPlugin
+module:src.dynamic#loadPlugin -REFLECTS-> __reflect__:./plugins/\${name}
+module:src.routes -CALLS-> __unknown__:app.get
+module:src.routes -CALLS-> __unknown__:app.post
+module:src.routes -CALLS-> __unknown__:express
+module:src.routes -CALLS-> src.service.OrderService#<init>
+module:src.routes -CONTAINS-> module:src.routes#<anonymous@11>
+module:src.routes -CONTAINS-> module:src.routes#<anonymous@7>
+module:src.routes -CONTAINS-> module:src.routes$app
+module:src.routes -CONTAINS-> module:src.routes$service
+module:src.routes -ROUTES-> module:src.routes#<anonymous@11>
+module:src.routes -ROUTES-> module:src.routes#<anonymous@7>
+module:src.routes#<anonymous@11> -CALLS-> __unknown__:res.json
+module:src.routes#<anonymous@11> -CALLS-> src.service.OrderService#place
+module:src.routes#<anonymous@7> -CALLS-> __unknown__:res.json
+module:src.routes#<anonymous@7> -CALLS-> src.service.OrderService#place
+src.controller.OrderController -ANNOTATED_WITH-> @Controller
+src.controller.OrderController -CONTAINS-> src.controller.OrderController#<init>
+src.controller.OrderController -CONTAINS-> src.controller.OrderController#create
+src.controller.OrderController -CONTAINS-> src.controller.OrderController#read
+src.controller.OrderController -CONTAINS-> src.controller.OrderController$service
+src.controller.OrderController -INJECTS-> src.service.OrderService
+src.controller.OrderController -ROUTES-> src.controller.OrderController#create
+src.controller.OrderController -ROUTES-> src.controller.OrderController#read
+src.controller.OrderController#create -ANNOTATED_WITH-> @Post
+src.controller.OrderController#create -CALLS-> src.service.OrderService#place
+src.controller.OrderController#read -ANNOTATED_WITH-> @Get
+src.controller.OrderController#read -CALLS-> src.service.OrderService#place
+src.repository.OrderRepository -CONTAINS-> src.repository.OrderRepository#create
+src.repository.OrderRepository -CONTAINS-> src.repository.OrderRepository#find
+src.repository.OrderRepository -CONTAINS-> src.repository.OrderRepository$rows
+src.repository.OrderRepository -IMPLEMENTS-> src.repository.Repository
+src.repository.OrderRepository#create -CALLS-> __unknown__:this.rows.push
+src.repository.OrderRepository#create -CALLS-> src.repository.OrderRepository#find
+src.repository.OrderRepository#find -CALLS-> __unknown__:this.rows.find
+src.repository.Repository -CONTAINS-> src.repository.Repository#create
+src.repository.Repository -CONTAINS-> src.repository.Repository#find
+src.service.OrderService -ANNOTATED_WITH-> @Injectable
+src.service.OrderService -CONTAINS-> src.service.OrderService#<init>
+src.service.OrderService -CONTAINS-> src.service.OrderService#audit
+src.service.OrderService -CONTAINS-> src.service.OrderService#place
+src.service.OrderService -CONTAINS-> src.service.OrderService$repo
+src.service.OrderService -INJECTS-> src.repository.OrderRepository
+src.service.OrderService#audit -CALLS-> ext:console
+src.service.OrderService#place -CALLS-> src.repository.OrderRepository#create
+src.service.OrderService#place -CALLS-> src.service.OrderService#audit"
+`;

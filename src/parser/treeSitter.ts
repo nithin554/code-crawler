@@ -1,7 +1,7 @@
-import { Parser, Language } from "web-tree-sitter";
-import { createRequire } from "node:module";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { Language, Parser } from "web-tree-sitter";
 
 /**
  * Shared tree-sitter setup: WASM runtime init, grammar loading, and CST walk

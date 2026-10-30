@@ -11,7 +11,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { crawlProject } from "../src/crawler.js";
-import { GraphStore } from "../src/graph/store.js";
 import {
   deadCode,
   findEntryPoints,
@@ -21,6 +20,7 @@ import {
   hotspots,
   searchSymbols,
 } from "../src/graph/queries.js";
+import { GraphStore } from "../src/graph/store.js";
 import { generateProject } from "./generate.js";
 
 export interface BenchOptions {
@@ -78,10 +78,7 @@ function timing(r: {
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)
-  );
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
   return sorted[idx] ?? 0;
 }
 
@@ -97,15 +94,11 @@ function dbSize(dbPath: string): number {
   return total;
 }
 
-export async function runBenchmark(
-  options: BenchOptions = {}
-): Promise<BenchResult> {
+export async function runBenchmark(options: BenchOptions = {}): Promise<BenchResult> {
   const targetLines = options.targetLines ?? 100_000;
   const iterations = Math.max(3, options.queryIterations ?? 20);
   const log = options.log ?? (() => {});
-  const workDir =
-    options.workDir ??
-    fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-bench-"));
+  const workDir = options.workDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-bench-"));
 
   try {
     const projectRoot = path.join(workDir, "project");
@@ -118,26 +111,17 @@ export async function runBenchmark(
     const dbPath = path.join(workDir, "index.db");
     const store = new GraphStore(dbPath);
     try {
-      const cold = await crawlProject(store, projectRoot, [
-        "node_modules",
-        "dist",
-      ]);
+      const cold = await crawlProject(store, projectRoot, ["node_modules", "dist"]);
       log(`cold crawl: ${cold.durationMs} ms (${cold.nodes} nodes, ${cold.edges} edges)`);
 
-      const noop = await crawlProject(store, projectRoot, [
-        "node_modules",
-        "dist",
-      ]);
+      const noop = await crawlProject(store, projectRoot, ["node_modules", "dist"]);
       log(`no-op re-crawl: ${noop.durationMs} ms (${noop.filesUnchanged} unchanged)`);
 
       // Simulate a developer editing a single file: content differs, so exactly
       // one file must be re-parsed while the rest are replayed from the cache.
       const editedFile = path.join(projectRoot, "src", "mod0.ts");
       fs.appendFileSync(editedFile, "\n// touched by the benchmark\n", "utf8");
-      const incremental = await crawlProject(store, projectRoot, [
-        "node_modules",
-        "dist",
-      ]);
+      const incremental = await crawlProject(store, projectRoot, ["node_modules", "dist"]);
       const now = new Date();
       fs.utimesSync(editedFile, now, now);
       log(
@@ -159,7 +143,11 @@ export async function runBenchmark(
       // real regression (losing an index, or going back to correlated
       // subqueries), never on page-cache noise.
       const cases: { name: string; budgetMs: number; run: () => unknown }[] = [
-        { name: "search_symbols (exact)", budgetMs: 50, run: () => searchSymbols(store, "handle7_3") },
+        {
+          name: "search_symbols (exact)",
+          budgetMs: 50,
+          run: () => searchSymbols(store, "handle7_3"),
+        },
         { name: "search_symbols (prefix)", budgetMs: 50, run: () => searchSymbols(store, "svc42") },
         {
           name: "get_callers (depth 2)",
@@ -176,7 +164,11 @@ export async function runBenchmark(
           budgetMs: 50,
           run: () => getSubgraph(store, sample, { radius: 2 }),
         },
-        { name: "find_entry_points", budgetMs: 50, run: () => findEntryPoints(store, { limit: 50 }) },
+        {
+          name: "find_entry_points",
+          budgetMs: 50,
+          run: () => findEntryPoints(store, { limit: 50 }),
+        },
         { name: "find_hotspots", budgetMs: 1000, run: () => hotspots(store, { limit: 50 }) },
         { name: "find_dead_code", budgetMs: 1000, run: () => deadCode(store, { limit: 50 }) },
       ];
@@ -255,16 +247,13 @@ export function formatReport(result: BenchResult): string {
   rows.push("| Query | p50 | p95 | Budget (p95) |");
   rows.push("| --- | --- | --- | --- |");
   for (const q of result.queries) {
-    rows.push(
-      `| ${q.name} | ${q.p50.toFixed(2)} ms | ${q.p95.toFixed(2)} ms | ${q.budgetMs} ms |`
-    );
+    rows.push(`| ${q.name} | ${q.p50.toFixed(2)} ms | ${q.p95.toFixed(2)} ms | ${q.budgetMs} ms |`);
   }
   return rows.join("\n");
 }
 
 const isMain =
-  process.argv[1] !== undefined &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMain) {
   const linesArg = process.argv.find((a) => a.startsWith("--lines="));

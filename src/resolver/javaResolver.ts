@@ -87,7 +87,13 @@ function resolveCall(
   }
 
   for (const typeFqn of candidates.types) {
-    const found = findMethod(typeFqn, call.name, call.argumentTexts.length, index, searchInheritance);
+    const found = findMethod(
+      typeFqn,
+      call.name,
+      call.argumentTexts.length,
+      index,
+      searchInheritance
+    );
     if (found) {
       return {
         callSite: call,
@@ -113,14 +119,18 @@ interface CandidateSet {
 /**
  * Compute the candidate receiver types for an invocation, in priority order.
  */
-function receiverCandidates(call: ResolvedCall["callSite"], file: JavaParsedFile, index: TypeIndex): CandidateSet {
+function receiverCandidates(
+  call: ResolvedCall["callSite"],
+  file: JavaParsedFile,
+  index: TypeIndex
+): CandidateSet {
   const receiver = call.receiver;
 
   // ---- 2. Bare / this / super calls ----------------------------------------
   if (!receiver) {
     return {
       types: enclosingAndAncestors(call.enclosingTypeId, index),
-      how: "bare call in " + call.enclosingTypeId,
+      how: `bare call in ${call.enclosingTypeId}`,
     };
   }
   if (receiver === "this" || receiver.startsWith("this.")) {
@@ -157,7 +167,7 @@ function receiverCandidates(call: ResolvedCall["callSite"], file: JavaParsedFile
 
   // ---- Fallback: `new Foo().method()` and other expressions ----------------
   const newMatch = receiver.match(/^new\s+([\w.$]+)/);
-  if (newMatch && newMatch[1]) {
+  if (newMatch?.[1]) {
     const types = resolveTypeName(newMatch[1], file, index);
     return { types, how: `receiver created via new ${newMatch[1]}()` };
   }
@@ -193,7 +203,10 @@ function inferVariableType(
   for (const anc of superAncestors(call.enclosingTypeId, index)) {
     const ancField = file.fields.find((f) => f.typeId === anc && f.name === name);
     if (ancField) {
-      return { types: resolveTypeName(ancField.type, file, index), how: `field ${name} inherited from ${anc}` };
+      return {
+        types: resolveTypeName(ancField.type, file, index),
+        how: `field ${name} inherited from ${anc}`,
+      };
     }
   }
   return { types: [], how: `unknown variable "${name}"` };
@@ -236,7 +249,9 @@ function findInherited(
   visited.add(typeFqn);
   for (const parentName of index.parentsByFqn.get(typeFqn) ?? []) {
     for (const parent of index.resolveType(parentName)) {
-      const candidates = (index.methodsByFqn.get(parent) ?? []).filter((m) => m.name === methodName);
+      const candidates = (index.methodsByFqn.get(parent) ?? []).filter(
+        (m) => m.name === methodName
+      );
       const match = pickOverload(candidates, argCount);
       if (match) {
         return { method: { id: match.id }, confidence: 0.9, inherited: true };
@@ -249,7 +264,10 @@ function findInherited(
 }
 
 /** Pick the overload with matching arity; fall back to the first candidate. */
-function pickOverload(methods: { id: string; name: string; params: unknown[] }[], argCount: number) {
+function pickOverload(
+  methods: { id: string; name: string; params: unknown[] }[],
+  argCount: number
+) {
   const exact = methods.find((m) => m.params.length === argCount);
   if (exact) return exact;
   return methods[0] ?? null;
@@ -290,7 +308,7 @@ function resolveTypeName(name: string, file: JavaParsedFile, index: TypeIndex): 
   if (index.kindByFqn.has(`java.lang.${trimmed}`)) return [`java.lang.${trimmed}`];
 
   // same package
-  const simple = trimmed.includes(".") ? trimmed.split(".").pop()! : trimmed;
+  const simple = trimmed.slice(trimmed.lastIndexOf(".") + 1);
   const inFile = file.typeByName.get(simple);
   if (inFile) return [inFile];
 

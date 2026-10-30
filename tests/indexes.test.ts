@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { GraphStore } from "../src/graph/store.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import { findEntryPoints, searchSymbols } from "../src/graph/queries.js";
+import { GraphStore } from "../src/graph/store.js";
 
 let store: GraphStore;
 
@@ -29,7 +29,10 @@ beforeEach(() => {
       kind: "method",
       qualifiedName: `com.acme.Type${i}#call`,
       filePath: `/tmp/T${i}.java`,
-      properties: { name: "call", ...(i % 10 === 0 ? { entryPoint: true, entryPointKind: "http" } : {}) },
+      properties: {
+        name: "call",
+        ...(i % 10 === 0 ? { entryPoint: true, entryPointKind: "http" } : {}),
+      },
     });
   }
 });

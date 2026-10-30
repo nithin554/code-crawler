@@ -1,19 +1,24 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import ignore from "ignore";
-import type { FileRecord, GraphStore } from "./graph/store.js";
 import type { GraphEdge, GraphNode, NodeKind } from "./graph/schema.js";
 import { annotationNodeId, externalNodeId, fieldNodeId, importNodeId } from "./graph/schema.js";
-import { languageForFile } from "./parser/languages/index.js";
+import type { FileRecord, GraphStore } from "./graph/store.js";
 import { decodeParsedFile, encodeParsedFile } from "./parser/cache.js";
 import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
-import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
-import { resolveJavaFile } from "./resolver/javaResolver.js";
-import { resolveGenericFile, resolveInjectionTarget, resolveReflectiveTarget, resolveRouteHandler } from "./resolver/genericResolver.js";
+import { languageForFile } from "./parser/languages/index.js";
+import type { JavaParsedFile } from "./parser/languages/java.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
-import type { JavaParsedFile } from "./parser/languages/java.js";
+import {
+  resolveGenericFile,
+  resolveInjectionTarget,
+  resolveReflectiveTarget,
+  resolveRouteHandler,
+} from "./resolver/genericResolver.js";
+import { resolveJavaFile } from "./resolver/javaResolver.js";
+import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
 
 /**
  * Project crawler: discover source files, parse them, build a global type
@@ -201,7 +206,10 @@ export function discoverSourceFiles(
 }
 
 /** Convert a ParsedFile into graph nodes + edges (declarations only). */
-export function buildDeclarationGraph(parsed: ParsedFile): { nodes: GraphNode[]; edges: GraphEdge[] } {
+export function buildDeclarationGraph(parsed: ParsedFile): {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+} {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
@@ -414,7 +422,9 @@ export function buildCallEdges(
 
   const javaParsed = parsed as JavaParsedFile;
   const resolvedCalls =
-    parsed.language === "java" ? resolveJavaFile(javaParsed, index) : resolveGenericFile(parsed, index);
+    parsed.language === "java"
+      ? resolveJavaFile(javaParsed, index)
+      : resolveGenericFile(parsed, index);
 
   for (const rc of resolvedCalls) {
     // Calls in field/static initializers have no enclosing method; attribute
@@ -430,9 +440,7 @@ export function buildCallEdges(
             : {}),
         }
       : {};
-    const flowKind = rc.callSite.controlFlow
-      ? { controlFlow: rc.callSite.controlFlow.kinds }
-      : {};
+    const flowKind = rc.callSite.controlFlow ? { controlFlow: rc.callSite.controlFlow.kinds } : {};
 
     if (rc.external) {
       external++;
@@ -462,13 +470,27 @@ export function buildCallEdges(
           qualifiedName: rc.targetId,
           filePath: parsed.filePath,
           properties: {
-            name: rc.targetId.includes("#") ? rc.targetId.split("#").pop() ?? "" : rc.targetId,
+            name: rc.targetId.includes("#") ? (rc.targetId.split("#").pop() ?? "") : rc.targetId,
             synthetic: true,
             reason: rc.reason,
           },
         };
         phantomNodes.push(synthetic);
         knownNodeIds.add(rc.targetId);
+        // An implicit constructor has no declaration to hang a CONTAINS edge on,
+        // so attach one here. Without it the type's own constructor is not
+        // reachable from the type when the graph is traversed.
+        if (rc.targetId.endsWith("#<init>")) {
+          const ownerType = rc.targetId.slice(0, -"#<init>".length);
+          if (knownNodeIds.has(ownerType)) {
+            edges.push({
+              source: ownerType,
+              target: rc.targetId,
+              kind: "CONTAINS",
+              properties: { line: rc.callSite.line, synthetic: true },
+            });
+          }
+        }
       }
       edges.push({
         source,
@@ -492,7 +514,9 @@ export function buildCallEdges(
         qualifiedName: phantomId,
         filePath: parsed.filePath,
         properties: {
-          name: rc.callSite.isConstructorCall ? rc.callSite.name : `${rc.callSite.receiver ? `${rc.callSite.receiver}.` : ""}${rc.callSite.name}`,
+          name: rc.callSite.isConstructorCall
+            ? rc.callSite.name
+            : `${rc.callSite.receiver ? `${rc.callSite.receiver}.` : ""}${rc.callSite.name}`,
           reason: rc.reason,
         },
       });
@@ -604,11 +628,16 @@ export function buildDependencyGraph(
     if (!target && parsed.language !== "java") {
       const resolved = resolveInjectionTarget(parsed, index, inj.type);
       if (resolved?.targetId) {
-        target = resolved.targetId.startsWith("ext:") ? externalNode(resolved.external ?? inj.type) : resolved.targetId;
+        target = resolved.targetId.startsWith("ext:")
+          ? externalNode(resolved.external ?? inj.type)
+          : resolved.targetId;
         isExternal = Boolean(resolved.external);
       }
     }
-    if (!target) target = unknownNode(`__inject__:${inj.type || inj.name}`, inj.type || inj.name, { reason: "unresolved injected type" });
+    if (!target)
+      target = unknownNode(`__inject__:${inj.type || inj.name}`, inj.type || inj.name, {
+        reason: "unresolved injected type",
+      });
     edges.push({
       source: owner,
       target,
@@ -629,7 +658,11 @@ export function buildDependencyGraph(
     let target = resolved?.targetId;
     let isExternal = false;
     const targetLabel = ref.target || ref.receiver || ref.mechanism;
-    if (target && target.startsWith("ext:") && !isRelativeSpecifier(ref.target) && !isProjectInternalTarget(ref.target, index)) {
+    if (
+      target?.startsWith("ext:") &&
+      !isRelativeSpecifier(ref.target) &&
+      !isProjectInternalTarget(ref.target, index)
+    ) {
       target = externalNode(resolved?.external ?? targetLabel);
       isExternal = true;
     } else if (!target || target.startsWith("ext:")) {
@@ -742,7 +775,10 @@ function isRelativeSpecifier(specifier: string): boolean {
  * `app.plugins.` — that is a project namespace, not a third-party library, so
  * it must not be reported as an external dependency.
  */
-function isProjectInternalTarget(specifier: string, index: ReturnType<typeof buildTypeIndex>): boolean {
+function isProjectInternalTarget(
+  specifier: string,
+  index: ReturnType<typeof buildTypeIndex>
+): boolean {
   const dotted = (specifier ?? "")
     .replace(/^\?suffix:/, "")
     .replace(/^\.+\//, "")
@@ -823,11 +859,7 @@ export async function crawlProject(
   });
   if (options.fileFilter) {
     const filter = options.fileFilter;
-    files.splice(
-      0,
-      files.length,
-      ...files.filter((f) => f.includes(filter))
-    );
+    files.splice(0, files.length, ...files.filter((f) => f.includes(filter)));
   }
 
   const maxFileBytes = options.maxFileBytes ?? 1_000_000;
@@ -1048,7 +1080,9 @@ export async function crawlProject(
       const only = scoped[0];
       if (scoped.length === 1 && only) return { ...edge, target: only };
     }
-    const simple = edge.target.includes(".") ? edge.target.split(".").pop() ?? edge.target : edge.target;
+    const simple = edge.target.includes(".")
+      ? (edge.target.split(".").pop() ?? edge.target)
+      : edge.target;
     const candidates = typeIdsByName.get(simple);
     const resolved = candidates?.length === 1 ? candidates[0] : undefined;
     return resolved ? { ...edge, target: resolved } : edge;
@@ -1057,8 +1091,11 @@ export async function crawlProject(
   let persistedFiles = 0;
   store.withTransaction(() => {
     for (const parsed of parsedFiles) {
-      const decl = declarations.get(parsed.filePath)!;
-      const deps = dependencyGraphs.get(parsed.filePath)!;
+      const decl = declarations.get(parsed.filePath);
+      const deps = dependencyGraphs.get(parsed.filePath);
+      if (!decl || !deps) {
+        throw new Error(`missing parse result for ${parsed.filePath}`);
+      }
       const calls = buildCallEdges(parsed, index, allNodeIds);
 
       for (const pkg of calls.externalPackages) externalDeps.add(pkg);

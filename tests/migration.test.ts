@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { GraphStore } from "../src/graph/store.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { searchSymbols } from "../src/graph/queries.js";
+import { GraphStore } from "../src/graph/store.js";
 
 const tempDirs: string[] = [];
 
@@ -64,9 +64,11 @@ describe("schema migration", () => {
       (c) => c.name
     );
     expect(columns).not.toContain("name");
-    const tables = (raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
-      name: string;
-    }[]).map((t) => t.name);
+    const tables = (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+        name: string;
+      }[]
+    ).map((t) => t.name);
     expect(tables).not.toContain("files");
     expect(tables).not.toContain("nodes_fts");
     raw.close();
@@ -75,7 +77,10 @@ describe("schema migration", () => {
     try {
       expect(upgraded.schemaVersion).toBe(2);
       // The display name is backfilled from the qualified name.
-      const row = upgraded.raw("SELECT name FROM nodes WHERE id = ?", "com.acme.OrderService#place") as {
+      const row = upgraded.raw(
+        "SELECT name FROM nodes WHERE id = ?",
+        "com.acme.OrderService#place"
+      ) as {
         name: string | null;
       }[];
       expect(row[0]?.name).toBe("place");

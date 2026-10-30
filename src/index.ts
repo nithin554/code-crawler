@@ -2,11 +2,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { loadConfig, type Config } from "./config.js";
-import { GraphStore } from "./graph/store.js";
+import { type Config, loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
-import { createServer } from "./server.js";
 import { searchSymbols } from "./graph/queries.js";
+import { GraphStore } from "./graph/store.js";
+import { createServer } from "./server.js";
 
 /**
  * code-crawler CLI:

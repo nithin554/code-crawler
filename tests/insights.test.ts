@@ -1,10 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import path from "node:path";
-import { GraphStore } from "../src/graph/store.js";
-import { crawlProject } from "../src/crawler.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { methodNodeId, unknownNodeId } from "../src/graph/schema.js";
-import type { EdgeKind, GraphEdge } from "../src/graph/schema.js";
+import { crawlProject } from "../src/crawler.js";
+import { applyBudget, estimateTokens, pageMeta } from "../src/graph/budget.js";
 import {
   explainSymbol,
   exportGraph,
@@ -13,7 +11,9 @@ import {
   impactAnalysis,
   unresolvedForNode,
 } from "../src/graph/insights.js";
-import { applyBudget, estimateTokens, pageMeta } from "../src/graph/budget.js";
+import type { EdgeKind, GraphEdge } from "../src/graph/schema.js";
+import { methodNodeId, unknownNodeId } from "../src/graph/schema.js";
+import { GraphStore } from "../src/graph/store.js";
 
 const JAVA = path.join(__dirname, "fixtures", "java", "sample");
 const CYCLES = path.join(__dirname, "fixtures", "java", "cycles");
@@ -123,7 +123,6 @@ describe("findUnresolved", () => {
   it("returns undefined for a node with no unresolved edges", () => {
     expect(unresolvedForNode(store, methodNodeId("com.acme.Svc", "helper"))).toBeUndefined();
   });
-
 });
 
 describe("findUnresolved over the Java fixture", () => {
@@ -205,7 +204,9 @@ describe("impactAnalysis", () => {
   it("bands risk lower when no entry point reaches the symbol", () => {
     addMethod("com.acme.Lonely", "call");
     addMethod("com.acme.Lonely", "target");
-    store.upsertEdge(edge(methodNodeId("com.acme.Lonely", "call"), methodNodeId("com.acme.Lonely", "target")));
+    store.upsertEdge(
+      edge(methodNodeId("com.acme.Lonely", "call"), methodNodeId("com.acme.Lonely", "target"))
+    );
     const result = impactAnalysis(store, "com.acme.Lonely#target");
     expect(result?.summary.risk).toBe("medium");
   });

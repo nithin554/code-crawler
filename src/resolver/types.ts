@@ -168,12 +168,17 @@ export class TypeIndex {
     // Exact FQN match?
     if (this.kindByFqn.has(trimmed)) return [trimmed];
     // Simple name match.
-    const simple = trimmed.includes(".") ? trimmed.split(".").pop()! : trimmed;
+    const simple = trimmed.slice(trimmed.lastIndexOf(".") + 1);
     return this.typesBySimpleName.get(simple) ?? [];
   }
 
   /** All methods named `methodName` declared on a type (or inherited). */
-  findMethods(typeFqn: string, methodName: string, visited = new Set<string>(), depth = 0): MethodInfo[] {
+  findMethods(
+    typeFqn: string,
+    methodName: string,
+    visited = new Set<string>(),
+    depth = 0
+  ): MethodInfo[] {
     if (depth > 10 || visited.has(typeFqn)) return [];
     visited.add(typeFqn);
     const direct = (this.methodsByFqn.get(typeFqn) ?? []).filter((m) => m.name === methodName);

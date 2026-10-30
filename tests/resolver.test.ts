@@ -1,14 +1,18 @@
-import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { javaConfig } from "../src/parser/languages/java.js";
-import { buildTypeIndex, type ResolvedCall, type TypeIndex } from "../src/resolver/types.js";
-import { resolveJavaFile } from "../src/resolver/javaResolver.js";
+import { describe, expect, it } from "vitest";
 import type { ParsedFile } from "../src/parser/language.js";
+import { javaConfig } from "../src/parser/languages/java.js";
+import { resolveJavaFile } from "../src/resolver/javaResolver.js";
+import { buildTypeIndex, type ResolvedCall, type TypeIndex } from "../src/resolver/types.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
-async function loadFixture(): Promise<{ parsed: ParsedFile[]; index: TypeIndex; resolved: ResolvedCall[] }> {
+async function loadFixture(): Promise<{
+  parsed: ParsedFile[];
+  index: TypeIndex;
+  resolved: ResolvedCall[];
+}> {
   const files: string[] = [];
   const walk = (dir: string) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

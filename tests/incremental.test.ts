@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GraphStore } from "../src/graph/store.js";
-import { crawlProject } from "../src/crawler.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { crawlProject } from "../src/crawler.js";
+import { GraphStore } from "../src/graph/store.js";
 
 const FIXTURES = path.join(__dirname, "fixtures", "java", "sample");
 
@@ -73,7 +73,11 @@ describe("incremental crawl", () => {
     expect(result.filesUnchanged).toBe(8);
     expect(nodeRowIds()).toEqual(before);
     // The refreshed timestamp is persisted so the next crawl is a stat hit.
-    expect(store.listFileRecords().get(target)?.mtimeMs).toBe(Math.trunc(future.getTime()));
+    // libuv converts the `utimes` double into a timespec, so some platforms
+    // read back a fraction below the requested millisecond and the crawler's
+    // truncation lands 1ms low.
+    const stored = store.listFileRecords().get(target)?.mtimeMs ?? Number.NaN;
+    expect(Math.abs(stored - Math.trunc(future.getTime()))).toBeLessThanOrEqual(1);
   });
 
   it("re-parses and reindexes a single modified file", async () => {
@@ -82,7 +86,10 @@ describe("incremental crawl", () => {
 
     const target = path.join(project, "com", "acme", "Order.java");
     const source = fs.readFileSync(target, "utf8");
-    const patched = source.replace(/\}\s*$/, '    public String label() {\n        return "x";\n    }\n}\n');
+    const patched = source.replace(
+      /\}\s*$/,
+      '    public String label() {\n        return "x";\n    }\n}\n'
+    );
     fs.writeFileSync(target, patched);
 
     const result = await crawl();

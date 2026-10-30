@@ -101,16 +101,13 @@ function moduleSource(
   out.push(`}`);
 
   return {
-    source: out.join("\n") + "\n",
+    source: `${out.join("\n")}\n`,
     lines: out.length,
     methods: methodsPerFile + 1,
   };
 }
 
-export function generateProject(
-  root: string,
-  options: GenerateOptions = {}
-): GeneratedProject {
+export function generateProject(root: string, options: GenerateOptions = {}): GeneratedProject {
   const targetLines = options.targetLines ?? 100_000;
   const rand = mulberry32(options.seed ?? 1);
   const methodsPerFile = 16;

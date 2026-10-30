@@ -18,7 +18,8 @@
 | Resolution | `javaResolver.ts` + `genericResolver.ts` (module-based languages) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 19 files / 215 tests, per-language fixtures, migration + index-plan + scale checks |
+| Tests | 21 files / 250 tests, per-language fixtures, migration + index-plan + scale checks |
+| Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is that **adding a language currently means writing two
 parallel implementations** — a `LanguageConfig` and a resolver — and teaching each parser

@@ -1,5 +1,10 @@
 import type { FieldInfo, MethodInfo, ParsedFile } from "../parser/language.js";
-import { DEFAULT_EXPORT_SUFFIX, MODULE_ID_PREFIX, moduleNodeId, unwrapModuleNodeId } from "../parser/moduleId.js";
+import {
+  DEFAULT_EXPORT_SUFFIX,
+  MODULE_ID_PREFIX,
+  moduleNodeId,
+  unwrapModuleNodeId,
+} from "../parser/moduleId.js";
 import type { TypeIndex } from "./types.js";
 
 /**
@@ -179,7 +184,9 @@ export function normalizeTypeText(raw: string): string {
   text = text.replace(/^->\s*/, "").replace(/^:\s*/, "");
   text = text.replace(/^(readonly|typeof|final|val|var)\s+/i, "");
   text = splitTopLevel(text, "&").slice(0, 1).join("&").trim();
-  const union = splitTopLevel(text, "|").map((p) => p.trim()).filter((p) => p && !/^(null|undefined|None|nil)$/i.test(p));
+  const union = splitTopLevel(text, "|")
+    .map((p) => p.trim())
+    .filter((p) => p && !/^(null|undefined|None|nil)$/i.test(p));
   text = union[0] ?? "";
   text = text.replace(/\[\s*\]$/, "");
   text = text.replace(/^["']|["']$/g, "");
@@ -224,7 +231,12 @@ export function moduleIdOf(typeId: string): string | null {
 }
 
 /** Resolve an imported binding (scope value) to type or module node ids. */
-export function resolveScopeValue(file: ParsedFile, index: TypeIndex, value: string, depth = 0): string[] {
+export function resolveScopeValue(
+  file: ParsedFile,
+  index: TypeIndex,
+  value: string,
+  depth = 0
+): string[] {
   if (!value || depth > 5) return [];
   if (value.endsWith(DEFAULT_EXPORT_SUFFIX)) {
     const moduleId = index.resolveModuleId(value.slice(0, -DEFAULT_EXPORT_SUFFIX.length));
@@ -239,7 +251,8 @@ export function resolveScopeValue(file: ParsedFile, index: TypeIndex, value: str
   if (index.kindByFqn.has(value)) return [value];
   if (index.moduleExists(value)) return [moduleNodeId(value)];
   const scopedType = file.scopeTypes?.get(value);
-  if (scopedType && scopedType !== value) return resolveScopeValue(file, index, scopedType, depth + 1);
+  if (scopedType && scopedType !== value)
+    return resolveScopeValue(file, index, scopedType, depth + 1);
   const scopedModule = file.scopeModules?.get(value);
   if (scopedModule) {
     const matches = scopedModule.startsWith("?suffix:")
@@ -265,7 +278,11 @@ export function belongsToProject(index: TypeIndex, dotted: string): boolean {
 }
 
 /** External package for an unresolved dotted reference (`fastapi.Depends` -> `fastapi`). */
-export function externalPackageOf(file: ParsedFile, index: TypeIndex, dotted: string): string | null {
+export function externalPackageOf(
+  file: ParsedFile,
+  index: TypeIndex,
+  dotted: string
+): string | null {
   const root = dotted.split(".")[0] ?? "";
   const explicit = file.externalModules?.get(root) ?? file.externalModules?.get(dotted);
   if (explicit) return explicit;
@@ -278,7 +295,12 @@ export function externalPackageOf(file: ParsedFile, index: TypeIndex, dotted: st
 }
 
 /** Resolve a raw type name to candidate type ids declared in the project. */
-export function resolveTypeCandidates(file: ParsedFile, index: TypeIndex, raw: string, depth = 0): string[] {
+export function resolveTypeCandidates(
+  file: ParsedFile,
+  index: TypeIndex,
+  raw: string,
+  depth = 0
+): string[] {
   if (!raw || depth > 4) return [];
   const text = normalizeTypeText(raw);
   if (!text) return [];
@@ -286,12 +308,14 @@ export function resolveTypeCandidates(file: ParsedFile, index: TypeIndex, raw: s
 
   const scoped = file.scopeTypes?.get(text);
   if (scoped && scoped !== text) {
-    const resolved = resolveScopeValue(file, index, scoped, depth + 1).filter((id) => index.kindByFqn.has(id));
+    const resolved = resolveScopeValue(file, index, scoped, depth + 1).filter((id) =>
+      index.kindByFqn.has(id)
+    );
     if (resolved.length > 0) return resolved;
   }
 
   if (text.includes(".")) {
-    const tail = text.split(".").pop()!;
+    const tail = text.slice(text.lastIndexOf(".") + 1);
     // Module node ids (`module:app.service`) are namespaces, not types, so a
     // receiver named `service` must not match one by suffix.
     const suffixMatches = [...index.kindByFqn.keys()].filter(
@@ -300,12 +324,14 @@ export function resolveTypeCandidates(file: ParsedFile, index: TypeIndex, raw: s
     if (suffixMatches.length > 0) return suffixMatches;
     const scopedTail = file.scopeTypes?.get(tail);
     if (scopedTail && scopedTail !== tail) {
-      const resolved = resolveScopeValue(file, index, scopedTail, depth + 1).filter((id) => index.kindByFqn.has(id));
+      const resolved = resolveScopeValue(file, index, scopedTail, depth + 1).filter((id) =>
+        index.kindByFqn.has(id)
+      );
       if (resolved.length > 0) return resolved;
     }
   }
 
-  const simple = text.split(".").pop()!;
+  const simple = text.slice(text.lastIndexOf(".") + 1);
   if (file.moduleId) {
     const local = `${file.moduleId}.${simple}`;
     if (index.kindByFqn.has(local)) return [local];
@@ -416,7 +442,9 @@ export interface ReceiverResolution {
 }
 
 function splitReceiver(text: string): string[] {
-  return splitTopLevel(text.replace(/\?\./g, "."), ".").map((p) => p.trim()).filter(Boolean);
+  return splitTopLevel(text.replace(/\?\./g, "."), ".")
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -434,14 +462,27 @@ export function resolveReceiver(
   const text = (receiver ?? "").trim();
   if (!text) {
     const own = moduleIdOf(enclosingTypeId);
-    return { types: enclosingTypes, moduleIds: own ? [own] : [], reason: "implicit this/module scope" };
+    return {
+      types: enclosingTypes,
+      moduleIds: own ? [own] : [],
+      reason: "implicit this/module scope",
+    };
   }
 
   if (text === "this" || text === "self") {
-    return { types: enclosingTypes, moduleIds: [], reason: `${text} resolves to the enclosing type` };
+    return {
+      types: enclosingTypes,
+      moduleIds: [],
+      reason: `${text} resolves to the enclosing type`,
+    };
   }
   if (text === "cls" || text === "super" || text === "super()") {
-    if (text === "cls") return { types: [enclosingTypeId], moduleIds: [], reason: "cls resolves to the enclosing class" };
+    if (text === "cls")
+      return {
+        types: [enclosingTypeId],
+        moduleIds: [],
+        reason: "cls resolves to the enclosing class",
+      };
     const parents: string[] = [];
     for (const parentName of index.parentsByFqn.get(enclosingTypeId) ?? []) {
       parents.push(...index.resolveType(parentName));
@@ -462,20 +503,29 @@ export function resolveReceiver(
     }
     const scoped = resolveScopeValue(file, index, rootName);
     const scopedTypes = scoped.filter((id) => index.kindByFqn.has(id));
-    if (scopedTypes.length > 0) return { types: scopedTypes, moduleIds: [], reason: `field ${path} is imported` };
+    if (scopedTypes.length > 0)
+      return { types: scopedTypes, moduleIds: [], reason: `field ${path} is imported` };
   }
 
   if (text.startsWith("new ")) {
     const inner = resolveReceiver(file, index, text.slice(4), enclosingTypeId, enclosingMethodId);
-    if (inner.types.length > 0) return { ...inner, reason: `constructed instance: ${inner.reason}` };
+    if (inner.types.length > 0)
+      return { ...inner, reason: `constructed instance: ${inner.reason}` };
   }
 
   // Dotted paths (`service.repo`, `this.helper.client`) are walked segment by
   // segment so a field of a local's type stays typed instead of being
   // externalised by its root name.
   const pathSegments = splitReceiver(text);
-  if (pathSegments.length > 1) {
-    const rootResolution = resolveReceiver(file, index, pathSegments[0]!, enclosingTypeId, enclosingMethodId);
+  const rootSegment = pathSegments[0];
+  if (rootSegment !== undefined && pathSegments.length > 1) {
+    const rootResolution = resolveReceiver(
+      file,
+      index,
+      rootSegment,
+      enclosingTypeId,
+      enclosingMethodId
+    );
     let types = rootResolution.types;
     let external = rootResolution.external;
     let container = false;
@@ -498,7 +548,12 @@ export function resolveReceiver(
       return { types, moduleIds: [], reason: `field path ${text} (${rootResolution.reason})` };
     }
     if (container) {
-      return { types: [], moduleIds: [], external: "builtins", reason: `${text} is a builtin container member` };
+      return {
+        types: [],
+        moduleIds: [],
+        external: "builtins",
+        reason: `${text} is a builtin container member`,
+      };
     }
     if (external && external !== text) {
       return { types: [], moduleIds: [], external, reason: `${text} resolves outside the project` };
@@ -508,16 +563,18 @@ export function resolveReceiver(
   // A call used as a receiver: `getService().run()`.
   if (/^[A-Za-z_$][\w$.]*\(\)$/.test(text)) {
     const called = text.slice(0, -2);
-    const name = called.split(".").pop()!;
+    const name = called.slice(called.lastIndexOf(".") + 1);
+    const owningModule = moduleIdOf(enclosingTypeId);
     const typeIds = called.includes(".")
       ? enclosingTypes
-      : [enclosingTypeId, ...(moduleIdOf(enclosingTypeId) ? [moduleNodeId(moduleIdOf(enclosingTypeId)!)] : [])];
+      : [enclosingTypeId, ...(owningModule ? [moduleNodeId(owningModule)] : [])];
     for (const typeId of typeIds) {
       const method = pickOverload(findInherited(index, typeId, name), 0);
       const returnType = method ? normalizeTypeText(method.returnType) : "";
       if (returnType) {
         const types = resolveTypeCandidates(file, index, returnType);
-        if (types.length > 0) return { types, moduleIds: [], reason: `receiver is the result of ${name}()` };
+        if (types.length > 0)
+          return { types, moduleIds: [], reason: `receiver is the result of ${name}()` };
       }
     }
   }
@@ -530,42 +587,76 @@ export function resolveReceiver(
   if (scopedModule) {
     if (rest.length === 0) {
       const moduleId = index.resolveModuleId(scopedModule.replace("?suffix:", ""));
-      if (moduleId) return { types: [], moduleIds: [moduleId], reason: `${root} is module ${moduleId}` };
-      return { types: [], moduleIds: [], external: scopedModule, reason: `${root} is the external module ${scopedModule}` };
+      if (moduleId)
+        return { types: [], moduleIds: [moduleId], reason: `${root} is module ${moduleId}` };
+      return {
+        types: [],
+        moduleIds: [],
+        external: scopedModule,
+        reason: `${root} is the external module ${scopedModule}`,
+      };
     }
     const direct = rest.join(".");
-    const combined = index.matchModuleSuffix(`${scopedModule.replace("?suffix:", "")}.${direct}`)[0];
+    const combined = index.matchModuleSuffix(
+      `${scopedModule.replace("?suffix:", "")}.${direct}`
+    )[0];
     if (combined) return { types: [], moduleIds: [combined], reason: `nested module ${combined}` };
     const moduleId = index.resolveModuleId(scopedModule.replace("?suffix:", ""));
-    if (moduleId) return { types: [], moduleIds: [moduleId], reason: `${root} is module ${moduleId}` };
-    return { types: [], moduleIds: [], external: scopedModule, reason: `${root} is the external module ${scopedModule}` };
+    if (moduleId)
+      return { types: [], moduleIds: [moduleId], reason: `${root} is module ${moduleId}` };
+    return {
+      types: [],
+      moduleIds: [],
+      external: scopedModule,
+      reason: `${root} is the external module ${scopedModule}`,
+    };
   }
 
   const externalBinding = file.externalModules?.get(root);
   if (externalBinding) {
-    return { types: [], moduleIds: [], external: externalBinding, reason: `${root} is imported from ${externalBinding}` };
+    return {
+      types: [],
+      moduleIds: [],
+      external: externalBinding,
+      reason: `${root} is imported from ${externalBinding}`,
+    };
   }
 
   const scopedType = file.scopeTypes?.get(root);
   if (scopedType) {
     const types = resolveTypeCandidates(file, index, scopedType);
-    if (types.length > 0) return { types, moduleIds: [], reason: `${root} is imported type ${types[0] ?? scopedType}` };
+    if (types.length > 0)
+      return { types, moduleIds: [], reason: `${root} is imported type ${types[0] ?? scopedType}` };
     const symbolValue = file.scopeModules?.get(root) ?? scopedType;
-    const moduleIds = resolveScopeValue(file, index, symbolValue).filter((id) => !index.kindByFqn.has(id));
+    const moduleIds = resolveScopeValue(file, index, symbolValue).filter(
+      (id) => !index.kindByFqn.has(id)
+    );
     const firstModule = moduleIds[0];
     if (firstModule) {
       const moduleId = unwrapModuleNodeId(firstModule);
       // `import { service } from "./x"` where service is a module-level value.
-      if (moduleId) return { types: [], moduleIds: [moduleId], reason: `${root} is a symbol exported by ${moduleId}` };
+      if (moduleId)
+        return {
+          types: [],
+          moduleIds: [moduleId],
+          reason: `${root} is a symbol exported by ${moduleId}`,
+        };
     }
     const external = externalPackageOf(file, index, scopedType);
-    if (external) return { types: [], moduleIds: [], external, reason: `${root} comes from external package ${external}` };
+    if (external)
+      return {
+        types: [],
+        moduleIds: [],
+        external,
+        reason: `${root} comes from external package ${external}`,
+      };
   }
 
   const field = findField(index, enclosingTypeId, root);
   if (field?.type) {
     const types = resolveTypeCandidates(file, index, field.type);
-    if (types.length > 0) return { types, moduleIds: [], reason: `field ${root} has type ${field.type}` };
+    if (types.length > 0)
+      return { types, moduleIds: [], reason: `field ${root} has type ${field.type}` };
   }
 
   const moduleId = moduleIdOf(enclosingTypeId);
@@ -573,16 +664,29 @@ export function resolveReceiver(
     const moduleField = findField(index, moduleNodeId(moduleId), root);
     if (moduleField?.type) {
       const types = resolveTypeCandidates(file, index, moduleField.type);
-      if (types.length > 0) return { types, moduleIds: [], reason: `module field ${root} has type ${moduleField.type}` };
+      if (types.length > 0)
+        return {
+          types,
+          moduleIds: [],
+          reason: `module field ${root} has type ${moduleField.type}`,
+        };
     }
   }
 
-  const local = file.localsByMethod.get(enclosingMethodId)?.get(root) ?? file.localsByMethod.get(enclosingMethodId)?.get(text);
+  const local =
+    file.localsByMethod.get(enclosingMethodId)?.get(root) ??
+    file.localsByMethod.get(enclosingMethodId)?.get(text);
   if (local) {
     const types = resolveTypeCandidates(file, index, local);
-    if (types.length > 0) return { types, moduleIds: [], reason: `local ${root} has inferred type ${local}` };
+    if (types.length > 0)
+      return { types, moduleIds: [], reason: `local ${root} has inferred type ${local}` };
     if (isBuiltinTypeName(local)) {
-      return { types: [], moduleIds: [], external: "builtins", reason: `local ${root} is a builtin ${local}` };
+      return {
+        types: [],
+        moduleIds: [],
+        external: "builtins",
+        reason: `local ${root} is a builtin ${local}`,
+      };
     }
   }
 
@@ -593,7 +697,8 @@ export function resolveReceiver(
 
   if (rest.length > 0) {
     const nested = resolveTypeCandidates(file, index, rest.join("."));
-    if (nested.length > 0) return { types: nested, moduleIds: [], reason: `nested type ${rest.join(".")}` };
+    if (nested.length > 0)
+      return { types: nested, moduleIds: [], reason: `nested type ${rest.join(".")}` };
   }
 
   if (isGlobalObject(root)) {
@@ -603,13 +708,22 @@ export function resolveReceiver(
   // `self.unknownField`, `this.builder.x`: the receiver is the enclosing
   // instance, so an untyped member is unresolved project code, not external.
   if (root === "this" || root === "self" || root === "cls" || root === "super") {
-    return { types: [], moduleIds: [], reason: `member ${text} of the enclosing type could not be typed` };
+    return {
+      types: [],
+      moduleIds: [],
+      reason: `member ${text} of the enclosing type could not be typed`,
+    };
   }
 
   // `some_list.append` and friends: the receiver is a builtin container, so the
   // member lives in the standard library, not in a package called `list[str]`.
   if (isBuiltinTypeName(root)) {
-    return { types: [], moduleIds: [], external: "builtins", reason: `${root} is a builtin container` };
+    return {
+      types: [],
+      moduleIds: [],
+      external: "builtins",
+      reason: `${root} is a builtin container`,
+    };
   }
 
   const external = externalPackageOf(file, index, text);
@@ -624,7 +738,11 @@ export function resolveReceiver(
  * Resolve a method node id inside a module: a module-level function first, then
  * a single matching method anywhere in the module (for `from x import f`).
  */
-export function resolveModuleMember(index: TypeIndex, moduleId: string, name: string): string | null {
+export function resolveModuleMember(
+  index: TypeIndex,
+  moduleId: string,
+  name: string
+): string | null {
   const moduleTypeId = moduleNodeId(moduleId);
   const direct = findMethodsNamed(index, moduleTypeId, name);
   if (direct.length > 0) return direct[0]?.id ?? null;

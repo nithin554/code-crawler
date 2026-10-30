@@ -1,5 +1,5 @@
-import type { AnnotationInfo, MethodInfo, ParsedFile } from "../parser/language.js";
 import type { GraphEdge } from "../graph/schema.js";
+import type { AnnotationInfo, MethodInfo, ParsedFile } from "../parser/language.js";
 import type { TypeIndex } from "./types.js";
 
 /**
@@ -212,7 +212,7 @@ function resolvePointcutReference(
 ): string {
   const trimmed = expression.trim();
   const ref = trimmed.match(/^([\w.$]+)\s*\(\s*\)$/);
-  if (!ref || !ref[1]) return trimmed;
+  if (!ref?.[1]) return trimmed;
   // Do not treat pointcut keywords (execution(...) etc.) as references.
   if (POINTCUT_KEYWORDS.has(ref[1])) return trimmed;
 
@@ -601,7 +601,9 @@ function matchAnnotationPattern(pattern: string, annotations: AnnotationInfo[]):
 function matchArity(paramsText: string, count: number): boolean {
   const trimmed = paramsText.trim();
   if (!trimmed) return count === 0;
-  const parts = splitTopLevel(trimmed, ",").map((p) => p.trim()).filter(Boolean);
+  const parts = splitTopLevel(trimmed, ",")
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.some((p) => p === "..")) return true;
   return parts.length === count;
 }
