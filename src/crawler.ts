@@ -9,6 +9,7 @@ import { decodeParsedFile, encodeParsedFile } from "./parser/cache.js";
 import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
 import { languageForFile } from "./parser/languages/index.js";
 import type { JavaParsedFile } from "./parser/languages/java.js";
+import { isConstructorMethodId, ownerTypeOfMethodId } from "./parser/methodId.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
@@ -477,7 +478,7 @@ export function buildCallEdges(
       if (!knownNodeIds.has(rc.targetId)) {
         const synthetic: GraphNode = {
           id: rc.targetId,
-          kind: rc.targetId.endsWith("#<init>") ? "constructor" : "method",
+          kind: isConstructorMethodId(rc.targetId) ? "constructor" : "method",
           qualifiedName: rc.targetId,
           filePath: parsed.filePath,
           properties: {
@@ -491,8 +492,8 @@ export function buildCallEdges(
         // An implicit constructor has no declaration to hang a CONTAINS edge on,
         // so attach one here. Without it the type's own constructor is not
         // reachable from the type when the graph is traversed.
-        if (rc.targetId.endsWith("#<init>")) {
-          const ownerType = rc.targetId.slice(0, -"#<init>".length);
+        if (isConstructorMethodId(rc.targetId)) {
+          const ownerType = ownerTypeOfMethodId(rc.targetId);
           if (knownNodeIds.has(ownerType)) {
             edges.push({
               source: ownerType,

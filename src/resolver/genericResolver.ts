@@ -4,6 +4,7 @@ import {
   externalPackageOf,
   findInherited,
   findMethodsNamed,
+  inferArgumentTypes,
   isGlobalObject,
   isPythonBuiltin,
   moduleIdOf,
@@ -69,6 +70,7 @@ function resolveCall(
 ): ResolvedCall {
   const name = call.name === "__init__" || call.name === "constructor" ? "<init>" : call.name;
   const argCount = call.argumentTexts.length;
+  const argTypes = inferArgumentTypes(call.argumentTexts);
 
   // ---- 1. Constructors ----------------------------------------------------
   if (call.isConstructorCall) {
@@ -95,7 +97,7 @@ function resolveCall(
     const types = resolveTypeCandidates(file, index, call.name);
     if (types.length > 0) {
       for (const typeId of types) {
-        const ctor = pickOverload(findMethodsNamed(index, typeId, "<init>"), argCount);
+        const ctor = pickOverload(findMethodsNamed(index, typeId, "<init>"), argCount, argTypes);
         if (ctor) {
           return {
             callSite: call,
@@ -148,7 +150,7 @@ function resolveCall(
     const methods = searchInheritance
       ? findInherited(index, typeId, name)
       : findMethodsNamed(index, typeId, name);
-    const method = pickOverload(methods, argCount);
+    const method = pickOverload(methods, argCount, argTypes);
     if (method) {
       const inherited = method.typeId !== typeId;
       return {

@@ -320,6 +320,7 @@ no entry-point mark. If `find_dead_code` reports something you know is live, che
 | type | `com.acme.OrderService` |
 | method | `com.acme.OrderService#place` |
 | constructor | `com.acme.OrderService#<init>` |
+| overloaded declaration | `com.acme.OrderService#place(String,int)` |
 | field | `com.acme.OrderService$repo` |
 | module | `module:app.service` |
 | module function | `module:app.api#read_order` |
@@ -331,6 +332,12 @@ no entry-point mark. If `find_dead_code` reports something you know is live, che
 | unresolved call | `__unknown__:System.out.println` |
 | reflective marker | `__reflect__:./plugins/${name}` |
 | injection marker | `__inject__:Repo` |
+
+The first declaration of a method name keeps the bare `Type#name` id, so lookups of the
+form `get_node("com.acme.OrderService#place")` keep working. Each later overload appends
+its parameter types — `Type#place(String,int)`, `Type#<init>(int)` — and a variadic
+declaration marks its last parameter with `...`. This keeps every declaration addressable;
+before it, overloads collapsed into one node and the last one indexed won.
 
 ### Edge kinds
 
@@ -508,6 +515,10 @@ walkthrough.
   boundary (e.g. via gRPC); the languages share a graph, not a call edge.
 - **Types changed at runtime** — monkey-patching, `__getattr__`-based proxies, and
   `Object.defineProperty` tricks.
+- **Overloads a call site cannot distinguish.** Selection uses argument count first, then
+  the type of each argument where the call states one (a literal, a `new` expression, or a
+  cast). `f(count)` against `f(int)` and `f(String)` — an identifier whose type is not
+  tracked at the argument position — still binds to the first declaration.
 
 ### Per-language gaps
 

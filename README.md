@@ -584,9 +584,12 @@ Not yet modelled, by design:
 - Runtime DI graphs assembled from configuration files rather than code.
 - Receiver inference from an expression rather than a name — `getService().run()`,
   `items[0].run()`, a ternary, or a cast — so those calls report as unresolved.
-- Overload selection by argument count only. Variadic declarations (`String...`,
-  `...rest`, `*args`) match against their fixed prefix, but parameter types are not
-  compared, so same-arity overloads bind to the first declaration in source order.
+- Overload selection uses argument count first, then the type of each argument where
+  the call site states one (literals, `new` expressions, casts). Two overloads that a
+  call cannot distinguish — `f(count)` against `f(int)` and `f(String)` — still bind to
+  the first declaration in source order. Overloaded declarations keep distinct ids
+  (`Type#f`, `Type#f(int)`, `Type#<init>(String)`) after the first one; see
+  [`USAGE.md`](USAGE.md#7-what-is-and-is-not-modelled) for the id scheme.
 
 The full list, and what is modelled in exchange for each gap, is in
 [`USAGE.md`](USAGE.md#7-what-is-and-is-not-modelled).
@@ -608,6 +611,7 @@ src/
 │   ├── treeSitter.ts           WASM runtime + grammar loading + CST walk helpers
 │   ├── controlFlow.ts          enclosing branch/loop/try/catch + guard text
 │   ├── moduleId.ts             import-aware module id derivation
+│   ├── methodId.ts             method id scheme (overload signatures, constructor ids)
 │   └── languages/
 │       ├── index.ts            language registry + per-file language detection
 │       ├── java.ts             Java structural extraction
