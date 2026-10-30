@@ -73,7 +73,11 @@ describe("incremental crawl", () => {
     expect(result.filesUnchanged).toBe(8);
     expect(nodeRowIds()).toEqual(before);
     // The refreshed timestamp is persisted so the next crawl is a stat hit.
-    expect(store.listFileRecords().get(target)?.mtimeMs).toBe(Math.trunc(future.getTime()));
+    // libuv converts the `utimes` double into a timespec, so some platforms
+    // read back a fraction below the requested millisecond and the crawler's
+    // truncation lands 1ms low.
+    const stored = store.listFileRecords().get(target)?.mtimeMs ?? Number.NaN;
+    expect(Math.abs(stored - Math.trunc(future.getTime()))).toBeLessThanOrEqual(1);
   });
 
   it("re-parses and reindexes a single modified file", async () => {

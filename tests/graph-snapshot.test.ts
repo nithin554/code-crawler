@@ -36,14 +36,16 @@ function normalizer(root: string): (value: string) => string {
 
 function dumpGraph(root: string): string {
   const normalize = normalizer(root);
+  // Sort after normalizing, not in SQL: the raw ids are absolute paths, so their
+  // natural order depends on the platform's separator and drive prefix.
   const nodes = store
-    .raw<{ kind: string; id: string }>("SELECT kind, id FROM nodes ORDER BY id, kind")
-    .map((node) => `${node.kind} ${normalize(node.id)}`);
+    .raw<{ kind: string; id: string }>("SELECT kind, id FROM nodes")
+    .map((node) => `${node.kind} ${normalize(node.id)}`)
+    .sort();
   const edges = store
-    .raw<{ source: string; kind: string; target: string }>(
-      "SELECT source, kind, target FROM edges ORDER BY kind, source, target"
-    )
-    .map((edge) => `${normalize(edge.source)} -${edge.kind}-> ${normalize(edge.target)}`);
+    .raw<{ source: string; kind: string; target: string }>("SELECT source, kind, target FROM edges")
+    .map((edge) => `${normalize(edge.source)} -${edge.kind}-> ${normalize(edge.target)}`)
+    .sort();
 
   return [`# nodes (${nodes.length})`, ...nodes, "", `# edges (${edges.length})`, ...edges].join(
     "\n"
