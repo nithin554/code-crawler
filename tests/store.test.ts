@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { GraphStore } from "../src/graph/store.js";
 import { methodNodeId, fieldNodeId } from "../src/graph/schema.js";
 import type { GraphNode, GraphEdge } from "../src/graph/schema.js";
@@ -92,6 +95,75 @@ describe("GraphStore", () => {
     store.clearAll();
     expect(store.stats()).toMatchObject({ nodes: 0, edges: 0 });
     expect(store.getMeta("last_crawl_at")).toBeNull();
+  });
+
+  it("resolves duplicate qualified names deterministically", () => {
+    store.upsertNode({
+      id: "z#run",
+      kind: "method",
+      qualifiedName: "com.acme.Shared#run",
+      filePath: "/tmp/Z.java",
+      properties: {},
+    });
+    store.upsertNode({
+      id: "a#run",
+      kind: "method",
+      qualifiedName: "com.acme.Shared#run",
+      filePath: "/tmp/A.java",
+      properties: {},
+    });
+
+    expect(store.getNodeByQualifiedName("com.acme.Shared#run")?.id).toBe("a#run");
+  });
+
+  it("drops the legacy duplicate qualified-name index on open", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codecrawler-store-"));
+    const dbPath = path.join(tmp, "index.db");
+    try {
+      let legacy = new GraphStore(dbPath);
+      legacy.db.exec("CREATE INDEX idx_nodes_name ON nodes (qualified_name)");
+      legacy.close();
+
+      const upgraded = new GraphStore(dbPath);
+      const indexes = upgraded.raw(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_nodes_name','idx_nodes_qualified')"
+      ) as { name: string }[];
+      upgraded.close();
+
+      expect(indexes.map((i) => i.name)).toEqual(["idx_nodes_qualified"]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes orphan file-less nodes and keeps referenced ones", () => {
+    store.upsertNode(node("com.acme.Foo#run"));
+    store.upsertNode({
+      id: "com.acme.orphan",
+      kind: "package",
+      qualifiedName: "com.acme.orphan",
+      filePath: null,
+      properties: {},
+    });
+    store.upsertNode({
+      id: "com.acme.used",
+      kind: "package",
+      qualifiedName: "com.acme.used",
+      filePath: null,
+      properties: {},
+    });
+    store.upsertEdge({
+      source: "com.acme.Foo#run",
+      target: "com.acme.used",
+      kind: "DECLARED_IN",
+      properties: {},
+    });
+
+    expect(store.pruneOrphanNodes()).toBe(1);
+    expect(store.getNode("com.acme.orphan")).toBeNull();
+    expect(store.getNode("com.acme.used")).not.toBeNull();
+    // File-scoped nodes are owned by file reindexing, never by orphan GC.
+    expect(store.getNode("com.acme.Foo#run")).not.toBeNull();
   });
 
   it("exposes field and method node id helpers", () => {

@@ -72,14 +72,14 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   server.tool(
     "crawl_project",
-    "Index a project directory into the codebase graph. Supports Java, Python, TypeScript, and JavaScript. Idempotent: re-crawling refreshes the index; files that disappeared are removed. Returns counts of files, nodes, edges, resolved/unresolved call sites, entry points, injections, reflections, and external dependencies.",
+    "Index a project directory into the codebase graph. Supports Java, Python, TypeScript, and JavaScript. Idempotent: a full re-crawl refreshes the index and removes files that disappeared. The index holds one project; indexing a different project fails until clear_index is called. Scoped crawls (fileFilter or language) never remove files outside their scope and report pruned=false. Returns counts of files, nodes, edges, resolved/unresolved call sites, entry points, injections, reflections, and external dependencies.",
     {
       path: z.string().describe("Absolute path to the project root directory to index."),
       language: z
         .string()
         .optional()
         .describe(
-          "Force a parser language: 'java', 'python', 'typescript', or 'javascript'. Defaults to file-extension detection."
+          "Restrict indexing to one parser language: 'java', 'python', 'typescript', or 'javascript'. Files whose extension does not belong to that language are skipped. Defaults to file-extension detection."
         ),
       fileFilter: z
         .string()

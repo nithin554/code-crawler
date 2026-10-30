@@ -24,15 +24,34 @@ export function listLanguages(): string[] {
   return [...registry.keys()];
 }
 
-/** Pick the language for a file path based on its extension. */
+/** Preferred-name aliases that share a parser but cover a subset of extensions. */
+const PREFERRED_ALIASES: Record<string, { language: string; extensions: string[] }> = {
+  javascript: { language: "typescript", extensions: ["js", "jsx", "mjs", "cjs"] },
+};
+
+/**
+ * Pick the language for a file path based on its extension. A preferred
+ * language narrows the result to that language's extensions; it never makes
+ * unrelated files (README.md, configs) parseable.
+ */
 export function languageForFile(filePath: string, preferred?: string): LanguageConfig | null {
   const lower = filePath.toLowerCase();
+  const hasExtension = (extensions: string[]): boolean =>
+    extensions.some((ext) => lower.endsWith(`.${ext}`));
+
   if (preferred) {
-    const byName = getLanguageConfig(preferred);
-    if (byName) return byName;
+    const key = preferred.toLowerCase();
+    const byName = getLanguageConfig(key);
+    if (byName) return hasExtension(byName.extensions) ? byName : null;
+
+    const alias = PREFERRED_ALIASES[key];
+    if (alias) {
+      const config = getLanguageConfig(alias.language);
+      return config && hasExtension(alias.extensions) ? config : null;
+    }
   }
   for (const config of registry.values()) {
-    if (config.extensions.some((ext) => lower.endsWith(`.${ext}`))) return config;
+    if (hasExtension(config.extensions)) return config;
   }
   return null;
 }

@@ -133,4 +133,25 @@ describe("searchSymbols", () => {
     const r = searchSymbols(store, "main", { kind: "method" });
     expect(r.every((s) => s.kind === "method")).toBe(true);
   });
+
+  it("does not match node metadata properties", () => {
+    store.upsertNode({
+      id: "noise",
+      kind: "method",
+      qualifiedName: "noise",
+      filePath: "/tmp/Noise.java",
+      properties: { name: "noise", startLine: 42 },
+    });
+    expect(searchSymbols(store, "startLine", {})).toEqual([]);
+  });
+
+  it("ranks exact display names before truncating to the limit", () => {
+    for (let i = 0; i < 20; i++) {
+      addMethod("a", `target${i}`, "/tmp/a.java");
+    }
+    addMethod("com.acme.Zzz", "target", "/tmp/Z.java");
+
+    const r = searchSymbols(store, "target", { limit: 10 });
+    expect(r[0]?.qualifiedName).toBe("com.acme.Zzz#target");
+  });
 });

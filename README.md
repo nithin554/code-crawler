@@ -80,8 +80,11 @@ and answers them with bounded recursive SQL queries.
   bare/`this`/`super` calls, static/qualified calls, and superclass chains.
   Unresolvable calls become `unknown_symbol` phantom nodes with `resolved:false` edges,
   so the graph stays traversable.
-- **Idempotent, file-scoped indexing** — re-crawling refreshes changed files, rebuilds
-  derived dynamic edges, and removes stale ones without duplicating the graph.
+- **Idempotent, file-scoped indexing** — a full re-crawl refreshes changed files, rebuilds
+  derived dynamic edges, and removes files that disappeared, without duplicating the graph.
+  Scoped crawls (`fileFilter` or a forced `language`) never remove files outside their scope.
+- **One project per database** — indexing a different project into the same database fails
+  with a `clear_index` hint instead of silently wiping the first index.
 - **Analytics** — hotspots (fan-in/fan-out/advice counts) and dead-code candidates.
 - **Self-contained**: single SQLite file, no external services.
 - **LLM-friendly**: every tool returns structured JSON, unknown symbols come back with
@@ -94,7 +97,7 @@ Requires Node.js ≥ 20.
 ```bash
 npm install
 npm run build        # tsc → dist/
-npm test             # vitest (125 tests)
+npm test             # vitest (135 tests)
 ```
 
 ## CLI
@@ -196,7 +199,7 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 
 | Tool | Purpose |
 | --- | --- |
-| `crawl_project` | Index a directory (idempotent) |
+| `crawl_project` | Index a directory (idempotent; one project per database) |
 | `index_status` | Node/edge/file counts + last crawl |
 | `search_symbols` | Fuzzy lookup by name or FQN, optional kind filter |
 | `get_node` | Metadata + source location for one symbol |

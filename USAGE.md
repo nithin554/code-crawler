@@ -70,8 +70,11 @@ MCP client:
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap |
 | `CODECRAWLER_HELPFUL_ERRORS` | `true` | Return fuzzy suggestions when a symbol is missing |
 
-Use a separate `CODECRAWLER_DB` per repository. Re-crawling the same database is safe and
-cheap: file-scoped upserts replace only what changed.
+Use a separate `CODECRAWLER_DB` per repository. A database holds exactly one project:
+crawling a different path fails with a `clear_index` hint rather than replacing the existing
+index. Re-crawling the same database is safe and cheap: file-scoped upserts replace only
+what changed. A full crawl also removes files that disappeared; scoped crawls (`fileFilter`
+or a forced `language`) skip stale removal and report `pruned: false`.
 
 ### Wiring it into an MCP client
 

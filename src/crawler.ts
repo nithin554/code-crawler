@@ -29,6 +29,10 @@ export interface CrawlResult {
   filesScanned: number;
   filesParsed: number;
   filesRemoved: number;
+  /** False when the crawl was scoped (fileFilter/language) and stale pruning was skipped. */
+  pruned: boolean;
+  /** File-less shared nodes deleted because nothing references them anymore. */
+  orphansRemoved: number;
   nodes: number;
   edges: number;
   resolvedCalls: number;
@@ -653,10 +657,27 @@ function externalPackageOf(specifier: string): string {
   return text.split("/")[0]?.split(".")[0] ?? text;
 }
 
+/** Compare paths the way the host filesystem does (case-insensitive on Windows). */
+function normalizePathForCompare(p: string): string {
+  const resolved = path.resolve(p);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function sameProjectPath(a: string, b: string): boolean {
+  return normalizePathForCompare(a) === normalizePathForCompare(b);
+}
+
+/** True when `file` is strictly below `root`. */
+function isInsideProject(file: string, root: string): boolean {
+  const rel = path.relative(normalizePathForCompare(root), normalizePathForCompare(file));
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
 /**
  * Crawl a project directory and index it into the store.
  * Idempotent: re-crawling refreshes the graph; files that disappeared are
- * removed from the index.
+ * removed from the index. The index holds one project at a time; crawling a
+ * different project fails before mutating anything.
  */
 export async function crawlProject(
   store: GraphStore,
@@ -670,6 +691,20 @@ export async function crawlProject(
   if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) {
     throw new Error(`project path is not a directory: ${projectPath}`);
   }
+
+  // The store is a single-project database. Without this guard a second crawl
+  // would prune every file of the first project as "stale" and silently wipe it.
+  const indexedProject = store.getMeta("last_project_path");
+  if (indexedProject && !sameProjectPath(indexedProject, absPath)) {
+    throw new Error(
+      `index already contains ${indexedProject}; refusing to replace it with ${absPath}. ` +
+        `Run clear_index first, or point CODECRAWLER_DB at a separate database.`
+    );
+  }
+
+  // Stale pruning is only meaningful for a full scan. fileFilter and a forced
+  // language narrow the scan, so files outside that scope must be left alone.
+  const scopedScan = Boolean(options.fileFilter || options.language);
 
   const files = discoverSourceFiles(absPath, excludeDirs, options.language);
   if (options.fileFilter) {
@@ -706,6 +741,7 @@ export async function crawlProject(
   );
   const currentFiles = new Set(files);
   let filesRemoved = 0;
+  let orphansRemoved = 0;
   let totalResolved = 0;
   let totalUnresolved = 0;
   let totalDecorators = 0;
@@ -831,9 +867,11 @@ export async function crawlProject(
       previouslyIndexed.delete(parsed.filePath);
     }
 
-    // Remove files that disappeared from the project.
-    for (const stale of previouslyIndexed) {
-      if (!currentFiles.has(stale)) {
+    // Remove files that disappeared from the project. Only a full scan knows
+    // the complete file set, and only files under this project belong to it.
+    if (!scopedScan) {
+      for (const stale of previouslyIndexed) {
+        if (currentFiles.has(stale) || !isInsideProject(stale, absPath)) continue;
         store.removeFile(stale);
         filesRemoved++;
       }
@@ -846,6 +884,10 @@ export async function crawlProject(
     dynamicDispatchCount = dynamic.dispatchCount;
     adviceCount = dynamic.adviceCount;
     aspectCount = dynamic.aspects;
+
+    // Shared file-less nodes (packages, annotations, external symbols) outlive
+    // the files that created them; collect the ones nothing references now.
+    orphansRemoved = store.pruneOrphanNodes();
   });
 
   store.setMeta("last_crawl_at", new Date().toISOString());
@@ -857,6 +899,8 @@ export async function crawlProject(
     filesScanned: files.length,
     filesParsed: parsedFiles.length,
     filesRemoved,
+    pruned: !scopedScan,
+    orphansRemoved,
     nodes: stats.nodes,
     edges: stats.edges,
     resolvedCalls: totalResolved,
