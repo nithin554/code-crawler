@@ -29,6 +29,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -52,9 +53,21 @@ jobs:
           fi
 
           # The CLI authenticates from a config file (CLAWHUB_CONFIG_PATH), not
-          # from CLAWHUB_TOKEN directly. Keep the token out of the command line.
+          # from CLAWHUB_TOKEN directly. Keep the token out of the command line,
+          # and build the JSON with Node so no shell escaping can corrupt it.
           CONFIG="${RUNNER_TEMP}/clawhub-config.json"
-          printf '{"registry":"https://clawhub.ai","token":"%s"}\n' "${CLAWHUB_TOKEN}" > "${CONFIG}"
+          umask 077
+          trap 'rm -f "${CONFIG}"' EXIT
+          node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync(
+              process.argv[1],
+              JSON.stringify({
+                registry: "https://clawhub.ai",
+                token: process.env.CLAWHUB_TOKEN,
+              }) + "\n",
+            );
+          ' "${CONFIG}"
           export CLAWHUB_CONFIG_PATH="${CONFIG}"
 
           ARGS=(
@@ -65,6 +78,9 @@ jobs:
             --categories development
             --topics "code-analysis,call-graph,static-analysis,mcp,dead-code"
             --changelog "Sync skills/code-crawler from ${GITHUB_SHA::7}"
+            --source-repo "${GITHUB_REPOSITORY}"
+            --source-commit "${GITHUB_SHA}"
+            --source-ref "${GITHUB_REF_NAME}"
           )
 
           # Always validate first; a bad SKILL.md should fail before it ships.
