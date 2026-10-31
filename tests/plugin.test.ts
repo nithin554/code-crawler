@@ -185,4 +185,21 @@ describe("ClawHub publishing", () => {
     expect(workflow).toContain("--owner nithin554");
     expect(workflow).toContain("--dry-run");
   });
+
+  // Without an explicit --version the CLI assumes 1.0.0, so every release after
+  // the first collides with the version already on the registry.
+  it("publishes the skill at the release tag version", () => {
+    const workflow = read(".github/workflows/publish-clawhub.yml");
+    expect(workflow).toContain("workflow_call:");
+    // The flag must carry the derived version, not a literal.
+    expect(workflow).toMatch(/--version "\$\{VERSION\}"/);
+    expect(workflow).toMatch(/version=\$\{TAG#v\}/);
+    expect(workflow).toContain("ref: ${{ steps.release.outputs.tag }}");
+  });
+
+  it("is wired to the release tag created by the publish workflow", () => {
+    const workflow = read(".github/workflows/publish.yml");
+    expect(workflow).toContain("uses: ./.github/workflows/publish-clawhub.yml");
+    expect(workflow).toContain("tag: ${{ needs.create-release.outputs.tag }}");
+  });
 });
