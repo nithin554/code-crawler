@@ -21,17 +21,17 @@ name: Publish Skill to ClawHub
 # therefore follows ClawHub's own history and is not tied to this repository's
 # release tags.
 #
-# Needs a `CLAWHUB_TOKEN` secret on the `clawhub-publish` environment. Upstream
+# Requires a CLAWHUB_TOKEN repository secret, not an environment secret. Upstream
 # reads it under the name `clawhub_token`, so it is renamed at this boundary;
-# `secrets: inherit` would not rename it, and it would not see an environment
-# secret either, because only a job that declares that environment can read one.
-# A `uses:` job cannot declare an environment, so the `guard` job reads the token
-# from the environment and forwards it to the publish jobs.
+# `secrets: inherit` would not rename it. An environment secret cannot be used
+# here: only a job that declares the environment can read one, and a `uses:` job
+# cannot declare one. Forwarding the value through a job output does not work
+# either - GitHub refuses to emit a secret-valued output and warns `Skip output
+# '<name>' since it may contain secret` - so the secret has to be repository-wide.
 #
-# The publish is gated on that same environment, whose deployment branch policy
-# allows only `main`, so the gate and the secret are the same decision. A `uses:`
-# job cannot declare an environment, so the gate is a separate `guard` job that
-# everything else depends on.
+# The publish is gated on the `clawhub-publish` environment, whose deployment
+# branch policy allows only `main`. A `uses:` job cannot declare an environment,
+# so the gate is a separate `guard` job that everything else depends on.
 
 on:
   workflow_call:
@@ -64,34 +64,15 @@ jobs:
   # dispatch from a branch or tag stops here instead of writing to the registry.
   # This is its own job because a job that calls a reusable workflow cannot
   # declare an environment, and the gate has to sit in front of the publish.
-  #
-  # It also owns the token: an environment secret is only readable by a job that
-  # declares that environment, so this is the one job that can see it, and it
-  # forwards the value through `jobs.<id>.outputs` (which may read `secrets`) to
-  # the publish jobs' `secrets` map (which may read `needs`).
   guard:
     name: guard
     runs-on: ubuntu-latest
     environment: clawhub-publish
     permissions: {}
-    outputs:
-      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
     steps:
       - name: Confirm this ref may publish
         shell: bash
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          set -euo pipefail
-          echo "Publishing from ${GITHUB_REF}"
-          # A dry run never authenticates, so it does not need the token. A real
-          # publish without one fails deep inside upstream with "Not logged in",
-          # so it is caught here instead, where the cause is obvious.
-          if [[ "${DRY_RUN}" != "true" && -z "${CLAWHUB_TOKEN}" ]]; then
-            echo "::error::CLAWHUB_TOKEN is not set on the clawhub-publish environment."
-            exit 1
-          fi
+        run: echo "Publishing from ${GITHUB_REF}"
 
   publish:
     name: publish
@@ -116,7 +97,7 @@ jobs:
       topics: code-analysis,call-graph,static-analysis,mcp,dead-code
       changelog: ${{ inputs.tag != '' && format('Release {0}', inputs.tag) || '' }}
     secrets:
-      clawhub_token: ${{ needs.guard.outputs.clawhub_token }}
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
   # The registry answers a burst of writes with "Too many writes in a short
   # period of time", and upstream makes exactly one attempt, so a throttle would
@@ -144,4 +125,4 @@ jobs:
       topics: code-analysis,call-graph,static-analysis,mcp,dead-code
       changelog: ${{ inputs.tag != '' && format('Release {0}', inputs.tag) || '' }}
     secrets:
-      clawhub_token: ${{ needs.guard.outputs.clawhub_token }}
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
