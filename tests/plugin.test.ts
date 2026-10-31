@@ -240,30 +240,66 @@ describe("ClawHub publishing", () => {
     }
   });
 
-  // A reusable workflow inherits the GITHUB_TOKEN permissions of the job that
-  // calls it, so the grant has to be on the caller, not only in the called file.
-  // The upstream workflows mint an OIDC token to pin their own CLI source.
-  it("grants the called publish jobs the permissions they need", () => {
-    const caller = read(".github/workflows/publish.yml");
+  // Nothing but `main` may write to the registries, so the publishes sit behind
+  // the `clawhub-publish` environment, whose deployment branch policy allows
+  // only that branch. A job that calls a reusable workflow cannot declare an
+  // environment, so the gate is a plain job the publishers depend on.
+  it("restricts both publishes to main through the publish environment", () => {
+    for (const file of ["publish-clawhub", "publish-plugin"]) {
+      const workflow = read(`.github/workflows/${file}.yml`).replace(/\r\n/g, "\n");
+      const blocks = workflow.split(/\n(?= {2}[a-z][\w-]*:\n)/);
+      const guard = blocks.find((block) => block.startsWith("  guard:\n"));
+      expect(guard).toBeDefined();
+      expect(guard).toContain("environment: clawhub-publish");
+      expect(guard).not.toContain("uses:");
+
+      const publishers = blocks.filter((block) => block.includes("uses: openclaw/"));
+      expect(publishers.length).toBeGreaterThan(0);
+      for (const publisher of publishers) {
+        expect(publisher).toMatch(/^ {4}needs: guard$|^ {6}- guard$/m);
+      }
+    }
+  });
+
+  // A reusable workflow can only narrow the GITHUB_TOKEN permissions of the job
+  // that calls it, never widen them, so every grant the nested jobs request must
+  // also exist on the caller. Missing one does not fail at publish time: GitHub
+  // rejects the whole workflow as invalid and the run dies with a
+  // `startup_failure` before a single job starts.
+  it("grants the called publish jobs every permission they request", () => {
+    // This checkout may be CRLF while the committed file is LF.
+    const withoutCrlf = (text: string) => text.replace(/\r\n/g, "\n");
+    const caller = withoutCrlf(read(".github/workflows/publish.yml"));
     const jobBlock = (job: string) => {
       const start = caller.indexOf(`  ${job}:`);
       expect(start).toBeGreaterThan(-1);
       const rest = caller.slice(start + job.length + 3);
-      const next = rest.search(/\r?\n {2}[a-z][a-z-]*:\r?\n/);
+      const next = rest.search(/\n {2}[a-z][a-z-]*:\n/);
       return next === -1 ? rest : rest.slice(0, next);
     };
 
-    expect(jobBlock("publish-clawhub")).toMatch(/permissions:\r?\n {6}contents: read/);
-    const pluginJob = jobBlock("publish-clawhub-plugin");
-    expect(pluginJob).toMatch(/permissions:\r?\n {6}contents: read/);
-    // The called workflow uploads its inspector and publish reports.
-    expect(pluginJob).toMatch(/actions: read/);
+    for (const [job, file] of [
+      ["publish-clawhub", "publish-clawhub"],
+      ["publish-clawhub-plugin", "publish-plugin"],
+    ]) {
+      const called = withoutCrlf(read(`.github/workflows/${file}.yml`));
+      const calledJobs = called.slice(called.indexOf("\njobs:\n"));
+      const requested = [...calledJobs.matchAll(/^ {6}([\w-]+): (read|write)$/gm)].map(
+        (match) => `${match[1]}: ${match[2]}`
+      );
 
-    for (const file of ["publish-clawhub", "publish-plugin"]) {
-      const called = read(`.github/workflows/${file}.yml`);
-      expect(called).toMatch(/^permissions: \{\}$/m);
-      expect(called).toMatch(/id-token: write/);
+      expect(requested).toContain("contents: read");
+      // Upstream mints an OIDC token to pin its own CLI source.
+      expect(requested).toContain("id-token: write");
+
+      const callerGrants = jobBlock(job);
+      for (const grant of new Set(requested)) {
+        expect(callerGrants).toContain(grant);
+      }
     }
+
+    // The called workflow uploads its inspector and publish reports.
+    expect(jobBlock("publish-clawhub-plugin")).toContain("actions: read");
   });
 });
 

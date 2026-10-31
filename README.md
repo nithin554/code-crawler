@@ -298,11 +298,16 @@ uses. `CODECRAWLER_DB` still pins a single file when you want one.
 The same skill is published to [ClawHub](https://clawhub.ai) as `code-crawler`, and the
 plugin is published there too:
 
-- **Skill** — `clawhub install code-crawler`. ClawHub owns this version: the publish workflow
-  patches whatever ClawHub already has, starting at `1.0.0`, so it does not track the npm
-  version.
+- **Skill** — `clawhub install code-crawler`. ClawHub assigns this version by bumping the
+  patch digit of whatever it already published, so it advances one release at a time instead
+  of copying the npm version; a release whose skill publish fails leaves the two numbers one
+  apart until the next publish.
 - **Plugin** — published as the `code-crawler` bundle plugin, versioned from the release tag:
   release `v0.1.67` publishes the bundle at `0.1.67`.
+
+Publishing is restricted to `main`. Both jobs deploy through the `clawhub-publish`
+environment, whose deployment branch policy rejects any other ref, so a manual dispatch from
+a feature branch stops before it can upload.
 
 ### One command
 

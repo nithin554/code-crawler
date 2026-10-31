@@ -232,9 +232,12 @@ copilot plugin install code-crawler@code-crawler</code></pre>
             database per repository, all from one plugin install. Set
             <code>CODECRAWLER_DB</code> to pin a single file. The skill is also published to
             <a href="https://clawhub.ai">ClawHub</a> as <code>code-crawler</code>
-            (<code>clawhub install code-crawler</code>), where ClawHub owns the skill version. It is
+            (<code>clawhub install code-crawler</code>), where ClawHub bumps the patch digit of
+            the version it already holds, so the skill advances one publish at a time. It is
             published as a plugin bundle too, versioned by the release tag:
-            <code>v0.1.67</code> publishes the bundle at <code>0.1.67</code>.
+            <code>v0.1.67</code> publishes the bundle at <code>0.1.67</code>. Both publishes are
+            limited to <code>main</code> by the <code>clawhub-publish</code> deployment
+            environment.
           </p>
         </div>
       </section>
