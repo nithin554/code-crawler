@@ -847,7 +847,8 @@ export function resolveReceiver(
 
 /**
  * Resolve a method node id inside a module: a module-level function first, then
- * a single matching method anywhere in the module (for `from x import f`).
+ * a single matching method anywhere in the module subtree — which is how a
+ * package `__init__.py` re-export, or a submodule name, becomes reachable.
  */
 export function resolveModuleMember(
   index: TypeIndex,
@@ -857,12 +858,32 @@ export function resolveModuleMember(
   const moduleTypeId = moduleNodeId(moduleId);
   const direct = findMethodsNamed(index, moduleTypeId, name);
   if (direct.length > 0) return direct[0]?.id ?? null;
+  // Type ids carry the `module:` prefix, so compare against `module:a.b.` —
+  // not `a.b.`, which never matches a type id and silently skipped every child.
+  const subtreePrefix = `${moduleTypeId}.`;
   const matches: string[] = [];
   for (const [typeId, methods] of index.methodsByFqn) {
-    if (typeId !== moduleTypeId && !typeId.startsWith(`${moduleId}.`)) continue;
+    if (typeId !== moduleTypeId && !typeId.startsWith(subtreePrefix)) continue;
     for (const method of methods) {
       if (method.name === name) matches.push(method.id);
     }
   }
   return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+/**
+ * Project modules a file pulls names from with `from x import *`.
+ *
+ * A star import binds no local name, so the parser records it as an import with
+ * `simpleName: "*"` and nothing in `scopeTypes`. Names reached this way are only
+ * findable by searching the modules themselves.
+ */
+export function starImportedModules(file: ParsedFile, index: TypeIndex): string[] {
+  const out: string[] = [];
+  for (const imp of file.imports ?? []) {
+    if (imp.simpleName !== "*" || !imp.module) continue;
+    const moduleId = index.resolveModuleId(imp.module);
+    if (moduleId && !out.includes(moduleId)) out.push(moduleId);
+  }
+  return out;
 }

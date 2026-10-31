@@ -14,6 +14,7 @@ import {
   resolveReceiver,
   resolveScopeValue,
   resolveTypeCandidates,
+  starImportedModules,
 } from "./common.js";
 import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
 
@@ -27,7 +28,8 @@ import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from 
  *      method lookup on the resolved type chain.
  *   4. Module-qualified calls: `order.create()` / `svc.helper()` where the
  *      receiver is a module, resolved to a module-level function.
- *   5. Bare calls: same module, then enclosing type, then builtins/globals.
+ *   5. Bare calls: same module, then enclosing type, then star imports, then
+ *      builtins/globals.
  *   6. External receivers produce `external: true` edges instead of phantoms.
  *   7. Everything else becomes a phantom `unknown_symbol` node.
  */
@@ -218,6 +220,23 @@ function resolveCall(
           external,
           `${name} is imported from external package ${external}`
         );
+      }
+    }
+    // `from x import *` binds no local name, so the target is only findable by
+    // searching the modules the file starred. Python also lets a later star
+    // import shadow an earlier one, so walk them back to front.
+    const stars = starImportedModules(file, index);
+    for (let i = stars.length - 1; i >= 0; i -= 1) {
+      const starModule = stars[i] as string;
+      const target = resolveModuleMember(index, starModule, name);
+      if (target) {
+        return {
+          callSite: call,
+          targetId: target,
+          resolved: true,
+          confidence: 0.75,
+          reason: `${name} star-imported from ${starModule}`,
+        };
       }
     }
     if (isPythonBuiltin(name)) return externalCall(call, "builtins", `${name} is a Python builtin`);

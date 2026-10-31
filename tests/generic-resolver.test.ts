@@ -216,6 +216,214 @@ class Child(Base):
     expect(r.resolved).toBe(true);
     expect(r.reason).toContain("super resolves to the parent type");
   });
+
+  it("resolves a bare call that came through a star import", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from .services import *
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+    expect(r.resolved).toBe(true);
+    expect(r.reason).toContain("star-imported from pkg.services");
+  });
+
+  it("lets a local function shadow a star import", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from .services import *
+
+def create_order():
+    return 2
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.api#create_order");
+  });
+
+  it("lets a named import shadow a star import", async () => {
+    const p = await project("python", {
+      "pkg/billing.py": `def create_order():
+    return 1
+`,
+      "pkg/services.py": `def create_order():
+    return 2
+`,
+      "pkg/api.py": `from .services import *
+from .billing import create_order
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.billing#create_order");
+  });
+
+  it("lets a later star import shadow an earlier one", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/billing.py": `def create_order():
+    return 2
+`,
+      "pkg/api.py": `from .services import *
+from .billing import *
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.billing#create_order");
+  });
+
+  it("leaves a name that no star import exports unresolved", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from .services import *
+
+def handler():
+    missing()
+`,
+    });
+    const r = p.call("pkg.api", "missing");
+    expect(r.targetId).toBe("__unknown__:missing");
+  });
+});
+
+describe("generic resolver — Python relative imports", () => {
+  it("resolves a named import from a sibling module", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from .services import create_order
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+  });
+
+  it("resolves a named import across two package levels", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api/routes.py": `from ..services import create_order
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api.routes", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+  });
+
+  it("resolves a module imported with from . import", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from . import services
+
+def handler():
+    services.create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+  });
+
+  it("resolves a module imported with from .. import", async () => {
+    const p = await project("python", {
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api/routes.py": `from .. import services
+
+def handler():
+    services.create_order()
+`,
+    });
+    const r = p.call("pkg.api.routes", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+  });
+});
+
+describe("generic resolver — package re-exports", () => {
+  it("follows a __init__.py re-export through a from-import", async () => {
+    const p = await project("python", {
+      "pkg/__init__.py": `from .services import create_order
+
+__all__ = ["create_order"]
+`,
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `from pkg import create_order
+
+def handler():
+    create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+  });
+
+  it("follows a __init__.py re-export through a qualified call", async () => {
+    const p = await project("python", {
+      "pkg/__init__.py": `from .services import create_order
+`,
+      "pkg/services.py": `def create_order():
+    return 1
+`,
+      "pkg/api.py": `import pkg
+
+def handler():
+    pkg.create_order()
+`,
+    });
+    const r = p.call("pkg.api", "create_order");
+    expect(r.targetId).toBe("module:pkg.services#create_order");
+    expect(r.reason).toContain("exported by module pkg");
+  });
+
+  it("keeps an ambiguous submodule name unresolved", async () => {
+    const p = await project("python", {
+      "pkg/__init__.py": ``,
+      "pkg/orders.py": `def run():
+    return 1
+`,
+      "pkg/billing.py": `def run():
+    return 2
+`,
+      "pkg/api.py": `import pkg
+
+def handler():
+    pkg.run()
+`,
+    });
+    const r = p.call("pkg.api", "run");
+    expect(r.resolved).toBe(false);
+  });
 });
 
 describe("reflective target resolution", () => {

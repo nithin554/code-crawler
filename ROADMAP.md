@@ -52,8 +52,14 @@ cannot answer.
 
 - **Monorepo roots.** `tsconfig` `paths`/`baseUrl`, `package.json` workspaces,
   `pyproject.toml` / `setup.cfg`, Maven and Gradle module boundaries.
-- **Python.** Relative-import depth, `__init__.py` re-exports (`__all__`), star imports,
-  `conftest.py`, `functools.wraps` signature preservation.
+- **Python import reach.** Star imports, `__init__.py` re-exports and relative-import
+  depth. **done** — `from x import *` binds no local name, so it was recorded and then
+  ignored; it now resolves through the starred modules, after same-module and named
+  imports and with Python's last-star-wins shadowing. Package re-exports were
+  unreachable because the `resolveModuleMember` subtree lookup compared type ids
+  against an unprefixed module id, so it never matched a child; fixing the prefix makes
+  `from pkg import f` and `pkg.f()` follow `pkg/__init__.py`. Relative imports were
+  already correct and are now covered. Still open: `conftest.py`, `functools.wraps`.
 - **TypeScript/JavaScript.** Barrel files, `export default`, type-only imports, generics
   on receivers, `satisfies`, React components (JSX return → component) and hooks.
 - **Python route attribution.** `framework` on a `ROUTES` edge used to report the
