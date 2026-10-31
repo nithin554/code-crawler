@@ -89,6 +89,16 @@ const HTTP_VERBS = new Set([
   "websocket_route",
 ]);
 
+/**
+ * Verb a route decorator implies: the method name itself, `WEBSOCKET` for the two
+ * socket spellings, or `""` when the decorator takes an explicit method list.
+ */
+function routeVerb(name: string): string {
+  if (name === "websocket" || name === "websocket_route") return "WEBSOCKET";
+  if (name === "route" || name === "api_route") return "";
+  return name.toUpperCase();
+}
+
 const ROUTE_RECEIVERS = new Set([
   "app",
   "api",
@@ -137,7 +147,7 @@ export const pythonConfig: LanguageDescriptor = {
   name: "python",
   extensions: ["py", "pyi"],
   resolver: "module",
-  frameworks: ["fastapi", "flask", "dependency-injector"],
+  frameworks: ["fastapi", "flask", "quart", "dependency-injector"],
   fixture: ["python", "sample"],
   loadGrammar() {
     return loadGrammar("@vscode/tree-sitter-wasm", "wasm/tree-sitter-python.wasm");
@@ -273,10 +283,7 @@ export const pythonConfig: LanguageDescriptor = {
         if (!match) continue;
         if (match.spec.kind === "http") {
           const path = stringArgument(annotation);
-          const method =
-            lower === "route" || lower === "api_route" || lower === "websocket_route"
-              ? ""
-              : lower.toUpperCase();
+          const method = routeVerb(lower);
           return { kind: "http", detail: `${method} ${path}`.trim() || qualified };
         }
         return { kind: match.spec.kind, detail: qualified };
@@ -303,13 +310,12 @@ export const pythonConfig: LanguageDescriptor = {
         const qualified = annotation.fqn ?? annotation.name;
         const receiver = qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
         if (!annotation.arguments.length && !receiver && !lower.endsWith("route")) continue;
-        const verb =
-          lower === "route" || lower === "api_route" || lower === "websocket_route"
-            ? "ANY"
-            : lower.toUpperCase();
+        // The framework is the library, not the receiver the handler hangs off:
+        // `@router.get` in a FastAPI module reports `fastapi`, not `router`.
+        const match = entryPointIn(scope(), annotation.name, qualified);
         found.push({
-          framework: receiver || "flask",
-          httpMethod: verb,
+          framework: match?.module.name || receiver || "flask",
+          httpMethod: routeVerb(lower) || "ANY",
           path: stringArgument(annotation),
           handlerName,
           moduleId,

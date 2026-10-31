@@ -10,6 +10,13 @@ async function parse(rel: string) {
   return pythonConfig.parseFile(fs.readFileSync(file, "utf8"), file, { projectRoot: FIXTURES });
 }
 
+const INLINE = path.join(FIXTURES, "app", "inline.py");
+
+/** Parse source text directly; the Python parser reads nothing from disk. */
+async function parseSource(source: string) {
+  return pythonConfig.parseFile(source, INLINE, { projectRoot: FIXTURES });
+}
+
 describe("Python parser", () => {
   it("derives dotted module ids relative to the project root", async () => {
     expect((await parse("app/__init__.py")).moduleId).toBe("app");
@@ -66,6 +73,69 @@ describe("Python parser", () => {
     expect(
       pf.injections?.every((i) => i.type === "OrderService" && i.framework === "fastapi")
     ).toBe(true);
+  });
+
+  it("attributes a route to the library the file imports, not the receiver", async () => {
+    const pf = await parse("app/api.py");
+    // The handlers hang off an `APIRouter` instance named `router`; the report
+    // names the library so routes group by framework.
+    expect(pf.routes?.map((r) => r.framework)).toEqual(["fastapi", "fastapi"]);
+  });
+
+  it("attributes the same decorator name to Flask, Quart or FastAPI by import", async () => {
+    const route = async (evidence: string) => {
+      const pf = await parseSource(`${evidence}
+
+app = object()
+
+
+@app.get("/orders")
+def orders() -> dict:
+    return {}
+`);
+      return pf.routes?.map((r) => `${r.framework} ${r.httpMethod} ${r.path}`);
+    };
+
+    // `app.get` exists in all three (Flask 2.0, Quart, FastAPI); only the import
+    // separates them, which is the whole point of registry evidence ordering.
+    expect(await route("from fastapi import FastAPI")).toEqual(["fastapi GET /orders"]);
+    expect(await route("from flask import Flask")).toEqual(["flask GET /orders"]);
+    expect(await route("from quart import Quart")).toEqual(["quart GET /orders"]);
+  });
+
+  it("records FastAPI socket and method-list decorators", async () => {
+    const pf = await parseSource(`from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.websocket("/ws/{client_id}")
+async def socket(client_id: str) -> None:
+    return None
+
+
+@router.websocket_route("/ws/raw")
+async def raw_socket() -> None:
+    return None
+
+
+@router.api_route("/orders", methods=["GET", "POST"])
+def orders() -> dict:
+    return {}
+`);
+
+    expect(pf.routes?.map((r) => `${r.framework} ${r.httpMethod} ${r.path}`)).toEqual([
+      "fastapi WEBSOCKET /ws/{client_id}",
+      "fastapi WEBSOCKET /ws/raw",
+      "fastapi ANY /orders",
+    ]);
+    // Both socket spellings read the same in a route report; a decorator that
+    // takes an explicit method list reports the path alone, like `@app.route`.
+    expect(pf.methods.filter((m) => m.entryPoint).map((m) => m.entryPoint?.detail)).toEqual([
+      "WEBSOCKET /ws/{client_id}",
+      "WEBSOCKET /ws/raw",
+      "/orders",
+    ]);
   });
 
   it("records dynamic imports and getattr as reflection", async () => {

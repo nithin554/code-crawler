@@ -13,6 +13,7 @@ import { junit } from "./junit.js";
 import { nestjs } from "./nestjs.js";
 import { nestjsParam } from "./nestjsParam.js";
 import { pytest } from "./pytest.js";
+import { quart } from "./quart.js";
 import { spring } from "./spring.js";
 import { tsDi } from "./tsDi.js";
 import type { EntryPointSpec, FrameworkModule, FrameworkScope } from "./types.js";
@@ -33,6 +34,7 @@ const REGISTRY: FrameworkModule[] = [
   nestjsParam,
   fastapi,
   flask,
+  quart,
   dependencyInjector,
   pytest,
   celery,

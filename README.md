@@ -62,7 +62,7 @@ and answers them with bounded recursive SQL queries.
   `__reflect__:` marker when it is not.
 - **Framework wiring** — dependency injection (`@Autowired`, NestJS constructor
   injection, FastAPI `Depends`) becomes `INJECTS` edges, and HTTP routes
-  (`@GetMapping`, `@RequestMapping`, NestJS `@Controller`/`@Get`, FastAPI/Flask
+  (`@GetMapping`, `@RequestMapping`, NestJS `@Controller`/`@Get`, FastAPI/Flask/Quart
   decorators, Express `app.get`) become `ROUTES` edges to the handler, which is also
   marked as an entry point.
 - **Control flow on call edges** — every `CALLS` edge records whether the call is
@@ -583,7 +583,7 @@ analysis honest and gives `trace_execution` a root (`find_entry_points`, `find_r
 | Language | Recognised |
 | --- | --- |
 | Java | `@GetMapping`, `@PostMapping`, `@RequestMapping`, `@Scheduled`, `@EventListener`, listener annotations, tests, `main` |
-| Python | FastAPI (`@router.get`, `@app.post`), Flask (`@bp.route`), `if __name__ == "__main__"`, `pytest` tests |
+| Python | FastAPI (`@router.get`, `@app.post`, `@router.websocket`), Flask (`@bp.route`, `@app.get`), Quart (`@bp.route`), `if __name__ == "__main__"`, `pytest` tests |
 | TypeScript | NestJS `@Controller` + `@Get`/`@Post`/... , Express `app.get('/x', handler)`, Jest tests |
 
 Express handlers written inline get a synthetic method node
@@ -643,7 +643,7 @@ Each resolved edge carries a `confidence` score and a human-readable `reason` tr
 | Language | Extensions | Extracted | Dynamic features |
 | --- | --- | --- | --- |
 | Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
-| Python | `.py`, `.pyi` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask routes, `getattr`, `importlib`, `__main__`, tests |
+| Python | `.py`, `.pyi` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask/Quart routes, `getattr`, `importlib`, `__main__`, tests |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
 
