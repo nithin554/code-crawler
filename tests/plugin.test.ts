@@ -201,32 +201,30 @@ describe("ClawHub publishing", () => {
   });
 
   // The upstream workflow names the secret `clawhub_token`, and `secrets:
-  // inherit` does not rename it. The value lives on the `clawhub-publish`
-  // environment, and an environment secret is only readable by a job that
-  // declares that environment - which a `uses:` job cannot do - so the guard
-  // job reads it and forwards it to the publish jobs.
-  it("forwards the environment token to the name upstream reads", () => {
+  // inherit` does not rename it. The value has to be a repository secret: only
+  // a job that declares the `clawhub-publish` environment can read that
+  // environment's secrets, a `uses:` job cannot declare one, and GitHub drops
+  // secret-valued job outputs ("Skip output ... since it may contain secret"),
+  // so neither the guard nor an output can carry the value across that boundary.
+  it("renames the repository token to the name upstream reads", () => {
     for (const file of [
       ".github/workflows/publish-clawhub.yml",
       ".github/workflows/publish-plugin.yml",
     ]) {
       const text = workflow(file);
-      const guard = jobBlock(text, "guard");
-      expect(guard).toContain("environment: clawhub-publish");
-      expect(guard).toContain("clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}");
-      // Without the token upstream only reports "Not logged in", so the gate
-      // has to name the missing secret instead.
-      expect(guard).toContain("::error::CLAWHUB_TOKEN");
+      // The gate is the only job that may bind the environment.
+      expect(jobBlock(text, "guard")).toContain("environment: clawhub-publish");
 
       const mappings = text.match(/^ {6}clawhub_token: .+$/gm) ?? [];
-      // Exactly one job reads the secret, and only from its environment.
-      expect(mappings.filter((line) => line.includes("secrets.CLAWHUB_TOKEN"))).toEqual([
+      // Publish and retry both read the secret straight from the repository.
+      expect(mappings).toEqual([
+        "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
         "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
       ]);
-      // Both the publish and the retry consume the forwarded value.
-      expect(
-        mappings.filter((line) => line.includes("needs.guard.outputs.clawhub_token"))
-      ).toHaveLength(2);
+      // A `uses:` job cannot read an environment secret, and forwarding one
+      // through a job output is silently dropped, so never do either.
+      expect(text).not.toContain("needs.guard.outputs");
+      expect(text).not.toMatch(/outputs:\s*\n\s+clawhub_token/);
     }
   });
 

@@ -274,8 +274,9 @@ The same skill is published to ClawHub as `code-crawler`
 holds, so the skill advances one publish at a time rather than copying the npm version. The
 plugin is published there as well, versioned by the release tag: release `v0.1.67` publishes
 the bundle at `0.1.67`. Both publishes deploy through the `clawhub-publish` environment,
-which only accepts deployments from `main` and holds the `CLAWHUB_TOKEN` secret, so a
-publish can only authenticate after the gate has accepted the ref.
+which only accepts deployments from `main`. They authenticate with the `CLAWHUB_TOKEN`
+repository secret — it cannot live on the environment, because only a job that declares an
+environment can read its secrets and a job that calls a reusable workflow cannot declare one.
 
 ---
 
