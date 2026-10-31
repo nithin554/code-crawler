@@ -1,0 +1,11 @@
+{
+  "name": "code-crawler",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase.",
+  "files": [
+    ".claude-plugin",
+    ".mcp.json",
+    "README.md"
+  ]
+}

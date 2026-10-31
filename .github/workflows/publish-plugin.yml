@@ -6,10 +6,12 @@ name: Publish Plugin to ClawHub
 #
 # The bundle is Claude-format (it carries a `.claude-plugin/plugin.json`), which
 # upstream classifies as the `bundle-plugin` family. That family is the only one
-# ClawHub can publish without requiring `openclaw.plugin.json`, a `package.json`
-# and a matching build output in the bundle, which is why the payload is a thin
-# manifest rather than the crawler itself: the plugin resolves its server through
-# `npx -y @nithin554/code-crawler`, so the npm release supplies the code.
+# ClawHub can publish without requiring `openclaw.plugin.json` and a matching
+# build output in the bundle, which is why the payload is a thin manifest rather
+# than the crawler itself: the plugin resolves its server through
+# `npx -y @nithin554/code-crawler`, so the npm release supplies the code. The
+# bundle does carry a `package.json`, because ClawHub reports "package metadata
+# is missing" without one and cannot build a ClawPack tarball from it.
 #
 # "Build & Publish" tags every push to main and calls this one with that tag, so
 # the plugin version tracks the npm release. `workflow_dispatch` publishes by
@@ -99,11 +101,68 @@ jobs:
           echo "Publishing plugins/code-crawler@$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+  # ClawHub needs a `package.json` in the bundle to inspect it and to build a
+  # ClawPack tarball, but its `version` changes with every release, so the
+  # committed file holds a placeholder and the release version is stamped here.
+  # The stamping has to happen in this workflow: the reusable workflow checks the
+  # repository out again, so edits made before the call would not reach it. The
+  # stamped bundle is therefore packed into a tarball and handed over as an
+  # artifact, which upstream publishes instead of the folder.
+  pack:
+    name: pack
+    needs:
+      - guard
+      - prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.checkout.outputs.commit }}
+    steps:
+      # The tag rather than the dispatched ref, so a retry of an older release
+      # packs the tree that release was cut from.
+      - name: Check out the release tag
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Stamp the release version into the bundle
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node -e '
+          const fs = require("node:fs");
+          const file = "plugins/code-crawler/package.json";
+          const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+          pkg.version = process.env.VERSION;
+          fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+          grep -q "\"version\": \"$VERSION\"" plugins/code-crawler/package.json
+      # `npm pack` output is exactly the "gzip-compressed npm pack tarball" that
+      # upstream's ClawPack parser expects, and packing here is what upgrades the
+      # release from the legacy ZIP that ClawHub flags as not ClawPack.
+      - name: Pack the stamped bundle
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          npm pack ./plugins/code-crawler --pack-destination dist
+      # The publish job resolves the only `.tgz` in the artifact, so the name of
+      # the file does not have to be restated there.
+      - name: Upload the packed bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: clawhub-plugin-package
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     name: publish
     needs:
       - guard
       - prepare
+      - pack
     # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
     uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.24.1
     # A called workflow can only narrow the caller's token, so every grant the
@@ -119,19 +178,21 @@ jobs:
       group: clawhub-publish-plugin
       cancel-in-progress: false
     with:
-      # A path that exists in the workspace is published as a local folder, so
-      # the bundle comes from the commit under test, not from the default branch.
+      # Upstream publishes the `package_artifact_name` tarball and ignores this
+      # once the artifact resolves; it stays named so the bundle path is still
+      # visible here and the folder form remains the fallback.
       source: ./plugins/code-crawler
+      package_artifact_name: clawhub-plugin-package
       family: bundle-plugin
       owner: nithin554
       version: ${{ needs.prepare.outputs.version }}
       tags: latest
       changelog: ${{ format('Release {0}', inputs.tag) }}
       topics: code-analysis,call-graph,static-analysis,mcp,dead-code
-      # A local-folder publish cannot infer this, so the release is attributed to
-      # the commit and tag it was built from.
+      # An artifact publish cannot infer this, so the release is attributed to
+      # the commit and tag the tarball was packed from.
       source_repo: ${{ github.repository }}
-      source_commit: ${{ github.sha }}
+      source_commit: ${{ needs.pack.outputs.commit }}
       source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
       dry_run: ${{ inputs.dry_run }}
     secrets:
@@ -146,6 +207,7 @@ jobs:
     needs:
       - guard
       - prepare
+      - pack
       - publish
     # Only a failed publish is worth retrying; a failed `prepare` already
     # reported the bad tag and would just fail again.
@@ -160,6 +222,7 @@ jobs:
       cancel-in-progress: false
     with:
       source: ./plugins/code-crawler
+      package_artifact_name: clawhub-plugin-package
       family: bundle-plugin
       owner: nithin554
       version: ${{ needs.prepare.outputs.version }}
@@ -167,7 +230,7 @@ jobs:
       changelog: ${{ format('Release {0}', inputs.tag) }}
       topics: code-analysis,call-graph,static-analysis,mcp,dead-code
       source_repo: ${{ github.repository }}
-      source_commit: ${{ github.sha }}
+      source_commit: ${{ needs.pack.outputs.commit }}
       source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
       dry_run: false
     secrets:

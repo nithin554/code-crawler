@@ -303,7 +303,11 @@ plugin is published there too:
   of copying the npm version; a release whose skill publish fails leaves the two numbers one
   apart until the next publish.
 - **Plugin** — published as the `code-crawler` bundle plugin, versioned from the release tag:
-  release `v0.1.67` publishes the bundle at `0.1.67`.
+  release `v0.1.67` publishes the bundle at `0.1.67`. The bundle's own
+  `plugins/code-crawler/package.json` is packaging metadata — ClawHub needs a package
+  manifest to inspect the bundle and build its ClawPack artifact, and warns when one is
+  missing — so the release workflow stamps the tag's version into it, packs the bundle, and
+  hands that tarball to the publish; the committed `version` is only a placeholder.
 
 Publishing is restricted to `main`. Both jobs deploy through the `clawhub-publish`
 environment, whose deployment branch policy rejects any other ref, so a manual dispatch from

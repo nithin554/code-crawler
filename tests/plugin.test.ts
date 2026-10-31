@@ -348,10 +348,54 @@ describe("ClawHub plugin bundle", () => {
     expect(bundleMcp.mcpServers["code-crawler"].args).toEqual(["-y", pkg.name, "serve"]);
   });
 
-  // A `version` here would have to be bumped by hand and would still be
-  // overridden, because the publish workflow passes the release version.
-  it("carries no version and no package.json of its own", () => {
+  // A `version` in the manifest would have to be bumped by hand and would
+  // still be overridden, because the publish workflow passes the release
+  // version. The package.json below is packaging metadata instead.
+  it("pins no version in the plugin manifests", () => {
+    expect(claudeManifest.version).toBeUndefined();
     expect(bundleManifest.version).toBeUndefined();
-    expect(fs.existsSync(path.join(ROOT, bundle, "package.json"))).toBe(false);
+  });
+
+  // ClawHub reports "package metadata is missing" for a bundle with no
+  // package.json, and cannot build a ClawPack tarball without a version.
+  it("carries a package manifest so ClawHub can inspect and pack it", () => {
+    const bundlePkg = JSON.parse(read(`${bundle}/package.json`)) as {
+      name: string;
+      version: string;
+      files: string[];
+    };
+
+    expect(bundlePkg.name).toBe(claudeManifest.name);
+    // The release version is stamped by CI, so the committed value is a
+    // placeholder that never ships.
+    expect(bundlePkg.version).toBe("0.0.0");
+    // npm pack drops dot entries unless they are listed explicitly.
+    for (const file of [".claude-plugin", ".mcp.json"]) {
+      expect(bundlePkg.files).toContain(file);
+    }
+  });
+
+  // A `version` bumped by hand would drift from the release it ships with, and
+  // ClawHub rejects a tarball whose version disagrees with the published one.
+  it("stamps the release version into the bundle before packing it", () => {
+    const text = workflow(".github/workflows/publish-plugin.yml");
+    const pack = jobBlock(text, "pack");
+
+    expect(pack).toContain("VERSION: ${{ needs.prepare.outputs.version }}");
+    expect(pack).toContain("pkg.version = process.env.VERSION;");
+    expect(pack).toContain("npm pack ./plugins/code-crawler");
+  });
+
+  // The publish job runs in its own checkout, so the stamped file only reaches
+  // it as the uploaded tarball.
+  it("publishes the packed tarball instead of the working tree", () => {
+    const text = workflow(".github/workflows/publish-plugin.yml");
+
+    for (const job of ["publish", "publish-retry"]) {
+      const block = jobBlock(text, job);
+      expect(block).toContain("package_artifact_name: clawhub-plugin-package");
+      expect(block).toContain("source_commit: ${{ needs.pack.outputs.commit }}");
+      expect(block).toContain("version: ${{ needs.prepare.outputs.version }}");
+    }
   });
 });
