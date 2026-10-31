@@ -1,19 +1,39 @@
 name: Publish Skill to ClawHub
 
-# Publishes skills/code-crawler to clawhub.ai whenever the skill changes.
+# Publishes skills/code-crawler to clawhub.ai at the version of a release tag.
+#
+# The "Build & Publish" workflow tags every push to main and calls this one with
+# that tag, so the skill version always matches the npm package and the MCP
+# registry entry for the same commit. The skill is published from the tag
+# itself, not from main, so a re-run reproduces exactly what was released.
+#
+# `workflow_dispatch` re-publishes an existing tag by hand (defaults to the
+# latest release) and is how a previously failed publish is retried.
+#
 # Requires a CLAWHUB_TOKEN repository secret (`clawhub login` then `clawhub token`).
 # Without the secret the job reports a notice and exits successfully, so forks
 # and fresh clones are not broken by a missing credential.
 
 on:
-  push:
-    branches:
-      - "main"
-    paths:
-      - "skills/code-crawler/**"
-      - ".github/workflows/publish-clawhub.yml"
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.66"
+        type: string
+        required: true
+      dry_run:
+        description: "Validate the skill without publishing it"
+        type: boolean
+        default: false
+    secrets:
+      CLAWHUB_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Release tag to publish (empty uses the latest release)"
+        type: string
+        required: false
       dry_run:
         description: "Validate the skill without publishing it"
         type: boolean
@@ -22,17 +42,48 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: clawhub-publish
-  cancel-in-progress: false
-
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One publish at a time; never cancel a run that is mid-upload.
+    concurrency:
+      group: clawhub-publish
+      cancel-in-progress: false
     steps:
-      - name: Checkout
+      # The version comes from the release tag, never from a hardcoded default:
+      # the CLI otherwise assumes 1.0.0 and every release after the first
+      # collides with it. This runs before checkout because the tag is the
+      # checkout ref.
+      - name: Resolve version from the release tag
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          TAG="${INPUT_TAG}"
+          if [ -z "${TAG}" ]; then
+            TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          fi
+
+          # The registry stores whatever is passed, so refuse anything that is
+          # not a semver release tag instead of publishing a bogus version.
+          if ! printf '%s' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'${TAG}' is not a vX.Y.Z release tag"
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Publishing code-crawler at ${TAG}"
+
+      - name: Checkout release tag
         uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
       - name: Setup node
         uses: actions/setup-node@v7
@@ -44,6 +95,8 @@ jobs:
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -70,17 +123,22 @@ jobs:
           ' "${CONFIG}"
           export CLAWHUB_CONFIG_PATH="${CONFIG}"
 
+          # Commit of the checked-out tag, which is not GITHUB_SHA on a manual
+          # dispatch from a branch.
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+
           ARGS=(
             skill publish ./skills/code-crawler
             --slug code-crawler
             --name "Code Crawler"
             --owner nithin554
+            --version "${VERSION}"
             --categories development
             --topics "code-analysis,call-graph,static-analysis,mcp,dead-code"
-            --changelog "Sync skills/code-crawler from ${GITHUB_SHA::7}"
+            --changelog "Release ${TAG}"
             --source-repo "${GITHUB_REPOSITORY}"
-            --source-commit "${GITHUB_SHA}"
-            --source-ref "${GITHUB_REF_NAME}"
+            --source-commit "${SOURCE_COMMIT}"
+            --source-ref "${TAG}"
           )
 
           # Always validate first; a bad SKILL.md should fail before it ships.
@@ -91,4 +149,18 @@ jobs:
             exit 0
           fi
 
-          npx -y clawhub@latest "${ARGS[@]}"
+          # A re-run of a tag whose publish only partially failed must not turn
+          # into a failure on the version that is already there.
+          if OUTPUT="$(npx -y clawhub@latest "${ARGS[@]}" 2>&1)"; then
+            printf '%s\n' "${OUTPUT}"
+            exit 0
+          fi
+
+          printf '%s\n' "${OUTPUT}"
+          if printf '%s' "${OUTPUT}" | grep -qi "already exists"; then
+            echo "::notice::code-crawler@${VERSION} is already on ClawHub; nothing to publish."
+            exit 0
+          fi
+
+          echo "::error::ClawHub rejected code-crawler@${VERSION}"
+          exit 1
