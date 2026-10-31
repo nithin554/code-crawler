@@ -213,6 +213,26 @@ npm install @nithin554/code-crawler
             move the file, or when the client's working directory is not the project.
             Full details in <a href="usage.html#registry">Usage</a>.
           </p>
+          <div class="code-card">
+            <div class="code-title">Or install the plugin: server + skill together</div>
+            <pre><code># Claude Code
+/plugin marketplace add nithin554/code-crawler
+/plugin install code-crawler@code-crawler
+
+# Copilot CLI
+copilot plugin marketplace add nithin554/code-crawler
+copilot plugin install code-crawler@code-crawler</code></pre>
+          </div>
+          <p>
+            The plugin launches <code>npx -y @nithin554/code-crawler serve</code>. Its stdio
+            server runs from the plugin directory, but resolves a project per call &mdash;
+            from <code>crawl_project</code>, the client's workspace roots, or the project
+            this session already selected &mdash; and writes
+            <code>&lt;project&gt;/.code-crawler/index.db</code>, exactly like the CLI: one
+            database per repository, all from one plugin install. Set
+            <code>CODECRAWLER_DB</code> to pin a single file. The skill is also published to
+            <a href="https://clawhub.ai">ClawHub</a> as <code>code-crawler</code>.
+          </p>
         </div>
       </section>
 

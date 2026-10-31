@@ -1,0 +1,94 @@
+name: Publish Skill to ClawHub
+
+# Publishes skills/code-crawler to clawhub.ai whenever the skill changes.
+# Requires a CLAWHUB_TOKEN repository secret (`clawhub login` then `clawhub token`).
+# Without the secret the job reports a notice and exits successfully, so forks
+# and fresh clones are not broken by a missing credential.
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "skills/code-crawler/**"
+      - ".github/workflows/publish-clawhub.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate the skill without publishing it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clawhub-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Publish skill
+        shell: bash
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLAWHUB_TOKEN}" ]; then
+            echo "::notice::CLAWHUB_TOKEN is not set; skipping the ClawHub publish."
+            exit 0
+          fi
+
+          # The CLI authenticates from a config file (CLAWHUB_CONFIG_PATH), not
+          # from CLAWHUB_TOKEN directly. Keep the token out of the command line,
+          # and build the JSON with Node so no shell escaping can corrupt it.
+          CONFIG="${RUNNER_TEMP}/clawhub-config.json"
+          umask 077
+          trap 'rm -f "${CONFIG}"' EXIT
+          node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync(
+              process.argv[1],
+              JSON.stringify({
+                registry: "https://clawhub.ai",
+                token: process.env.CLAWHUB_TOKEN,
+              }) + "\n",
+            );
+          ' "${CONFIG}"
+          export CLAWHUB_CONFIG_PATH="${CONFIG}"
+
+          ARGS=(
+            skill publish ./skills/code-crawler
+            --slug code-crawler
+            --name "Code Crawler"
+            --owner nithin554
+            --categories development
+            --topics "code-analysis,call-graph,static-analysis,mcp,dead-code"
+            --changelog "Sync skills/code-crawler from ${GITHUB_SHA::7}"
+            --source-repo "${GITHUB_REPOSITORY}"
+            --source-commit "${GITHUB_SHA}"
+            --source-ref "${GITHUB_REF_NAME}"
+          )
+
+          # Always validate first; a bad SKILL.md should fail before it ships.
+          npx -y clawhub@latest "${ARGS[@]}" --dry-run
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice::Dry run requested; not publishing to ClawHub."
+            exit 0
+          fi
+
+          npx -y clawhub@latest "${ARGS[@]}"

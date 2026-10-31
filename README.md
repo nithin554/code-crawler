@@ -138,6 +138,9 @@ Environment variables:
 | `CODECRAWLER_MAX_FILE_BYTES` | `1000000` | Files larger than this are skipped, not parsed |
 | `CODECRAWLER_RESPECT_GITIGNORE` | `true` | Honor the project's `.gitignore` during discovery |
 | `CODECRAWLER_HELPFUL_ERRORS` | `true` | Fuzzy suggestions on symbol misses |
+| `CODECRAWLER_PLUGIN` | unset | Plugin mode: resolve one database per project at call time instead of opening one file at startup |
+| `CODECRAWLER_PLUGIN_ROOT` | unset | Plugin install directory, never indexed as a project |
+| `CODECRAWLER_PLUGIN_DATA` | temp dir | Writable directory for the no-project fallback database |
 
 Invalid values never crash the server: booleans fall back to their default and
 integers are clamped to their documented range, each with a one-line warning on
@@ -256,6 +259,30 @@ if green, **auto-releases**:
 
 ## Using as an MCP server
 
+### Install as an agent plugin
+
+The repository is also an agent plugin, so Claude Code and Copilot CLI can install the
+server and the skill together:
+
+```bash
+# Claude Code
+/plugin marketplace add nithin554/code-crawler
+/plugin install code-crawler@code-crawler
+
+# Copilot CLI
+copilot plugin marketplace add nithin554/code-crawler
+copilot plugin install code-crawler@code-crawler
+```
+
+The plugin runs `npx -y @nithin554/code-crawler serve`. Agent Plugins clients start a
+plugin's stdio servers inside the plugin directory, so the server does not treat that
+directory as your checkout: it resolves a project from `crawl_project`, the client's
+workspace roots, or the project this session already selected, and keeps that graph in
+`<project>/.code-crawler/index.db` — one database per repository, the same layout the CLI
+uses. `CODECRAWLER_DB` still pins a single file when you want one.
+
+The same skill is published to [ClawHub](https://clawhub.ai) as `code-crawler`.
+
 ### One command
 
 [`add-mcp`](https://github.com/neon-solutions/add-mcp) registers the server in whichever
@@ -278,10 +305,13 @@ with your checkout as its working directory: with `-g` and an unrelated working 
 
 ### One server per project
 
-A server process opens one database at startup and a database holds exactly one project, so
-the model is one registration per repository — which is what the per-project config above
-gives you. Re-crawling a repository reuses its existing file and only re-parses what changed;
-two repositories never share a file, so they cannot clash.
+Outside plugin mode a server process opens one database at startup and a database holds
+exactly one project, so the model is one registration per repository — which is what the
+per-project config above gives you. The plugin install instead resolves a database per
+project at call time, so one plugin serves every repository you open. Re-crawling a repository reuses its existing file and only re-parses what changed;
+two repositories never share a file, so they cannot clash. Only a few project databases stay
+open at once (idle ones are closed), and every handle is released when the client
+disconnects.
 
 ### MCP Registry / `npx`
 

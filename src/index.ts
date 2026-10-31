@@ -6,6 +6,13 @@ import { type Config, loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
 import { searchSymbols } from "./graph/queries.js";
 import { GraphStore } from "./graph/store.js";
+import {
+  PluginProjects,
+  pluginDataDir,
+  pluginModeFromEnv,
+  pluginRootFromEnv,
+  type StoreSource,
+} from "./projects.js";
 import { createServer } from "./server.js";
 
 /**
@@ -34,6 +41,9 @@ Environment:
   CODECRAWLER_MAX_DEPTH        Traversal depth cap
   CODECRAWLER_MAX_FILE_BYTES   Skip source files larger than this (default 1000000)
   CODECRAWLER_RESPECT_GITIGNORE Honor .gitignore during crawl (default true)
+  CODECRAWLER_PLUGIN           Plugin mode: one database per project (set by plugin manifests)
+  CODECRAWLER_PLUGIN_ROOT      Plugin install directory, never indexed as a project
+  CODECRAWLER_PLUGIN_DATA      Writable plugin directory for the fallback database
 `);
 }
 
@@ -51,10 +61,35 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case undefined:
     case "serve": {
       const config = loadConfig();
-      const store = makeStore(config);
-      const server = createServer(store, config);
+      // A plugin client starts the server inside the plugin directory. Pick one
+      // database per project instead of binding to that directory. An explicit
+      // CODECRAWLER_DB still wins and keeps the CLI's fixed-file behavior.
+      const pluginRoot = pluginModeFromEnv() ? pluginRootFromEnv() : undefined;
+      const projects = pluginModeFromEnv()
+        ? new PluginProjects({
+            config,
+            pluginRoot,
+            dataDir: pluginDataDir(pluginRoot),
+            makeStore,
+            log: (message) => console.error(`code-crawler: ${message}`),
+          })
+        : undefined;
+      const storeConfig = projects ? { ...config, dbPath: projects.fallbackDatabasePath } : config;
+      // Plugin mode opens the fallback database only when no project is ever
+      // detected, so merely starting the server writes no database file.
+      const store: StoreSource = projects ? () => projects.fallbackStore() : makeStore(storeConfig);
+      const server = createServer(store, storeConfig, { projects });
       const transport = new StdioServerTransport();
-      console.error(`code-crawler: MCP server ready (db: ${config.dbPath})`);
+      // Release SQLite handles (and checkpoint their WAL files) on the way out.
+      // `exit` is synchronous and does not suppress the default signal behavior
+      // the way a SIGINT/SIGTERM listener would.
+      transport.onclose = () => projects?.close();
+      if (projects) process.once("exit", () => projects.close());
+      console.error(
+        projects
+          ? "code-crawler: MCP server ready (plugin mode: one database per project)"
+          : `code-crawler: MCP server ready (db: ${config.dbPath})`
+      );
       await server.connect(transport);
       break;
     }

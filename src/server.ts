@@ -1,4 +1,6 @@
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { RootsListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { loadConfig } from "./config.js";
@@ -35,7 +37,7 @@ import {
   type WiringEdge,
 } from "./graph/queries.js";
 import { EDGE_KINDS, NODE_KINDS } from "./graph/schema.js";
-import type { GraphStore } from "./graph/store.js";
+import { type PluginProjects, type StoreSource, scopedStore } from "./projects.js";
 import { SERVER_VERSION } from "./version.js";
 
 /**
@@ -63,11 +65,39 @@ interface ProgressExtra {
   }) => Promise<void>;
 }
 
-export function createServer(store: GraphStore, config: Config): McpServer {
+export interface ServerOptions {
+  /** Plugin mode: resolve one database per project instead of the fixed store. */
+  projects?: PluginProjects;
+}
+
+export function createServer(
+  initialStore: StoreSource,
+  config: Config,
+  options: ServerOptions = {}
+): McpServer {
+  const { store, run } = scopedStore(initialStore);
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
   });
+
+  if (options.projects) {
+    const projects = options.projects;
+    projects.setRootsProvider(async () => {
+      if (!server.server.getClientCapabilities()?.roots) return [];
+      const result = await server.server.listRoots();
+      return result.roots.flatMap((root) => {
+        try {
+          return [fileURLToPath(root.uri)];
+        } catch {
+          return [];
+        }
+      });
+    });
+    server.server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+      projects.invalidateRoots();
+    });
+  }
 
   const text = (data: unknown) => ({
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -158,6 +188,14 @@ export function createServer(store: GraphStore, config: Config): McpServer {
   };
 
   /**
+   * Bind `fn` to the database for the project the client is working in. This is
+   * also used by the prompt below: every handler that reads the graph must go
+   * through here, or plugin mode would silently use the fallback database.
+   */
+  const scoped = <T>(projectPath: string | undefined, fn: () => T | Promise<T>): T | Promise<T> =>
+    options.projects ? options.projects.withCall(projectPath, (bound) => run(bound, fn)) : fn();
+
+  /**
    * Every handler shares one error boundary so MCP clients always receive the
    * same `{ ok, error, hint }` shape instead of a mix of throws and payloads.
    */
@@ -175,7 +213,13 @@ export function createServer(store: GraphStore, config: Config): McpServer {
     ) => void;
     register(name, description, paramsSchema, async (...args: unknown[]) => {
       try {
-        return await handler(...(args as Args));
+        // `crawl_project` names the project it wants; every other tool inherits
+        // the client's roots or the project the previous call selected.
+        const requested =
+          name === "crawl_project" ? (args[0] as { path?: unknown } | undefined)?.path : undefined;
+        return await scoped(typeof requested === "string" ? requested : undefined, () =>
+          handler(...(args as Args))
+        );
       } catch (err) {
         return errorResult(err);
       }
@@ -186,7 +230,7 @@ export function createServer(store: GraphStore, config: Config): McpServer {
 
   tool(
     "crawl_project",
-    "Index a project directory into the codebase graph. Supports Java, Python, TypeScript, and JavaScript. Idempotent: a full re-crawl refreshes the index and removes files that disappeared. The index holds one project; indexing a different project fails until clear_index is called. Honors .gitignore and an optional .crawlerrc, skips files above CODECRAWLER_MAX_FILE_BYTES and binary files, and reports skipped files and parse errors. Scoped crawls (fileFilter or language) never remove files outside their scope and report pruned=false. Returns counts of files, nodes, edges, resolved/unresolved call sites, entry points, injections, reflections, and external dependencies.",
+    "Index a project directory into the codebase graph. Supports Java, Python, TypeScript, and JavaScript. Idempotent: a full re-crawl refreshes the index and removes files that disappeared. The index holds one project; outside plugin mode, indexing a different project fails until clear_index is called (plugin mode opens that project's own database). Honors .gitignore and an optional .crawlerrc, skips files above CODECRAWLER_MAX_FILE_BYTES and binary files, and reports skipped files and parse errors. Scoped crawls (fileFilter or language) never remove files outside their scope and report pruned=false. Returns counts of files, nodes, edges, resolved/unresolved call sites, entry points, injections, reflections, and external dependencies.",
     {
       path: z.string().describe("Absolute path to the project root directory to index."),
       language: z
@@ -1280,9 +1324,25 @@ export function createServer(store: GraphStore, config: Config): McpServer {
       from: z.string().describe("Starting symbol"),
       to: z.string().describe("Destination symbol"),
     },
-    async ({ from, to }) => {
-      const paths = tracePath(store, from, to, { limit: 10 });
-      if (!paths || paths.length === 0) {
+    ({ from, to }) =>
+      scoped(undefined, () => {
+        const paths = tracePath(store, from, to, { limit: 10 });
+        if (!paths || paths.length === 0) {
+          return {
+            messages: [
+              {
+                role: "assistant",
+                content: {
+                  type: "text",
+                  text:
+                    `No static call path was found from \`${from}\` to \`${to}\`. ` +
+                    `Use \`search_symbols\` to confirm both symbols exist, and ` +
+                    `\`get_subgraph\` on each to inspect their neighborhoods.`,
+                },
+              },
+            ],
+          };
+        }
         return {
           messages: [
             {
@@ -1290,29 +1350,14 @@ export function createServer(store: GraphStore, config: Config): McpServer {
               content: {
                 type: "text",
                 text:
-                  `No static call path was found from \`${from}\` to \`${to}\`. ` +
-                  `Use \`search_symbols\` to confirm both symbols exist, and ` +
-                  `\`get_subgraph\` on each to inspect their neighborhoods.`,
+                  `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
+                  paths.map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`).join("\n") +
+                  `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
               },
             },
           ],
         };
-      }
-      return {
-        messages: [
-          {
-            role: "assistant",
-            content: {
-              type: "text",
-              text:
-                `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
-                paths.map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`).join("\n") +
-                `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
-            },
-          },
-        ],
-      };
-    }
+      })
   );
 
   return server;

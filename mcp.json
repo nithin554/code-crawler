@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "code-crawler": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler", "serve"],
+      "env": {
+        "CODECRAWLER_PLUGIN": "1",
+        "CODECRAWLER_PLUGIN_ROOT": "${PLUGIN_ROOT}",
+        "CODECRAWLER_PLUGIN_DATA": "${PLUGIN_DATA}"
+      }
+    }
+  }
+}
