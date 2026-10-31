@@ -1,27 +1,31 @@
-import type { LanguageConfig } from "../language.js";
+import type { LanguageConfig, LanguageDescriptor } from "../language.js";
 import { javaConfig } from "./java.js";
 import { pythonConfig } from "./python.js";
 import { typescriptConfig } from "./typescript.js";
 
 /**
- * Registry of supported languages. Adding a language means:
- *   1. implement a LanguageConfig in `./<lang>.ts`
- *   2. register it here
- *   3. implement a resolver keyed by the same name in `src/resolver/`
+ * The one table that defines what this project speaks. Each language declares
+ * its own descriptor next to its parser (extensions → grammar → resolver →
+ * frameworks → fixture), so adding a language is a new module plus a row here,
+ * and never an edit to an existing language.
  */
-
-const registry = new Map<string, LanguageConfig>([
+const registry = new Map<string, LanguageDescriptor>([
   ["java", javaConfig],
   ["python", pythonConfig],
   ["typescript", typescriptConfig],
 ]);
 
-export function getLanguageConfig(name: string): LanguageConfig | null {
+export function getLanguageConfig(name: string): LanguageDescriptor | null {
   return registry.get(name.toLowerCase()) ?? null;
 }
 
 export function listLanguages(): string[] {
   return [...registry.keys()];
+}
+
+/** Every descriptor, in registration order. */
+export function listLanguageDescriptors(): LanguageDescriptor[] {
+  return [...registry.values()];
 }
 
 /** Preferred-name aliases that share a parser but cover a subset of extensions. */

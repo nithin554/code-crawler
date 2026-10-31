@@ -14,16 +14,16 @@
 | Area | Today |
 |---|---|
 | Languages | Java, Python, TypeScript, JavaScript |
-| Parsing | `LanguageConfig` per language over tree-sitter WASM grammars |
-| Resolution | `javaResolver.ts` + `genericResolver.ts` (module-based languages) |
+| Parsing | `LanguageDescriptor` per language: extensions → grammar → resolver → frameworks → fixture |
+| Resolution | One `Resolver` contract, two implementations: `java` (declared types + hierarchy) and `module` (imports and barrels) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 27 test files, per-language fixtures, migration + index-plan + scale checks |
+| Tests | 28 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
-The biggest structural gap is that **adding a language currently means writing two
-parallel implementations** — a `LanguageConfig` and a resolver — and teaching each parser
-about framework conventions. Phase 0 removes that before any new language lands.
+The biggest structural gap is the **per-language entry cost**: a new language needs a
+`LanguageConfig`, a resolver, framework knowledge inside its parser, and a conformance
+row. Phase 0 shrank that to data.
 
 ---
 
@@ -31,16 +31,18 @@ about framework conventions. Phase 0 removes that before any new language lands.
 
 *Goal: a new language is one config module, one resolver module, one fixture directory.*
 
-| Item | Change | Effort |
-|---|---|---|
-| 0.1 | Collapse `javaResolver.ts` and `genericResolver.ts` behind one `Resolver` interface with declared capabilities | M |
-| 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M |
-| 0.3 | One language descriptor: extensions → grammar → resolver → frameworks → fixture path | S |
-| 0.4 | Conformance suite every language must pass (types, calls, imports, one route, one reflection) | S |
-| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots — **partly done**: discovery globs and language overrides ship in `loadCrawlerRc`; module roots and tsconfig paths are still open | S |
+| Item | Change | Effort | Status |
+|---|---|---|---|
+| 0.1 | Collapse `javaResolver.ts` and `genericResolver.ts` behind one `Resolver` interface with declared capabilities | M | **done** — `Resolver` in `resolver/types.ts`, looked up through `resolver/registry.ts`; `crawler.ts` no longer branches on language |
+| 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M | **open** — parsers still own their conventions, though each now declares which frameworks it detects |
+| 0.3 | One language descriptor: extensions → grammar → resolver → frameworks → fixture path | S | **done** — `LanguageDescriptor` in `parser/language.ts`, declared beside each parser |
+| 0.4 | Conformance suite every language must pass (types, calls, imports, one route, one reflection) | S | **done** — `tests/language-conformance.test.ts`, now also asserting it covers exactly the registered languages |
+| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots | S | **partly done** — discovery globs and language overrides ship in `loadCrawlerRc`; module roots and tsconfig paths are still open |
 
 **Exit criteria:** a new language needs no edits to existing language modules, and CI
-fails if the conformance suite regresses.
+fails if the conformance suite regresses. *Both now hold: dispatch reads the
+descriptor, and the conformance suite fails if a registered language has no contract
+row or points at a missing fixture.*
 
 ## Phase 1 — Resolution quality
 
@@ -93,7 +95,7 @@ Two rules for every language added:
 
 ### Non-code surfaces (higher value than a ninth language)
 
-Each of these fits the `LanguageConfig` shape and produces far more insight per line than
+Each of these fits the `LanguageDescriptor` shape and produces far more insight per line than
 another general-purpose language:
 
 - **SQL** — tables, columns, and queries as nodes and edges, so `get_callers` works on a

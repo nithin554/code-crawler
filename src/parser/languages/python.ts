@@ -6,7 +6,7 @@ import type {
   FieldInfo,
   ImportInfo,
   InjectionPoint,
-  LanguageConfig,
+  LanguageDescriptor,
   MethodInfo,
   ParsedFile,
   ReflectiveRef,
@@ -128,9 +128,12 @@ interface TypeRange {
   id: string;
 }
 
-export const pythonConfig: LanguageConfig = {
+export const pythonConfig: LanguageDescriptor = {
   name: "python",
   extensions: ["py", "pyi"],
+  resolver: "module",
+  frameworks: ["fastapi", "flask", "dependency-injector"],
+  fixture: ["python", "sample"],
   loadGrammar() {
     return loadGrammar("@vscode/tree-sitter-wasm", "wasm/tree-sitter-python.wasm");
   },

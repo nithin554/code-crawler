@@ -5,7 +5,7 @@ import type {
   EntryPointInfo,
   FieldInfo,
   InjectionPoint,
-  LanguageConfig,
+  LanguageDescriptor,
   MethodInfo,
   ParsedFile,
   ReflectiveRef,
@@ -42,11 +42,14 @@ export interface JavaParsedFile extends ParsedFile {
   typeByName: Map<string, string>;
 }
 
-export const javaConfig: LanguageConfig = {
+export const javaConfig: LanguageDescriptor = {
   name: "java",
   extensions: ["java"],
   loadGrammar: () => loadGrammar(GRAMMAR_PACKAGE, GRAMMAR_WASM),
   parseFile,
+  resolver: "java",
+  frameworks: ["spring", "aspectj"],
+  fixture: ["java", "sample"],
 };
 
 function isTypeDecl(type: string): boolean {

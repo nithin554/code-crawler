@@ -5,7 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { GraphStore } from "../src/graph/store.js";
-import { listLanguages } from "../src/parser/languages/index.js";
+import { listLanguageDescriptors, listLanguages } from "../src/parser/languages/index.js";
 import { createServer } from "../src/server.js";
 
 const ROOT = path.join(__dirname, "..");
@@ -104,6 +104,23 @@ describe("documentation matches the code", () => {
       .sort();
     // JavaScript shares the TypeScript parser but is advertised separately.
     expect(documented).toEqual([...listLanguages(), "javascript"].sort());
+  });
+
+  it("README lists exactly the extensions each descriptor claims", () => {
+    // One descriptor may be advertised as two rows: JavaScript shares the
+    // TypeScript parser but earns its own line in the table.
+    const aliasRows: Record<string, string[]> = { typescript: ["javascript"] };
+    const rows = tableRows(section(doc("README.md"), "## Implemented languages"));
+    for (const descriptor of listLanguageDescriptors()) {
+      const names = [descriptor.name, ...(aliasRows[descriptor.name] ?? [])];
+      const documented = names
+        .flatMap((name) => rows.find((cells) => (cells[0] ?? "").toLowerCase() === name)?.[1] ?? "")
+        .join(" ")
+        .match(/\.[a-z0-9]+/gi)
+        ?.map((token) => token.slice(1).toLowerCase())
+        .sort();
+      expect(documented, descriptor.name).toEqual([...descriptor.extensions].sort());
+    }
   });
 
   it("documents what is not modelled for every language", () => {

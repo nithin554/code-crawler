@@ -6,7 +6,7 @@ import type {
   FieldInfo,
   ImportInfo,
   InjectionPoint,
-  LanguageConfig,
+  LanguageDescriptor,
   MethodInfo,
   ParsedFile,
   ReflectiveRef,
@@ -136,9 +136,12 @@ interface TypeRange {
   id: string;
 }
 
-export const typescriptConfig: LanguageConfig = {
+export const typescriptConfig: LanguageDescriptor = {
   name: "typescript",
   extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
+  resolver: "module",
+  frameworks: ["nestjs", "nestjs-param", "ts-di", "spring", "express", "fastify"],
+  fixture: ["typescript", "sample"],
   loadGrammar() {
     return loadGrammar("@vscode/tree-sitter-wasm", "wasm/tree-sitter-typescript.wasm");
   },

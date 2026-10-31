@@ -10,6 +10,7 @@ import {
   findRoutes,
 } from "../src/graph/queries.js";
 import { GraphStore } from "../src/graph/store.js";
+import { getLanguageConfig, listLanguages } from "../src/parser/languages/index.js";
 
 /**
  * Language conformance contract.
@@ -266,5 +267,22 @@ describe("java language features", () => {
       {}
     );
     expect(edgePairs("ANNOTATED_WITH")).toContain("src.controller.OrderController#read -> @Get");
+  });
+});
+
+/**
+ * The conformance suite is the definition of "supported", so it must not drift
+ * from the registry: a language that ships without a contract row, or a row
+ * pointing at a different fixture than its descriptor, fails here.
+ */
+describe("conformance coverage", () => {
+  it("has a contract row for every registered language", () => {
+    expect(CONTRACTS.map((c) => c.name).sort()).toEqual(listLanguages().sort());
+  });
+
+  it("crawls the fixture each descriptor declares", () => {
+    for (const contract of CONTRACTS) {
+      expect(getLanguageConfig(contract.name)?.fixture).toEqual(contract.dir);
+    }
   });
 });

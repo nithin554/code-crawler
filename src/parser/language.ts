@@ -274,3 +274,20 @@ export interface LanguageConfig {
   /** Extract structural entities + raw call sites from source text. */
   parseFile(source: string, filePath: string, context?: ParseContext): Promise<ParsedFile>;
 }
+
+/**
+ * Everything that makes a language a language. One descriptor per language,
+ * declared next to its parser, so adding language #5 is one config module, one
+ * resolver module, and one fixture directory — no edits to existing languages.
+ */
+export interface LanguageDescriptor extends LanguageConfig {
+  /** Registry key of the call resolver in `src/resolver/registry.ts`. */
+  resolver: string;
+  /**
+   * Frameworks whose conventions this parser recognises, keyed by the import or
+   * annotation evidence that triggers detection.
+   */
+  frameworks: string[];
+  /** Conformance fixture directory, as segments relative to `tests/fixtures`. */
+  fixture: string[];
+}
