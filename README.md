@@ -295,8 +295,14 @@ workspace roots, or the project this session already selected, and keeps that gr
 `<project>/.code-crawler/index.db` — one database per repository, the same layout the CLI
 uses. `CODECRAWLER_DB` still pins a single file when you want one.
 
-The same skill is published to [ClawHub](https://clawhub.ai) as `code-crawler`, versioned by
-the release tag: release `v0.1.67` publishes `code-crawler@0.1.67`.
+The same skill is published to [ClawHub](https://clawhub.ai) as `code-crawler`, and the
+plugin is published there too:
+
+- **Skill** — `clawhub install code-crawler`. ClawHub owns this version: the publish workflow
+  patches whatever ClawHub already has, starting at `1.0.0`, so it does not track the npm
+  version.
+- **Plugin** — published as the `code-crawler` bundle plugin, versioned from the release tag:
+  release `v0.1.67` publishes the bundle at `0.1.67`.
 
 ### One command
 

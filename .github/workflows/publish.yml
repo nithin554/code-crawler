@@ -209,10 +209,30 @@ jobs:
     # and writes nothing.
     permissions:
       contents: read
-    # Publishes the skill at the tag created above, so the ClawHub version
-    # matches the npm package. It depends on the tests only, not on the npm
-    # environment approvals, so a ClawHub fix does not need an npm release.
+    # Publishes the skill from the tag created above, so the bytes shipped are the
+    # released commit's. ClawHub assigns the skill version itself, so it is not
+    # the npm version. It depends on the tests only, not on the npm environment
+    # approvals, so a ClawHub fix does not need an npm release.
     uses: ./.github/workflows/publish-clawhub.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit
+
+  publish-clawhub-plugin:
+    name: publish-clawhub-plugin
+    needs:
+      - create-release
+      - build-and-test
+    if: github.actor != 'dependabot[bot]'
+    # Same reasoning as publish-clawhub: the grant lives on the job because a
+    # called workflow can only narrow it, and this one reads the repository and
+    # this run's artifacts and writes nothing.
+    permissions:
+      contents: read
+      actions: read # The upstream workflow uploads its inspector and publish reports
+    # The bundle is static JSON, so it could publish without waiting on a build,
+    # but gating on the tests keeps a broken commit from reaching the catalog.
+    uses: ./.github/workflows/publish-plugin.yml
     with:
       tag: ${{ needs.create-release.outputs.tag }}
     secrets: inherit

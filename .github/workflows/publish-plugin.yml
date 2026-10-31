@@ -1,0 +1,149 @@
+name: Publish Plugin to ClawHub
+
+# Publishes plugins/code-crawler with the official openclaw/clawhub reusable
+# workflow, so the publish path is the one ClawHub maintains rather than a copy
+# of it kept in this repository.
+#
+# The bundle is Claude-format (it carries a `.claude-plugin/plugin.json`), which
+# upstream classifies as the `bundle-plugin` family. That family is the only one
+# ClawHub can publish without requiring `openclaw.plugin.json`, a `package.json`
+# and a matching build output in the bundle, which is why the payload is a thin
+# manifest rather than the crawler itself: the plugin resolves its server through
+# `npx -y @nithin554/code-crawler`, so the npm release supplies the code.
+#
+# "Build & Publish" tags every push to main and calls this one with that tag, so
+# the plugin version tracks the npm release. `workflow_dispatch` publishes by
+# hand (dry run by default) and is how a previously failed publish is retried.
+#
+# Pinned to a release tag because upstream has no `v1` floating ref. One tag
+# serves both workflows: skill-publish first appears in v0.23.0, and
+# package-publish only understands `.claude-plugin` bundles from v0.24.0 on
+# (v0.12.0 wanted an `openclaw.bundle.json`), so v0.24.1 is the oldest tag that
+# publishes everything this repository ships.
+#
+# Requires a CLAWHUB_TOKEN repository secret. Upstream reads the secret under
+# the name `clawhub_token`, so it is renamed at this boundary; `secrets: inherit`
+# would not rename it.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.68"
+        type: string
+        required: true
+      dry_run:
+        description: "Validate the bundle without publishing it"
+        type: boolean
+        required: false
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.68"
+        type: string
+        required: true
+      dry_run:
+        description: "Validate the bundle without publishing it"
+        type: boolean
+        required: false
+        default: true
+
+permissions: {}
+
+jobs:
+  # The reusable workflow takes the version as a plain string and cannot strip a
+  # leading `v` itself, and no expression function does that, so the tag is
+  # normalised in a throwaway job before the publish job can run.
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Derive the package version from the tag
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?(\+[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::cannot derive a package version from tag '$TAG'"
+            exit 1
+          fi
+          echo "Publishing plugins/code-crawler@$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: publish
+    needs: prepare
+    # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.24.1
+    # A called workflow can only narrow the caller's token, so every grant the
+    # upstream workflow needs has to be made here: it reads this run's artifacts,
+    # checks the repository out, and mints the OIDC token it pins its own CLI
+    # source with.
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    # Never cancel a run that is mid-upload.
+    concurrency:
+      group: clawhub-publish-plugin
+      cancel-in-progress: false
+    with:
+      # A path that exists in the workspace is published as a local folder, so
+      # the bundle comes from the commit under test, not from the default branch.
+      source: ./plugins/code-crawler
+      family: bundle-plugin
+      owner: nithin554
+      version: ${{ needs.prepare.outputs.version }}
+      tags: latest
+      changelog: ${{ format('Release {0}', inputs.tag) }}
+      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
+      # A local-folder publish cannot infer this, so the release is attributed to
+      # the commit and tag it was built from.
+      source_repo: ${{ github.repository }}
+      source_commit: ${{ github.sha }}
+      source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
+      dry_run: ${{ inputs.dry_run }}
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+
+  # The registry answers a burst of writes with "Too many writes in a short
+  # period of time", and upstream makes exactly one attempt, so a throttle would
+  # otherwise turn into a failed release. One retry outlasts the advertised
+  # reset window; a dry run never writes, so it never needs one.
+  publish-retry:
+    name: publish (retry)
+    needs:
+      - prepare
+      - publish
+    # Only a failed publish is worth retrying; a failed `prepare` already
+    # reported the bad tag and would just fail again.
+    if: needs.publish.result == 'failure' && !inputs.dry_run
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.24.1
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    concurrency:
+      group: clawhub-publish-plugin
+      cancel-in-progress: false
+    with:
+      source: ./plugins/code-crawler
+      family: bundle-plugin
+      owner: nithin554
+      version: ${{ needs.prepare.outputs.version }}
+      tags: latest
+      changelog: ${{ format('Release {0}', inputs.tag) }}
+      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
+      source_repo: ${{ github.repository }}
+      source_commit: ${{ github.sha }}
+      source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
+      dry_run: false
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

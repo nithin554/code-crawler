@@ -269,8 +269,10 @@ the CLI. One
 plugin install serves every repository you open, each with its own database. Set
 `CODECRAWLER_DB` to pin a single file instead.
 
-The same skill is published to ClawHub as `code-crawler`, versioned by the release tag:
-release `v0.1.67` publishes `code-crawler@0.1.67`.
+The same skill is published to ClawHub as `code-crawler`
+(`clawhub install code-crawler`); ClawHub owns that version, so it does not track the npm
+version. The plugin is published there as well, versioned by the release tag: release
+`v0.1.67` publishes the bundle at `0.1.67`.
 
 ---
 

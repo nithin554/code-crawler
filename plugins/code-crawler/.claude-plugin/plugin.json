@@ -1,0 +1,20 @@
+{
+  "name": "code-crawler",
+  "displayName": "Code Crawler",
+  "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase",
+  "author": {
+    "name": "nithin554",
+    "url": "https://github.com/nithin554"
+  },
+  "homepage": "https://nithin554.github.io/code-crawler/",
+  "repository": "https://github.com/nithin554/code-crawler",
+  "license": "MIT",
+  "keywords": [
+    "code-analysis",
+    "call-graph",
+    "static-analysis",
+    "mcp",
+    "dead-code",
+    "impact-analysis"
+  ]
+}
