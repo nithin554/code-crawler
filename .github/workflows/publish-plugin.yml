@@ -166,6 +166,11 @@ jobs:
       - pack
     runs-on: ubuntu-latest
     environment: clawhub-publish
+    # A failed first attempt is not a failed release while the retry is still
+    # available, so the upload step tolerates its own failure and reports it
+    # here. A dry run has no retry behind it, so it keeps failing loudly.
+    outputs:
+      result: ${{ steps.publish.outcome }}
     # The registry is only written through the credential in the environment,
     # so the job itself needs nothing beyond reading this run's artifact.
     permissions:
@@ -201,7 +206,11 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_ENV, `CLAWHUB_CONFIG_PATH=${file}\n`);
           '
       - name: Publish the bundle
+        id: publish
         shell: bash
+        # Tolerated for a release so the retry can take over; a dry run has no
+        # retry, so a failure there must still fail the run.
+        continue-on-error: ${{ !inputs.dry_run }}
         env:
           TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -247,9 +256,11 @@ jobs:
       - prepare
       - pack
       - publish
-    # Only a failed publish is worth retrying; a failed `prepare` already
-    # reported the bad tag and would just fail again.
-    if: needs.publish.result == 'failure' && !inputs.dry_run
+    # Only a failed upload is worth retrying; a failed `prepare` already
+    # reported the bad tag and would just fail again. The publish job tolerates
+    # its step failure to keep the run alive, so it reports it through
+    # `outputs.result` rather than failing the job.
+    if: needs.publish.outputs.result == 'failure' && !inputs.dry_run
     runs-on: ubuntu-latest
     environment: clawhub-publish
     permissions:

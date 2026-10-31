@@ -266,6 +266,29 @@ describe("ClawHub publishing", () => {
     }
   });
 
+  // A failed first attempt is only fatal when the retry fails too, otherwise a
+  // throttle on attempt one would mark an already published release as a failed
+  // run. A dry run has no retry behind it, so it must keep failing loudly.
+  it("lets a successful retry turn a failed first attempt into a passing run", () => {
+    const plugin = workflow(".github/workflows/publish-plugin.yml");
+    const publish = jobBlock(plugin, "publish");
+    // The job has to stay alive for the retry to be reached at all.
+    expect(publish).not.toMatch(/^ {4}continue-on-error:/m);
+    expect(publish).toMatch(/^ {6}result: \$\{\{ steps\.publish\.outcome \}\}$/m);
+
+    const step = publish.slice(publish.indexOf("      - name: Publish the bundle"));
+    expect(step).toMatch(/^ {8}id: publish$/m);
+    expect(step).toMatch(/^ {8}continue-on-error: \$\{\{ !inputs\.dry_run \}\}$/m);
+
+    const retry = jobBlock(plugin, "publish-retry");
+    expect(retry).toMatch(
+      /^ {4}if: needs\.publish\.outputs\.result == 'failure' && !inputs\.dry_run$/m
+    );
+    // A failed retry is the last word, so it must not be tolerated as well.
+    expect(retry).not.toMatch(/^ {4}continue-on-error:/m);
+    expect(retry).not.toMatch(/^ {8}continue-on-error:/m);
+  });
+
   // Nothing but `main` may write to the registries. A job that calls a reusable
   // workflow cannot declare an environment, so the skill publishers sit behind a
   // plain gate job; the plugin jobs declare the environment themselves, which is
