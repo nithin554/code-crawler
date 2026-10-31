@@ -307,7 +307,11 @@ plugin is published there too:
 
 Publishing is restricted to `main`. Both jobs deploy through the `clawhub-publish`
 environment, whose deployment branch policy rejects any other ref, so a manual dispatch from
-a feature branch stops before it can upload.
+a feature branch stops before it can upload. The `CLAWHUB_TOKEN` secret lives on that
+environment rather than on the repository, so a publish can only read it after the gate has
+accepted the ref; the environment-bound `guard` job is what passes it to the publish call,
+because a job that calls a reusable workflow cannot declare an environment and therefore
+cannot read an environment secret itself.
 
 ### One command
 
