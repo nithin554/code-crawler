@@ -64,7 +64,7 @@ MCP client:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODECRAWLER_DB` | `~/.code-crawler/index.db` | SQLite file that holds the graph |
+| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | SQLite file that holds the graph |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Directories skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default cap on result lists |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
@@ -75,9 +75,18 @@ MCP client:
 Invalid values are never fatal: booleans fall back to their default, integers are clamped
 to their range, and both emit a one-line warning on stderr.
 
-Use a separate `CODECRAWLER_DB` per repository. A database holds exactly one project:
-crawling a different path fails with a `clear_index` hint rather than replacing the existing
-index. Re-crawling the same database is safe and cheap: file-scoped upserts replace only
+`CODECRAWLER_DB` is resolved for you: the server walks up from its working directory to the
+nearest project root (`.git`, `package.json`, `pom.xml`, `build.gradle`, `pyproject.toml`,
+`setup.py`, `requirements.txt`, `go.mod`, `Cargo.toml`) and indexes into
+`<project>/.code-crawler/index.db`, creating the directory on first use. Each repository
+therefore gets its own file with nothing to configure, and a client launched in `src/` finds
+the file the repo root created. When no project encloses the working directory — Claude
+Desktop, for instance, starts from its own install directory — the fallback is
+`~/.code-crawler/index.db`. Set `CODECRAWLER_DB` to override the resolution entirely.
+
+A database still holds exactly one project: crawling a different path into a database that
+already tracks one fails with a `clear_index` hint rather than replacing the existing index.
+Re-crawling the same database is safe and cheap: file-scoped upserts replace only
 what changed. A full crawl also removes files that disappeared; scoped crawls (`fileFilter`
 or a forced `language`) skip stale removal and report `pruned: false`. When something outside
 the project rewrote a file but restored its size and mtime, the manifest cannot see the edit —
@@ -134,6 +143,11 @@ npx add-mcp @nithin554/code-crawler \
 and more (`npx add-mcp list-agents` lists them all). `-g` writes user-level config; drop it
 to register for the current project only. The rest of this section is the hand-written
 equivalent, useful when you want to inspect or version the file.
+
+`--env CODECRAWLER_DB` is optional: the server indexes into `<project>/.code-crawler/index.db`,
+created on first use. Pin the variable only to put the file somewhere else, or when the
+client's working directory is not the project. Every `CODECRAWLER_*` variable is optional in
+the same way.
 
 Claude Desktop (`claude_desktop_config.json`):
 

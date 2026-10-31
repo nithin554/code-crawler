@@ -55,14 +55,24 @@ accepts `claude-code`, `cursor`, `vscode`, `claude-desktop`, `codex`, `opencode`
 about twenty more — `npx add-mcp list-agents` prints the list. `-g` writes user-level config;
 drop it to register for the current project only. Repeat `--args` and `--env` once per value.
 
+`--env CODECRAWLER_DB` is optional: the server indexes into `<project>/.code-crawler/index.db`
+by default. Pin it when you want the file elsewhere, or when the client's working directory
+is not the project.
+
 Three things decide whether the graph is usable:
 
-- **`CODECRAWLER_DB`** is the SQLite file holding the graph, default
-  `~/.code-crawler/index.db`. **A database holds exactly one project** — crawling a
-  different path fails with a `clear_index` hint rather than overwriting it. Give each
-  repository its own file.
+- **`CODECRAWLER_DB`** is the SQLite file holding the graph. The default needs no
+  configuration: the server walks up from its working directory to the nearest project root
+  (`.git`, `package.json`, `pom.xml`, `build.gradle`, `pyproject.toml`, `setup.py`,
+  `requirements.txt`, `go.mod`, `Cargo.toml`) and uses `<project>/.code-crawler/index.db`, so
+  **each repository gets its own file**. With no enclosing project it falls back to
+  `~/.code-crawler/index.db`. A database still holds exactly one project — crawling a
+  different path into one fails with a `clear_index` hint rather than overwriting it.
+- **Never share one `CODECRAWLER_DB` across repositories.** Do that and the second project's
+  crawl hits the one-project error above.
 - **Use absolute paths.** Clients launch servers from an unpredictable working directory,
-  so a relative `CODECRAWLER_DB` or a relative project root lands somewhere unexpected.
+  so a relative `CODECRAWLER_DB` or a relative project root lands somewhere unexpected —
+  and the default resolution follows the cwd you may not have chosen.
 - **Config is all environment variables**, identical for the CLI and the client:
   `CODECRAWLER_DB`, `CODECRAWLER_EXCLUDE_DIRS`, `CODECRAWLER_DEFAULT_LIMIT`,
   `CODECRAWLER_MAX_DEPTH`, `CODECRAWLER_MAX_FILE_BYTES`, `CODECRAWLER_RESPECT_GITIGNORE`,

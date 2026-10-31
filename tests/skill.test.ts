@@ -224,6 +224,61 @@ describe("skill install instructions", () => {
     expect(skill).toContain("clear_index");
   });
 
+  it("says that CODECRAWLER_DB is optional wherever the flag is shown", () => {
+    // The one-liners pass --env CODECRAWLER_DB, which reads as mandatory. It is not:
+    // src/config.ts resolves <project>/.code-crawler/index.db from the cwd when the
+    // variable is unset or empty, and store.ts creates the directory. Saying so next to
+    // the command is what stops a reader hunting for a value they do not need.
+    const configSrc = read(path.join(ROOT, "src", "config.ts"));
+    const dirName = /export const DB_DIR_NAME = "([^"]+)";/.exec(configSrc)?.[1];
+    const fileName = /export const DB_FILE_NAME = "([^"]+)";/.exec(configSrc)?.[1];
+    expect(dirName, "DB_DIR_NAME is unreadable from src/config.ts").toBeTruthy();
+    expect(fileName, "DB_FILE_NAME is unreadable from src/config.ts").toBeTruthy();
+    const defaultRelative = `${dirName}/${fileName}`;
+
+    const surfaces = [
+      "README.md",
+      "USAGE.md",
+      path.join("skills", "code-crawler", "SKILL.md"),
+      path.join("docs", "index.html"),
+      path.join("docs", "skill.html"),
+      path.join("docs", "usage.html"),
+    ];
+    for (const surface of surfaces) {
+      const text = read(path.join(ROOT, surface));
+      const at = text.indexOf("--env CODECRAWLER_DB=");
+      if (at === -1) continue;
+      // Adjacent, not merely somewhere on the page: a stray "optional" in a config
+      // section three screens away does not help the reader of this command.
+      const nearby = text.slice(Math.max(0, at - 900), at + 900).toLowerCase();
+      expect(nearby, `${surface} passes CODECRAWLER_DB without saying it is optional`).toContain(
+        "optional"
+      );
+      expect(
+        nearby,
+        `${surface} does not name the per-project default ${defaultRelative}`
+      ).toContain(defaultRelative.toLowerCase());
+    }
+  });
+
+  it("documents the database default as one file per project", () => {
+    // The whole point of the resolution rule: a reader should not be told to configure
+    // anything to keep two repositories apart.
+    for (const surface of [
+      "README.md",
+      "USAGE.md",
+      path.join("skills", "code-crawler", "SKILL.md"),
+    ]) {
+      const text = read(path.join(ROOT, surface)).toLowerCase();
+      expect(text, `${surface} never mentions .code-crawler/index.db`).toContain(
+        ".code-crawler/index.db"
+      );
+      expect(text, `${surface} does not say each project gets its own file`).toMatch(
+        /each (?:repository|project)[^.]{0,80}(?:own file|own database)/
+      );
+    }
+  });
+
   it("only names environment variables the config actually reads", () => {
     const config = read(path.join(ROOT, "src", "config.ts"));
     const real = new Set(config.match(/CODECRAWLER_[A-Z_]+/g) ?? []);

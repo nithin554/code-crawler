@@ -95,7 +95,8 @@ and answers them with bounded recursive SQL queries.
 - **Versioned schema with automatic migration** — the database carries a schema version and
   upgrades itself in place on open. A database written by a newer build is rejected with a
   clear message instead of being read as if the shape were known.
-- **One project per database** — indexing a different project into the same database fails
+- **A database per project** — the index lives in `<project>/.code-crawler/index.db`, so two
+  repositories can never collide. Pointing a populated database at a different project fails
   with a `clear_index` hint instead of silently wiping the first index.
 - **Analytics** — hotspots (fan-in/fan-out/advice counts) and dead-code candidates.
 - **Self-contained**: single SQLite file, no external services.
@@ -130,7 +131,7 @@ Environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODECRAWLER_DB` | `~/.code-crawler/index.db` | Database path |
+| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | Database path. Resolved from the cwd upward, so each project gets its own file; falls back to `~/.code-crawler/index.db` when no project encloses the cwd |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Dirs skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
@@ -269,7 +270,10 @@ npx add-mcp @nithin554/code-crawler \
 ```
 
 The server name `code-crawler` is derived from the package. `-g` writes user-level config;
-drop it to register for the current project only.
+drop it to register for the current project only. `--env CODECRAWLER_DB` is optional — the
+server indexes into `<project>/.code-crawler/index.db`, created on first use. Pin it only to
+put the file somewhere else, or because the client's working directory is not the project
+(Claude Desktop starts outside your repo, so there the default is `~/.code-crawler/index.db`).
 
 ### MCP Registry / `npx`
 

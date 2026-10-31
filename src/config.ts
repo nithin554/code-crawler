@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -8,7 +9,63 @@ import path from "node:path";
  * point the server at different databases without code changes.
  */
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".code-crawler", "index.db");
+/** Directory created inside a project to hold its database. */
+export const DB_DIR_NAME = ".code-crawler";
+/** Database file name inside that directory. */
+export const DB_FILE_NAME = "index.db";
+
+/**
+ * Files and directories that identify a project root. A git checkout is the common case;
+ * the build files cover repositories whose history is not present.
+ */
+const PROJECT_MARKERS = [
+  ".git",
+  "package.json",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "pyproject.toml",
+  "setup.py",
+  "requirements.txt",
+  "go.mod",
+  "Cargo.toml",
+];
+
+/** The database that belongs to one project: `<projectRoot>/.code-crawler/index.db`. */
+export function databasePathFor(projectRoot: string): string {
+  return path.join(path.resolve(projectRoot), DB_DIR_NAME, DB_FILE_NAME);
+}
+
+/** The database used when no project can be determined, so each caller still gets a file. */
+export function userDatabasePath(): string {
+  return path.join(os.homedir(), DB_DIR_NAME, DB_FILE_NAME);
+}
+
+/**
+ * Database to use when `CODECRAWLER_DB` is unset, resolved from `start` (the process cwd
+ * unless a caller knows better).
+ *
+ * Walking up from the cwd gives each repository its own file, and keeps a client launched
+ * in `src/` on the file the repo root created. The nearest match wins so a database is
+ * never taken from above a project root.
+ *
+ * With no database and no project marker anywhere above it, the user-wide path is the
+ * fallback: a client spawned with an unrelated cwd (Claude Desktop launches from its own
+ * install directory) must not scatter databases into arbitrary directories.
+ */
+export function defaultDatabasePath(start: string = process.cwd()): string {
+  let dir = path.resolve(start);
+  for (;;) {
+    const candidate = path.join(dir, DB_DIR_NAME, DB_FILE_NAME);
+    if (fs.existsSync(candidate)) return candidate;
+    if (PROJECT_MARKERS.some((marker) => fs.existsSync(path.join(dir, marker)))) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return userDatabasePath();
+    dir = parent;
+  }
+}
 
 function warn(message: string): void {
   process.stderr.write(`code-crawler: ${message}\n`);
@@ -64,14 +121,17 @@ export interface Config {
   helpfulErrors: boolean;
 }
 
-export function loadConfig(): Config {
+export function loadConfig(options: { projectRoot?: string } = {}): Config {
+  const fallback = options.projectRoot
+    ? databasePathFor(options.projectRoot)
+    : defaultDatabasePath();
   return {
-    dbPath: envStr("CODECRAWLER_DB", DEFAULT_DB_PATH),
+    dbPath: envStr("CODECRAWLER_DB", fallback),
     excludeDirs: [
       ...new Set(
         envStr(
           "CODECRAWLER_EXCLUDE_DIRS",
-          ".git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage"
+          ".git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage,.code-crawler"
         )
           .split(",")
           .map((s) => s.trim())

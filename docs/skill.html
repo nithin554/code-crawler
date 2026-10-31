@@ -203,8 +203,12 @@ npm install @nithin554/code-crawler
             <code>-a</code> accepts <code>claude-code</code>, <code>cursor</code>,
             <code>vscode</code>, <code>claude-desktop</code>, <code>codex</code>,
             <code>opencode</code>, <code>zed</code> and more &mdash;
-            <code>npx add-mcp list-agents</code> lists them. Full details in
-            <a href="usage.html#registry">Usage</a>.
+            <code>npx add-mcp list-agents</code> lists them. <code>--env CODECRAWLER_DB</code>
+            is optional: the server indexes into
+            <code>&lt;project&gt;/.code-crawler/index.db</code> by default, so each repository
+            gets its own file. Pin it only to move the file, or when the client's working
+            directory is not the project.
+            Full details in <a href="usage.html#registry">Usage</a>.
           </p>
         </div>
       </section>

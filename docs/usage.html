@@ -240,9 +240,9 @@ npx codecrawler serve</code></pre>
 
           <div class="note warn">
             <p>
-              One database per project is the safest default. If you index several repos,
-              give each its own <code>CODECRAWLER_DB</code> path — otherwise the second
-              crawl replaces the first project's file set.
+              Do not point two repositories at one <code>CODECRAWLER_DB</code>. The default
+              already gives each project its own file, and a shared one makes the second
+              crawl fail with a <code>clear_index</code> hint.
             </p>
           </div>
         </div>
@@ -273,7 +273,10 @@ npx codecrawler serve</code></pre>
               <code>-a</code> picks the client &mdash; <code>npx add-mcp list-agents</code>
               prints every accepted name &mdash; and <code>-g</code> writes user-level
               config; drop it to register for the current project only. Repeat
-              <code>--args</code> and <code>--env</code> once per value.
+              <code>--args</code> and <code>--env</code> once per value. <code>--env</code>
+              is optional too: without <code>CODECRAWLER_DB</code> the server resolves
+              <code>&lt;project&gt;/.code-crawler/index.db</code> from its working directory
+              and creates the directory on first use.
             </p>
           </div>
 
@@ -466,12 +469,15 @@ npx codecrawler serve</code></pre>
               <tbody>
                 <tr>
                   <td><code>CODECRAWLER_DB</code></td>
-                  <td><code>~/.code-crawler/index.db</code></td>
-                  <td>Path to the SQLite graph database. Created on first use.</td>
+                  <td><code>&lt;project&gt;/.code-crawler/index.db</code></td>
+                  <td>Path to the SQLite graph database. Resolved by walking up from the working
+                  directory to the nearest project root, so each project gets its own file;
+                  <code>~/.code-crawler/index.db</code> when no project encloses it. Created on
+                  first use.</td>
                 </tr>
                 <tr>
                   <td><code>CODECRAWLER_EXCLUDE_DIRS</code></td>
-                  <td><code>.git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage</code></td>
+                  <td><code>.git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage,.code-crawler</code></td>
                   <td>Comma-separated directory names skipped during crawl.</td>
                 </tr>
                 <tr>
@@ -632,8 +638,11 @@ npx codecrawler serve</code></pre>
               <tbody>
                 <tr>
                   <td>Every tool says “not found in the index”</td>
-                  <td>The server is using a different database path than the crawl.</td>
-                  <td>Pin <code>CODECRAWLER_DB</code> in the client <code>env</code> block.</td>
+                  <td>The server resolved a different database than the crawl did. It walks up
+                  from its working directory, and the client chooses that directory.</td>
+                  <td>Compare the <code>db</code> field in <code>index_status</code> with what
+                  you crawled; pin <code>CODECRAWLER_DB</code> in the client <code>env</code>
+                  block to force one path.</td>
                 </tr>
                 <tr>
                   <td>Low resolved-call count</td>
