@@ -149,18 +149,35 @@ jobs:
             exit 0
           fi
 
-          # A re-run of a tag whose publish only partially failed must not turn
-          # into a failure on the version that is already there.
-          if OUTPUT="$(npx -y clawhub@latest "${ARGS[@]}" 2>&1)"; then
-            printf '%s\n' "${OUTPUT}"
-            exit 0
-          fi
+          # The registry answers a burst of writes with a rate-limit error and
+          # tells the caller when it resets, so a single attempt turns an
+          # ordinary throttle into a failed release. Retry with a backoff that
+          # outlasts the advertised reset. A re-run of a tag whose publish
+          # partially succeeded must also not fail on the version that is
+          # already there.
+          for attempt in 1 2 3; do
+            if OUTPUT="$(npx -y clawhub@latest "${ARGS[@]}" 2>&1)"; then
+              printf '%s\n' "${OUTPUT}"
+              exit 0
+            fi
 
-          printf '%s\n' "${OUTPUT}"
-          if printf '%s' "${OUTPUT}" | grep -qi "already exists"; then
-            echo "::notice::code-crawler@${VERSION} is already on ClawHub; nothing to publish."
-            exit 0
-          fi
+            printf '%s\n' "${OUTPUT}"
+            if printf '%s' "${OUTPUT}" | grep -qi "already exists"; then
+              echo "::notice::code-crawler@${VERSION} is already on ClawHub; nothing to publish."
+              exit 0
+            fi
+
+            if [ "${attempt}" -ge 3 ]; then
+              break
+            fi
+            if ! printf '%s' "${OUTPUT}" | grep -qiE "too many writes|rate.?limit|try again|429"; then
+              break
+            fi
+
+            DELAY=$((attempt * 45))
+            echo "::warning::ClawHub throttled the publish (attempt ${attempt}); retrying in ${DELAY}s"
+            sleep "${DELAY}"
+          done
 
           echo "::error::ClawHub rejected code-crawler@${VERSION}"
           exit 1

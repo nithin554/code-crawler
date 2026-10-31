@@ -203,6 +203,16 @@ describe("ClawHub publishing", () => {
     expect(workflow).toContain("tag: ${{ needs.create-release.outputs.tag }}");
   });
 
+  // The registry answers a burst of writes with "Too many writes in a short
+  // period of time", so a single attempt turns an ordinary throttle into a
+  // failed release.
+  it("retries a throttled publish instead of failing the release", () => {
+    const workflow = read(".github/workflows/publish-clawhub.yml");
+    expect(workflow).toMatch(/for attempt in 1 2 3; do/);
+    expect(workflow).toMatch(/too many writes/i);
+    expect(workflow).toMatch(/sleep "\$\{DELAY\}"/);
+  });
+
   // A reusable workflow inherits the GITHUB_TOKEN permissions of the job that
   // calls it, so the grant has to be on the caller, not only in the called file.
   it("grants the called publish job a read-only token", () => {
