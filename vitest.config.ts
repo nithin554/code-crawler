@@ -11,15 +11,21 @@ export default defineConfig({
       // Floors sit just under the measured baseline so they catch regressions
       // without failing on incidental churn. Raise them when coverage climbs.
       thresholds: {
-        lines: 84,
-        statements: 79,
-        functions: 88,
-        branches: 61,
+        lines: 87,
+        statements: 82,
+        functions: 89,
+        branches: 64,
         "src/graph/**": {
           lines: 92,
           statements: 88,
           functions: 88,
           branches: 72,
+        },
+        "src/resolver/**": {
+          lines: 85,
+          statements: 80,
+          functions: 86,
+          branches: 69,
         },
         "src/**/crawler.ts": {
           lines: 92,
