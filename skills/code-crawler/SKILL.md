@@ -8,6 +8,54 @@ description: Answer questions about code relationships in an indexed repository 
 A SQLite property graph of a codebase, exposed as 27 MCP tools. The graph is built
 once by a crawl, then queried cheaply many times.
 
+## Getting the tools
+
+**Check first.** If no `code-crawler` tools appear in your tool list, the server is not
+registered and nothing else in this skill will run. Say so instead of falling back to
+`grep` — and ask before editing a client config file, which is the user's machine
+state, not yours.
+
+The server is the npm package `@nithin554/code-crawler` and needs Node.js ≥ 22.12. Every
+stdio MCP client takes the same command/args/env triple:
+
+```json
+{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler", "serve"],
+      "env": { "CODECRAWLER_DB": "/absolute/path/to/index.db" }
+    }
+  }
+}
+```
+
+`npx -y` needs no prior install. If the package is already installed globally, use
+`"command": "codecrawler"` with `"args": ["serve"]`. From a source checkout, point
+`"command": "node"` at `dist/index.js`, keeping `"args": ["serve"]`. `serve` is the default
+subcommand, so `args` may omit it.
+
+Three things decide whether the graph is usable:
+
+- **`CODECRAWLER_DB`** is the SQLite file holding the graph, default
+  `~/.code-crawler/index.db`. **A database holds exactly one project** — crawling a
+  different path fails with a `clear_index` hint rather than overwriting it. Give each
+  repository its own file.
+- **Use absolute paths.** Clients launch servers from an unpredictable working directory,
+  so a relative `CODECRAWLER_DB` or a relative project root lands somewhere unexpected.
+- **Config is all environment variables**, identical for the CLI and the client:
+  `CODECRAWLER_DB`, `CODECRAWLER_EXCLUDE_DIRS`, `CODECRAWLER_DEFAULT_LIMIT`,
+  `CODECRAWLER_MAX_DEPTH`, `CODECRAWLER_MAX_FILE_BYTES`, `CODECRAWLER_RESPECT_GITIGNORE`,
+  `CODECRAWLER_HELPFUL_ERRORS`. Invalid values are clamped and warned about, never fatal.
+
+Some clients namespace tool names with the server key — `code-crawler-search_symbols`
+rather than `search_symbols`. Same tools, so match on the suffix if the exact name is
+missing.
+
+Once the tools appear, call `index_status` to confirm the server answers, then follow the
+bootstrap below. The CLI shares the database, so `npx -y @nithin554/code-crawler crawl
+/path/to/repo` warms the index ahead of time if you would rather not spend a turn on it.
+
 ## When to reach for it
 
 The graph answers **relationship** questions. Text search answers **location** questions.

@@ -203,7 +203,7 @@ CODECRAWLER_BENCH=1 npm test -- tests/perf.test.ts   # enforce the budgets
 CODECRAWLER_BENCH_LINES=20000 npm run bench          # smaller corpus
 ```
 
-Measured on a Windows dev laptop (Node 20, warm disk cache); absolute numbers vary,
+Measured on a Windows dev laptop with a warm disk cache; absolute numbers vary,
 the *ratios* and the index usage are what matter:
 
 | Phase | Duration | Added | Updated | Unchanged |

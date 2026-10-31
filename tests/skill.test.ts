@@ -135,6 +135,60 @@ describe("skill guidance", () => {
   });
 });
 
+describe("skill install instructions", () => {
+  const pkg = JSON.parse(read(path.join(ROOT, "package.json"))) as {
+    name: string;
+    engines: { node: string };
+    bin: Record<string, string>;
+  };
+
+  it("names the real published package", () => {
+    // A rename would otherwise leave the skill telling agents to run a package that
+    // does not exist.
+    expect(read(SKILL)).toContain(pkg.name);
+  });
+
+  it("documents the real bin command", () => {
+    const commands = Object.keys(pkg.bin);
+    expect(commands.length).toBeGreaterThan(0);
+    const skill = read(SKILL);
+    for (const command of commands) {
+      // Prose uses backticks, the config snippet uses JSON quotes.
+      expect(skill, `${command} is not documented`).toMatch(new RegExp(`[\`"]${command}[\`"]`));
+    }
+  });
+
+  it("states a Node floor that matches engines.node", () => {
+    const required = /(\d+(?:\.\d+)*)/.exec(pkg.engines.node)?.[1];
+    expect(required).toBeDefined();
+    expect(read(SKILL), `Node ${required} is not documented`).toContain(`≥ ${required}`);
+  });
+
+  it("shows a client config block with an absolute database path", () => {
+    const skill = read(SKILL);
+    expect(skill).toContain('"mcpServers"');
+    expect(skill).toContain('"command"');
+    expect(skill).toContain("/absolute/path/to/index.db");
+  });
+
+  it("warns that a database holds exactly one project", () => {
+    // Otherwise an agent points a second repository at the default database and
+    // gets a clear_index error instead of a graph.
+    const skill = read(SKILL).toLowerCase();
+    expect(skill).toContain("exactly one project");
+    expect(skill).toContain("clear_index");
+  });
+
+  it("only names environment variables the config actually reads", () => {
+    const config = read(path.join(ROOT, "src", "config.ts"));
+    const real = new Set(config.match(/CODECRAWLER_[A-Z_]+/g) ?? []);
+    const mentioned = new Set(read(SKILL).match(/CODECRAWLER_[A-Z_]+/g) ?? []);
+    expect(mentioned.size).toBeGreaterThan(0);
+    const bogus = [...mentioned].filter((name) => !real.has(name));
+    expect(bogus).toEqual([]);
+  });
+});
+
 describe("skill reference documents", () => {
   it("documents the confidence bands the resolver actually emits", () => {
     const semantics = read(path.join(SKILL_DIR, "reference", "edge-semantics.md"));

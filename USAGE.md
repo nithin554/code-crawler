@@ -16,7 +16,7 @@ the [README](README.md); if you want to *do* something, start here.
 
 ## 1. Install and index
 
-Requires Node.js ≥ 20.
+Requires Node.js ≥ 22.12.
 
 ```bash
 npm install
@@ -158,6 +158,9 @@ Copy `skills/code-crawler/` into whichever directory your client loads skills fr
 
 The directory is self-contained — `SKILL.md` plus a `reference/` folder — so a plain copy
 is the whole install. No build step, and no dependency on `dist/`.
+
+`SKILL.md` also repeats the client config above and the one-database-per-project rule, so an
+agent that has the skill but not the server can tell the difference and ask for the right fix.
 
 `SKILL.md` carries the discovery `description` and the crawl-first workflow;
 `reference/tools.md` maps all 27 tools to the questions they answer;
