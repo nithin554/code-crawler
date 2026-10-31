@@ -113,14 +113,29 @@ Beyond `CODECRAWLER_EXCLUDE_DIRS`, discovery honors two project-local convention
 
 - **`.gitignore`** in the project root (disable with `CODECRAWLER_RESPECT_GITIGNORE=false`).
   Nested `.gitignore` files are not read yet.
-- **`.crawlerrc`** — optional JSON with gitignore-style globs:
+- **`.crawlerrc`** — optional JSON with gitignore-style globs and module roots:
 
   ```json
-  { "include": ["src/", "packages/core/"], "exclude": ["**/generated/"] }
+  {
+    "include": ["src/", "packages/core/"],
+    "exclude": ["**/generated/"],
+    "moduleRoots": ["src"]
+  }
   ```
 
   A non-empty `include` restricts indexing to matching files. A malformed file is skipped
   with a warning; it never fails the crawl.
+
+  `moduleRoots` names the prefixes module ids start below, so `src/orders/service.ts`
+  becomes `orders.service` rather than `src.orders.service`. Roots are configuration
+  only — never inferred, since inference would renumber an existing index.
+
+- **`tsconfig.json` / `jsconfig.json`** — `compilerOptions.paths` and `baseUrl` become
+  import aliases, following `extends` within the project (not into `node_modules`).
+  `import { placeOrder } from "@app/orders/service"` then resolves to the indexed
+  module instead of being reported as an external dependency. Aliases and module
+  roots are fingerprinted in the index metadata: changing either re-parses the cached
+  files on the next crawl, so stale module ids never survive a config edit.
 
 Files above `CODECRAWLER_MAX_FILE_BYTES` and files whose first 8 KB contain NUL bytes are
 skipped. Every crawl result reports them:
@@ -711,8 +726,9 @@ directory that contains your packages/modules.
 
 **Every Python or TypeScript call is unresolved.**
 Usually the same cause: the module id is wrong because the crawl root is wrong. Also check
-that `tsconfig.json`/package layout does not rely on path aliases that fall outside the
-crawled tree — aliases into an unmapped directory are treated as external.
+that `tsconfig.json` aliases do not point outside the crawled tree — `paths` and `baseUrl`
+inside the project resolve automatically, but a target outside the crawl root is treated
+as external.
 
 **A live method is reported as dead code.**
 It is probably invoked by a framework. Confirm with `find_entry_points` and `find_routes`;

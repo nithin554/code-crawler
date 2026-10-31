@@ -25,6 +25,7 @@ import {
   moduleNodeId,
   resolveRelativeModule,
   tsModuleId,
+  tsModuleIdFromRelative,
 } from "../moduleId.js";
 import {
   childOfType,
@@ -35,6 +36,13 @@ import {
   type TSNode,
   walk,
 } from "../treeSitter.js";
+import { type AliasRule, matchAlias } from "../tsPaths.js";
+
+/** `@/x` and `~/x` resolve from the project root when no tsconfig says otherwise. */
+const CONVENTION_ALIASES: AliasRule[] = [
+  { prefix: "@/", suffix: "", targets: ["*"], wildcard: true },
+  { prefix: "~/", suffix: "", targets: ["*"], wildcard: true },
+];
 
 /**
  * TypeScript / JavaScript parser (TS, TSX, JS, JSX).
@@ -117,7 +125,13 @@ export const typescriptConfig: LanguageDescriptor = {
     if (!tree) throw new Error(`failed to parse ${filePath}`);
     const root = tree.rootNode;
 
-    const moduleId = tsModuleId(filePath, context?.projectRoot);
+    const moduleId = tsModuleId(filePath, context?.projectRoot, context?.moduleRoots);
+    const moduleRoots = context?.moduleRoots;
+    // tsconfig aliases first (longest prefix wins), then the `@/` and `~/`
+    // conventions that bundler setups use without declaring them.
+    const aliasRules: AliasRule[] = [...(context?.aliases ?? []), ...CONVENTION_ALIASES].sort(
+      (a, b) => b.prefix.length - a.prefix.length
+    );
     const moduleTypeId = moduleNodeId(moduleId);
 
     const types: TypeInfo[] = [
@@ -920,16 +934,21 @@ export const typescriptConfig: LanguageDescriptor = {
       if (!sourceNode) return;
       const specifier = stringContent(sourceNode.text);
       const isRelative = specifier.startsWith(".");
-      const aliasMatch = specifier.startsWith("@/") || specifier.startsWith("~/");
+      // A tsconfig alias wins, then the conventions every bundler setup shares,
+      // which are project-root-relative. Both end up as real module ids so the
+      // index can match them exactly instead of guessing from a suffix.
+      const aliasPaths = isRelative ? null : matchAlias(aliasRules, specifier);
       const candidateModule = isRelative
         ? normalizeResolved(
             resolveRelativeModule(moduleId, stripSpecifierExtension(specifier)) ?? specifier
           )
-        : aliasMatch
-          ? specifier.slice(2).replace(/\//g, ".")
+        : aliasPaths
+          ? normalizeResolved(
+              tsModuleIdFromRelative(stripSpecifierExtension(aliasPaths[0] ?? ""), moduleRoots)
+            )
           : specifier;
-      const external = !isRelative && !aliasMatch;
-      const moduleCandidate = aliasMatch ? `?suffix:${candidateModule}` : candidateModule;
+      const external = !isRelative && !aliasPaths;
+      const moduleCandidate = candidateModule;
 
       const clause = childOfType(node, "import_clause");
       if (!clause) {
