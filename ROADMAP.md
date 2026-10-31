@@ -56,9 +56,12 @@ cannot answer.
   `conftest.py`, `functools.wraps` signature preservation.
 - **TypeScript/JavaScript.** Barrel files, `export default`, type-only imports, generics
   on receivers, `satisfies`, React components (JSX return → component) and hooks.
-- **Python route attribution.** `framework` on a `ROUTES` edge currently reports the
-  decorator receiver (`router`), not the library. Attribute `fastapi` / `flask` /
-  `quart` from imported symbols so route reports group by framework.
+- **Python route attribution.** `framework` on a `ROUTES` edge used to report the
+  decorator receiver (`router`), not the library. **done** — attribution now resolves the
+  decorator name against the file's imports, so `@app.get` reports `fastapi`, `flask` or
+  `quart` depending on which one it imported; Quart is a data-only module, FastAPI gained
+  `api_route`/`websocket`/`websocket_route`, and a file with no framework import falls back
+  to the receiver.
 - **Visible failures.** Aggregate resolver `reason` values into a `find_unresolved` tool
   and surface them in `get_node`. Unresolved edges are acceptable; unexplained ones are not.
 - **Optional compiler-assisted mode.** A `tsc` program or `jdtls` bridge behind a flag for

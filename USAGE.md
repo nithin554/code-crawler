@@ -527,7 +527,7 @@ different surface.
 // find_routes()
 { "source": { "id": "module:app.api" },
   "target": { "id": "module:app.api#read_order" },
-  "framework": "router", "httpMethod": "GET",
+  "framework": "fastapi", "httpMethod": "GET",
   "path": "/orders/{order_id}", "line": 13 }
 
 // find_injections()
@@ -550,8 +550,12 @@ different surface.
 `OrderRepository#create` (line 19) and `OrderService#audit` (line 20), then stops at
 `ext:builtins`.
 
-> `framework` on a route names the decorator receiver — `router` here, because the handler
-> hangs off an `APIRouter` instance — while a `Depends()` parameter reports `fastapi`.
+> `framework` on a route names the **library the file imports**, not the object the handler
+> hangs off — `router` is an `APIRouter` instance, but the route reports `fastapi`. That is
+> what lets a route report group by framework across a monorepo. The same decorator name
+> means different libraries in different files: `@app.get` is `fastapi` under
+> `from fastapi import FastAPI`, `flask` under `from flask import Flask`, and `quart` under
+> `from quart import Quart`. A file with no framework import falls back to the receiver.
 
 ### TypeScript — one endpoint, two frameworks
 
@@ -632,7 +636,7 @@ walkthrough.
   `importlib`, `require`, dynamic `import()`, as `REFLECTS` edges.
 - **Dependency injection** — `@Autowired`, NestJS constructor injection, FastAPI `Depends`,
   `dependency-injector`, as `INJECTS` edges.
-- **Framework entry points and routes** — Spring MVC, FastAPI, Flask, NestJS, Express.
+- **Framework entry points and routes** — Spring MVC, FastAPI, Flask, Quart, NestJS, Express.
 - **Control flow on edges** — conditional flags, control-flow kinds, and guard text.
 - **External dependencies** — package-level `external_symbol` nodes with a summary query.
 - **Analytics** — hotspots and dead-code candidates.

@@ -162,6 +162,22 @@ describe("framework annotation meanings", () => {
     expect(injectionIn(nestjs, "Body")).toBe("nestjs-param");
   });
 
+  it("attributes an ambiguous decorator name to the evidenced framework", () => {
+    // `get`, `api_route` and both socket spellings exist in FastAPI, Flask 2.0
+    // and Quart, so only the import separates them. `route` is Flask/Quart
+    // only — FastAPI has no bare `@router.route`.
+    const meaning = (evidence: string, name: string) =>
+      entryPointIn(frameworkScope([imported(evidence)], [evidence]), name)?.module.name;
+
+    for (const name of ["get", "post", "api_route", "websocket", "websocket_route"]) {
+      expect(meaning("fastapi", name), `fastapi ${name}`).toBe("fastapi");
+      expect(meaning("flask", name), `flask ${name}`).toBe("flask");
+      expect(meaning("quart", name), `quart ${name}`).toBe("quart");
+    }
+    expect(meaning("flask", "route")).toBe("flask");
+    expect(meaning("quart", "route")).toBe("quart");
+  });
+
   it("recognises raw parameter markers", () => {
     const python = frameworkScope([imported("fastapi")], ["fastapi", "dependency-injector"], true);
     expect(paramMarkerIn(python, "db: Session = Depends( get_db )")).toBe("fastapi");
