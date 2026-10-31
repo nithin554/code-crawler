@@ -204,11 +204,13 @@ jobs:
       - create-release
       - build-and-test
     if: github.actor != 'dependabot[bot]'
-    # A called workflow inherits this job's GITHUB_TOKEN permissions, so the
-    # grant has to live here: it reads the release tag and checks that tag out,
-    # and writes nothing.
+    # A called workflow can only narrow this job's permissions, never widen them,
+    # so every grant the nested jobs ask for has to be made here or the whole
+    # workflow is rejected as invalid. It reads the release tag and checks that
+    # tag out, and swaps the OIDC token for the ClawHub credential.
     permissions:
       contents: read
+      id-token: write
     # Publishes the skill from the tag created above, so the bytes shipped are the
     # released commit's. ClawHub assigns the skill version itself, so it is not
     # the npm version. It depends on the tests only, not on the npm environment
@@ -224,12 +226,14 @@ jobs:
       - create-release
       - build-and-test
     if: github.actor != 'dependabot[bot]'
-    # Same reasoning as publish-clawhub: the grant lives on the job because a
-    # called workflow can only narrow it, and this one reads the repository and
-    # this run's artifacts and writes nothing.
+    # Same reasoning as publish-clawhub: the grants live on the job because a
+    # called workflow can only narrow them, and this one reads the repository and
+    # this run's artifacts, writes nothing, and needs the OIDC token upstream
+    # exchanges for the ClawHub credential.
     permissions:
       contents: read
       actions: read # The upstream workflow uploads its inspector and publish reports
+      id-token: write
     # The bundle is static JSON, so it could publish without waiting on a build,
     # but gating on the tests keeps a broken commit from reaching the catalog.
     uses: ./.github/workflows/publish-plugin.yml
