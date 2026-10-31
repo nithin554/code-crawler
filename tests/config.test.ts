@@ -1,5 +1,14 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../src/config.js";
+import {
+  databasePathFor,
+  defaultDatabasePath,
+  loadConfig,
+  projectDatabasePath,
+  userDatabasePath,
+} from "../src/config.js";
 
 const ENV_VARS = [
   "CODECRAWLER_DB",
@@ -12,6 +21,15 @@ const ENV_VARS = [
 ] as const;
 
 const saved = new Map<string, string | undefined>();
+
+const temporaries: string[] = [];
+
+/** A throwaway directory tree, removed after each test. */
+function makeRoot(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-config-"));
+  temporaries.push(root);
+  return root;
+}
 
 function setEnv(values: Partial<Record<(typeof ENV_VARS)[number], string>>): void {
   for (const name of ENV_VARS) {
@@ -32,6 +50,9 @@ function captureWarnings(): string[] {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  for (const directory of temporaries.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
   for (const name of ENV_VARS) {
     const value = saved.get(name);
     if (value === undefined) delete process.env[name];
@@ -94,5 +115,125 @@ describe("loadConfig", () => {
   it("deduplicates the excluded directory list", () => {
     setEnv({ CODECRAWLER_EXCLUDE_DIRS: "node_modules, node_modules ,dist,,out" });
     expect(loadConfig().excludeDirs).toEqual(["node_modules", "dist", "out"]);
+  });
+
+  it("never crawls its own database directory", () => {
+    setEnv({});
+    expect(loadConfig().excludeDirs).toContain(".code-crawler");
+  });
+});
+
+describe("project-scoped database", () => {
+  it("places the database inside the project root", () => {
+    setEnv({});
+    const root = makeRoot();
+    fs.mkdirSync(path.join(root, ".git"));
+    fs.mkdirSync(path.join(root, "src", "deep", "deeper"), { recursive: true });
+
+    const expected = path.join(root, ".code-crawler", "index.db");
+    expect(databasePathFor(root)).toBe(expected);
+    expect(defaultDatabasePath(path.join(root, "src", "deep", "deeper"))).toBe(expected);
+  });
+
+  it("recognises projects without a git checkout", () => {
+    setEnv({});
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, "pyproject.toml"), "");
+    fs.mkdirSync(path.join(root, "app"), { recursive: true });
+
+    expect(defaultDatabasePath(path.join(root, "app"))).toBe(
+      path.join(root, ".code-crawler", "index.db")
+    );
+  });
+
+  it("resolves the nearest database rather than one above the project", () => {
+    setEnv({});
+    const root = makeRoot();
+    const outer = path.join(root, "outer");
+    const inner = path.join(outer, "inner");
+    fs.mkdirSync(path.join(outer, ".git"), { recursive: true });
+    // A stale database sits closer to the caller than outer's project marker.
+    fs.mkdirSync(path.join(inner, ".code-crawler"), { recursive: true });
+    fs.writeFileSync(path.join(inner, ".code-crawler", "index.db"), "");
+    fs.mkdirSync(path.join(inner, "src"), { recursive: true });
+
+    expect(defaultDatabasePath(path.join(inner, "src"))).toBe(
+      path.join(inner, ".code-crawler", "index.db")
+    );
+  });
+
+  it("falls back to the user-wide path when no project encloses the cwd", () => {
+    setEnv({});
+    vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    expect(defaultDatabasePath(makeRoot())).toBe(userDatabasePath());
+    expect(userDatabasePath()).toBe(path.join(os.homedir(), ".code-crawler", "index.db"));
+  });
+
+  it("lets CODECRAWLER_DB override the project database", () => {
+    setEnv({ CODECRAWLER_DB: path.join(os.tmpdir(), "explicit.db") });
+    expect(loadConfig({ projectRoot: makeRoot() }).dbPath).toBe(
+      path.join(os.tmpdir(), "explicit.db")
+    );
+  });
+
+  it("uses the project database when CODECRAWLER_DB is unset or empty", () => {
+    const root = makeRoot();
+    fs.mkdirSync(path.join(root, ".git"));
+    const expected = path.join(root, ".code-crawler", "index.db");
+    setEnv({});
+    expect(loadConfig({ projectRoot: root }).dbPath).toBe(expected);
+    setEnv({ CODECRAWLER_DB: "" });
+    expect(loadConfig({ projectRoot: root }).dbPath).toBe(expected);
+  });
+
+  it("shares the enclosing project's database when crawling a subdirectory", () => {
+    setEnv({});
+    const root = makeRoot();
+    fs.mkdirSync(path.join(root, ".git"));
+    const subdirectory = path.join(root, "src", "nested");
+    fs.mkdirSync(subdirectory, { recursive: true });
+
+    const expected = path.join(root, ".code-crawler", "index.db");
+    // Otherwise `crawl repo/src` grows a second index the server at `repo` never sees.
+    expect(loadConfig({ projectRoot: subdirectory }).dbPath).toBe(expected);
+  });
+
+  it("never sends an explicit project to the user-wide database", () => {
+    setEnv({});
+    const root = makeRoot();
+    // No marker and no database anywhere above the crawl target: it is still its
+    // own project, not "somewhere global".
+    vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    expect(projectDatabasePath(root)).toBe(path.join(root, ".code-crawler", "index.db"));
+    expect(defaultDatabasePath(root)).toBe(userDatabasePath());
+  });
+
+  it("does not hand the user-wide database to unmarked folders under home", () => {
+    setEnv({});
+    const home = makeRoot();
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    fs.mkdirSync(path.join(home, ".code-crawler"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".code-crawler", "index.db"), "");
+    const scratch = path.join(home, "scratch");
+    fs.mkdirSync(scratch);
+
+    // The fallback file is not a project. Inheriting it would give every unmarked folder
+    // under `~` one shared file, so a crawl of one would collide with another's contents.
+    expect(projectDatabasePath(scratch)).toBe(path.join(scratch, ".code-crawler", "index.db"));
+    // A server started in one of those folders still lands on the fallback, as documented.
+    expect(defaultDatabasePath(scratch)).toBe(userDatabasePath());
+  });
+
+  it("never treats the home directory as the project enclosing its children", () => {
+    setEnv({});
+    const home = makeRoot();
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    // Even a marker at home (a dotfiles checkout in `~`) does not capture siblings.
+    fs.mkdirSync(path.join(home, ".git"));
+    const notes = path.join(home, "notes");
+    fs.mkdirSync(notes);
+
+    expect(projectDatabasePath(notes)).toBe(path.join(notes, ".code-crawler", "index.db"));
+    expect(defaultDatabasePath(notes)).toBe(userDatabasePath());
   });
 });

@@ -95,7 +95,8 @@ and answers them with bounded recursive SQL queries.
 - **Versioned schema with automatic migration** — the database carries a schema version and
   upgrades itself in place on open. A database written by a newer build is rejected with a
   clear message instead of being read as if the shape were known.
-- **One project per database** — indexing a different project into the same database fails
+- **A database per project** — the index lives in `<project>/.code-crawler/index.db`, so two
+  repositories can never collide. Pointing a populated database at a different project fails
   with a `clear_index` hint instead of silently wiping the first index.
 - **Analytics** — hotspots (fan-in/fan-out/advice counts) and dead-code candidates.
 - **Self-contained**: single SQLite file, no external services.
@@ -130,7 +131,7 @@ Environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODECRAWLER_DB` | `~/.code-crawler/index.db` | Database path |
+| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | Database path. Resolved from the cwd upward, so each project gets its own file; falls back to `~/.code-crawler/index.db` when no project encloses the cwd. The home directory is only that fallback, never an enclosing project |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Dirs skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
@@ -203,7 +204,7 @@ CODECRAWLER_BENCH=1 npm test -- tests/perf.test.ts   # enforce the budgets
 CODECRAWLER_BENCH_LINES=20000 npm run bench          # smaller corpus
 ```
 
-Measured on a Windows dev laptop (Node 20, warm disk cache); absolute numbers vary,
+Measured on a Windows dev laptop with a warm disk cache; absolute numbers vary,
 the *ratios* and the index usage are what matter:
 
 | Phase | Duration | Added | Updated | Unchanged |
@@ -254,6 +255,33 @@ if green, **auto-releases**:
    verified through the `mcpName` field in `package.json`.
 
 ## Using as an MCP server
+
+### One command
+
+[`add-mcp`](https://github.com/neon-solutions/add-mcp) registers the server in whichever
+client you name — Claude Code, Cursor, VS Code, Claude Desktop, Codex, OpenCode, Zed, and
+more (`npx add-mcp list-agents`). Run it from inside the repository you want indexed:
+
+```bash
+npx add-mcp @nithin554/code-crawler --args serve -a cursor
+```
+
+That writes project-scoped config next to the code (`.mcp.json`, `.cursor/mcp.json`,
+`.vscode/mcp.json`, …), so each repository carries its own registration and its own
+`.code-crawler/index.db`. The server name `code-crawler` is derived from the package.
+
+`--env CODECRAWLER_DB` is optional — add it only to put the database somewhere else:
+`--env CODECRAWLER_DB=/absolute/path/to/index.db`. `-g` writes user-level config instead. Prefer that only for clients that launch the server
+with your checkout as its working directory: with `-g` and an unrelated working directory
+(Claude Desktop starts in its own install folder) the server falls back to
+`~/.code-crawler/index.db`, and every repository then competes for that one file.
+
+### One server per project
+
+A server process opens one database at startup and a database holds exactly one project, so
+the model is one registration per repository — which is what the per-project config above
+gives you. Re-crawling a repository reuses its existing file and only re-parses what changed;
+two repositories never share a file, so they cannot clash.
 
 ### MCP Registry / `npx`
 
@@ -352,6 +380,27 @@ so cutting one list would leave edges pointing at omitted nodes. It is bounded b
 `limit` instead. Aggregate tools (`impact_analysis`, `explain_symbol`, `export_graph`) and
 single-object tools (`get_node`, `index_status`, `get_schema`) return one object and take no
 budget.
+
+### Agent skill
+
+The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`
+ships in the npm package and is plain Markdown — `SKILL.md` for discovery and the
+crawl-first workflow, `reference/tools.md` mapping all 27 tools to the questions they
+answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
+nodes.
+
+```bash
+npx skills add nithin554/code-crawler
+```
+
+The [skills CLI](https://skills.sh) finds it by convention and installs to whichever agents
+you pick; `npx skills update` refreshes it. To install by hand instead, copy the directory
+into your client's skills folder (`~/.claude/skills/code-crawler/`,
+`.claude/skills/code-crawler/`, or a plugin's `skills/` root). No build step. See
+[`USAGE.md`](USAGE.md#installing-the-agent-skill).
+
+`tests/skill.test.ts` asserts the skill's tool table against the live registry, so it
+cannot drift as tools are added.
 
 ## Graph model
 

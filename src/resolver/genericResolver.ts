@@ -74,26 +74,6 @@ function resolveCall(
 
   // ---- 1. Constructors ----------------------------------------------------
   if (call.isConstructorCall) {
-    if (name === "<init>") {
-      // `super().__init__()` dispatches to the parent constructor.
-      const parents = resolveReceiver(
-        file,
-        index,
-        call.receiver,
-        call.enclosingTypeId,
-        call.enclosingMethodId
-      );
-      const parentType = parents.types[0];
-      if (parentType) {
-        return {
-          callSite: call,
-          targetId: `${parentType}#<init>`,
-          resolved: true,
-          confidence: 0.85,
-          reason: `parent constructor of ${parentType}`,
-        };
-      }
-    }
     const types = resolveTypeCandidates(file, index, call.name);
     if (types.length > 0) {
       for (const typeId of types) {
@@ -329,7 +309,9 @@ export function resolveInjectionTarget(
   if (!text) return null;
   const first = resolveTypeCandidates(file, index, typeText)[0];
   if (first) return { targetId: first };
-  const external = externalPackageOf(file, index, text);
+  // Attribute through the import binding: `from fastapi import Depends` must
+  // reach `ext:fastapi`, not a fabricated package named after the symbol.
+  const external = externalPackageOf(file, index, file.scopeTypes?.get(text) ?? text);
   if (external) return { targetId: `ext:${external}`, external };
   // Token-based injections (`@Inject("repo")`) land on an unknown node so the
   // graph still records that a dependency is supplied at run time.

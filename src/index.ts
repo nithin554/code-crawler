@@ -28,7 +28,7 @@ Usage:
   codecrawler query <symbol>     Fuzzy-lookup a symbol
 
 Environment:
-  CODECRAWLER_DB               Database path (default ~/.code-crawler/index.db)
+  CODECRAWLER_DB               Database path (default <project>/.code-crawler/index.db)
   CODECRAWLER_EXCLUDE_DIRS     Comma-separated dirs to skip during crawl
   CODECRAWLER_DEFAULT_LIMIT    Default result limit for list queries
   CODECRAWLER_MAX_DEPTH        Traversal depth cap
@@ -45,12 +45,12 @@ function makeStore(config: Config): GraphStore {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const config = loadConfig();
   const [cmd, ...rest] = argv;
 
   switch (cmd) {
     case undefined:
     case "serve": {
+      const config = loadConfig();
       const store = makeStore(config);
       const server = createServer(store, config);
       const transport = new StdioServerTransport();
@@ -67,6 +67,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         process.exitCode = 1;
         break;
       }
+      // The indexed path owns the database, so crawling two projects never shares a file.
+      const config = loadConfig({ projectRoot: target });
       const store = makeStore(config);
       try {
         let lastBucket = -1;
@@ -113,6 +115,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       break;
     }
     case "status": {
+      const config = loadConfig();
       const store = makeStore(config);
       const stats = store.stats();
       console.log(
@@ -140,6 +143,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         process.exitCode = 1;
         break;
       }
+      const config = loadConfig();
       const store = makeStore(config);
       const results = searchSymbols(store, symbol, { limit: config.defaultLimit });
       if (results.length === 0) {

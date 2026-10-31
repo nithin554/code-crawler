@@ -857,7 +857,9 @@ export async function crawlProject(
   if (indexedProject && !sameProjectPath(indexedProject, absPath)) {
     throw new Error(
       `index already contains ${indexedProject}; refusing to replace it with ${absPath}. ` +
-        `Run clear_index first, or point CODECRAWLER_DB at a separate database.`
+        `A database holds one project, so give this one its own: register a separate MCP ` +
+        `server per project (each then resolves its own .code-crawler/index.db), or point ` +
+        `CODECRAWLER_DB at another file. To replace the existing index instead, run clear_index.`
     );
   }
 

@@ -16,7 +16,7 @@ the [README](README.md); if you want to *do* something, start here.
 
 ## 1. Install and index
 
-Requires Node.js ≥ 20.
+Requires Node.js ≥ 22.12.
 
 ```bash
 npm install
@@ -64,7 +64,7 @@ MCP client:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODECRAWLER_DB` | `~/.code-crawler/index.db` | SQLite file that holds the graph |
+| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | SQLite file that holds the graph |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Directories skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default cap on result lists |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
@@ -75,13 +75,32 @@ MCP client:
 Invalid values are never fatal: booleans fall back to their default, integers are clamped
 to their range, and both emit a one-line warning on stderr.
 
-Use a separate `CODECRAWLER_DB` per repository. A database holds exactly one project:
-crawling a different path fails with a `clear_index` hint rather than replacing the existing
-index. Re-crawling the same database is safe and cheap: file-scoped upserts replace only
+`CODECRAWLER_DB` is resolved for you: the server walks up from its working directory to the
+nearest project root (`.git`, `package.json`, `pom.xml`, `build.gradle`, `pyproject.toml`,
+`setup.py`, `requirements.txt`, `go.mod`, `Cargo.toml`) and indexes into
+`<project>/.code-crawler/index.db`, creating the directory on first use. Each repository
+therefore gets its own file with nothing to configure, and a client launched in `src/` finds
+the file the repo root created. When no project encloses the working directory — Claude
+Desktop, for instance, starts from its own install directory — the fallback is
+`~/.code-crawler/index.db`. Set `CODECRAWLER_DB` to override the resolution entirely. The home
+directory is only that fallback, never an enclosing project, so `crawl ~/scratch` creates
+`~/scratch/.code-crawler/index.db` instead of joining whatever the fallback file already
+holds.
+
+A database still holds exactly one project: crawling a different path into a database that
+already tracks one is refused, before anything is written, with a message that points at the
+remedy — give the second project its own database (its own registration) or set
+`CODECRAWLER_DB`. `clear_index` also works, but only to replace the existing index.
+Re-crawling the same database is safe and cheap: file-scoped upserts replace only
 what changed. A full crawl also removes files that disappeared; scoped crawls (`fileFilter`
 or a forced `language`) skip stale removal and report `pruned: false`. When something outside
 the project rewrote a file but restored its size and mtime, the manifest cannot see the edit —
 re-crawl with `force: true` to re-parse everything.
+
+Because a process opens one database at startup, one server serves one project. Register the
+server once per repository — `add-mcp` without `-g` writes the config into the checkout — and
+the per-project default keeps every repository on its own file. `crawl` resolves the same
+way, so `crawl repo/src` shares `repo`'s database instead of creating a nested one.
 
 ### What discovery skips
 
@@ -121,6 +140,31 @@ failure payload — handlers never throw across the MCP boundary:
 
 ### Wiring it into an MCP client
 
+[`add-mcp`](https://github.com/neon-solutions/add-mcp) writes the client config for you. Run
+it from inside the repository you want indexed:
+
+```bash
+npx add-mcp @nithin554/code-crawler --args serve -a cursor
+```
+
+`-a` takes `claude-code`, `cursor`, `vscode`, `claude-desktop`, `codex`, `opencode`, `zed`,
+and more (`npx add-mcp list-agents` lists them all). Without `-g` the entry is written into
+the project (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`), which is what you want:
+one registration per repository, each with its own index. `-g` writes user-level config
+instead. The rest of this section is the hand-written equivalent, useful when you want to
+inspect or version the file.
+
+`--env CODECRAWLER_DB` is optional: the server indexes into `<project>/.code-crawler/index.db`,
+created on first use. Pin it — `--env CODECRAWLER_DB=/absolute/path/to/index.db` — only to
+put the file somewhere else, or when the client's working directory is not the project — a globally registered server started
+outside your checkout (Claude Desktop starts in its own install folder) resolves to
+`~/.code-crawler/index.db`, which every repository would then share. Every `CODECRAWLER_*`
+variable is optional in the same way.
+
+One server per project: a process opens one database at startup, and a database holds
+exactly one project, so give each repository its own registration rather than one global
+entry serving all of them.
+
 Claude Desktop (`claude_desktop_config.json`):
 
 ```json
@@ -136,6 +180,51 @@ Claude Desktop (`claude_desktop_config.json`):
 ```
 
 Cursor, Zed, VS Code, and other stdio MCP clients take the same command/args/env triple.
+
+### Installing the agent skill
+
+The MCP server tells an agent *what* it can call. The skill tells it *when* to — which
+question deserves a graph query and which is better answered by reading a file. The skill
+needs no build step and does not depend on `dist/`, so it can be installed on its own:
+
+```bash
+npx skills add nithin554/code-crawler
+```
+
+The [skills CLI](https://skills.sh) finds `skills/code-crawler/` by convention, asks which
+agents to install to, and writes a `skills-lock.json` you can commit so teammates reproduce
+the setup. Install to your user directory instead of the project with `-g`, or skip the
+prompts entirely:
+
+```bash
+npx skills add nithin554/code-crawler -g -a claude-code -y
+```
+
+`npx skills update` refreshes an installed copy. The CLI itself needs Node.js ≥ 22.20,
+which is stricter than the server's floor.
+
+Installing the server separately, or copying by hand? The skill is also in the npm package:
+
+```bash
+npm install @nithin554/code-crawler
+# the skill is at node_modules/@nithin554/code-crawler/skills/code-crawler/
+```
+
+Copy `skills/code-crawler/` into whichever directory your client loads skills from:
+
+| Layout | Destination |
+| --- | --- |
+| Personal skills folder | `~/.claude/skills/code-crawler/` (or your client's equivalent) |
+| Project-scoped skills | `.claude/skills/code-crawler/` beside the repo you index |
+| Plugin or marketplace skill directory | `skills/code-crawler/` inside the plugin root |
+
+The directory is self-contained — `SKILL.md` plus a `reference/` folder — so a plain copy
+is the whole install.
+
+`SKILL.md` carries the discovery `description`, the client config above, the
+one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps all
+27 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
+`external`, and phantom nodes, which are the three things agents misread most.
 
 ---
 

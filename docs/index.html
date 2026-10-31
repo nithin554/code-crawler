@@ -31,7 +31,7 @@
         "name": "Code-Crawler",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Static analysis",
-        "operatingSystem": "Node.js 20 or newer",
+        "operatingSystem": "Node.js 22.12 or newer",
         "url": "https://nithin554.github.io/code-crawler/",
         "codeRepository": "https://github.com/nithin554/code-crawler",
         "license": "https://opensource.org/licenses/MIT",
@@ -53,6 +53,7 @@
           <a href="usage.html">Usage</a>
           <a href="examples.html">Examples</a>
           <a href="tools.html">Tools</a>
+          <a href="skill.html">Skill</a>
           <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
         </div>
       </nav>
@@ -79,7 +80,7 @@
               <span class="badge"><b>27</b> MCP tools</span>
               <span class="badge"><b>250</b> tests passing</span>
               <span class="badge"><b>0</b> external services</span>
-              <span class="badge">TypeScript · Node ≥ 20</span>
+              <span class="badge">TypeScript · Node ≥ 22.12</span>
             </div>
           </div>
 
@@ -256,7 +257,7 @@
           <div class="steps">
             <div class="step">
               <h3>Install and build</h3>
-              <p>Requires Node.js 20 or newer.</p>
+              <p>Requires Node.js 22.12 or newer.</p>
               <pre><code>npm install
 npm run build</code></pre>
             </div>
@@ -282,7 +283,9 @@ node dist/index.js status</code></pre>
 }</code></pre>
               <p class="small muted" style="margin-top: 10px">
                 No local build needed — the published package runs the same way:
-                <code>npx -y @nithin554/code-crawler@latest</code>.
+                <code>npx -y @nithin554/code-crawler@latest</code>. Or let
+                <code>npx add-mcp @nithin554/code-crawler --args serve -a cursor</code> (run it
+                inside the repository) write the entry for you.
                 <a href="usage.html#registry">Registry install →</a>
               </p>
             </div>
@@ -299,7 +302,9 @@ List the aspects that intercept Payment#pay.</code></pre>
             <p>
               Full client setup, environment variables, and the indexing lifecycle live in
               <a href="usage.html">Usage</a>. Worked request/response pairs are in
-              <a href="examples.html">Examples</a>.
+              <a href="examples.html">Examples</a>, and the <a href="skill.html">agent skill</a>
+              teaches your agent when to reach for the graph &mdash; install it with
+              <code>npx skills add nithin554/code-crawler</code>.
             </p>
           </div>
         </div>

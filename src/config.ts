@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -8,7 +9,90 @@ import path from "node:path";
  * point the server at different databases without code changes.
  */
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".code-crawler", "index.db");
+/** Directory created inside a project to hold its database. */
+export const DB_DIR_NAME = ".code-crawler";
+/** Database file name inside that directory. */
+export const DB_FILE_NAME = "index.db";
+
+/**
+ * Files and directories that identify a project root. A git checkout is the common case;
+ * the build files cover repositories whose history is not present.
+ */
+const PROJECT_MARKERS = [
+  ".git",
+  "package.json",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "pyproject.toml",
+  "setup.py",
+  "requirements.txt",
+  "go.mod",
+  "Cargo.toml",
+];
+
+/** The database that belongs to one project: `<projectRoot>/.code-crawler/index.db`. */
+export function databasePathFor(projectRoot: string): string {
+  return path.join(path.resolve(projectRoot), DB_DIR_NAME, DB_FILE_NAME);
+}
+
+/** The database used when no project can be determined, so each caller still gets a file. */
+export function userDatabasePath(): string {
+  return path.join(os.homedir(), DB_DIR_NAME, DB_FILE_NAME);
+}
+
+/**
+ * Nearest directory at or above `start` that either already owns a database or looks like a
+ * project root. `undefined` when the walk reaches the filesystem root with neither.
+ *
+ * The user's home directory never answers for the directories beneath it. It is the fallback
+ * location, not a project: an unmarked folder under `~` that inherited `~/.code-crawler`
+ * would share one file with every other unmarked folder, and a crawl there would collide
+ * with whatever the fallback file held last.
+ */
+function nearestDatabaseRoot(start: string): string | undefined {
+  const home = path.resolve(os.homedir());
+  let dir = path.resolve(start);
+  for (;;) {
+    if (dir !== home) {
+      if (fs.existsSync(path.join(dir, DB_DIR_NAME, DB_FILE_NAME))) return dir;
+      if (PROJECT_MARKERS.some((marker) => fs.existsSync(path.join(dir, marker)))) return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || dir === home) return undefined;
+    dir = parent;
+  }
+}
+
+/**
+ * Database for the project that encloses `start`. Used when the caller knows what is being
+ * indexed, so a crawl of `repo/src` shares the database of `repo` rather than growing a
+ * second, nested one that the server started at `repo` would never see.
+ *
+ * Unlike `defaultDatabasePath` this never returns the user-wide path: an explicit project
+ * with no markers anywhere above it is still that project, not "somewhere global".
+ */
+export function projectDatabasePath(start: string): string {
+  return databasePathFor(nearestDatabaseRoot(start) ?? start);
+}
+
+/**
+ * Database to use when `CODECRAWLER_DB` is unset, resolved from `start` (the process cwd
+ * unless a caller knows better).
+ *
+ * Walking up from the cwd gives each repository its own file, and keeps a client launched
+ * in `src/` on the file the repo root created. The nearest match wins so a database is
+ * never taken from above a project root.
+ *
+ * With no database and no project marker anywhere above it, the user-wide path is the
+ * fallback: a client spawned with an unrelated cwd (Claude Desktop launches from its own
+ * install directory) must not scatter databases into arbitrary directories. The home
+ * directory itself is never treated as an enclosing project.
+ */
+export function defaultDatabasePath(start: string = process.cwd()): string {
+  const root = nearestDatabaseRoot(start);
+  return root === undefined ? userDatabasePath() : databasePathFor(root);
+}
 
 function warn(message: string): void {
   process.stderr.write(`code-crawler: ${message}\n`);
@@ -64,14 +148,17 @@ export interface Config {
   helpfulErrors: boolean;
 }
 
-export function loadConfig(): Config {
+export function loadConfig(options: { projectRoot?: string } = {}): Config {
+  const fallback = options.projectRoot
+    ? projectDatabasePath(options.projectRoot)
+    : defaultDatabasePath();
   return {
-    dbPath: envStr("CODECRAWLER_DB", DEFAULT_DB_PATH),
+    dbPath: envStr("CODECRAWLER_DB", fallback),
     excludeDirs: [
       ...new Set(
         envStr(
           "CODECRAWLER_EXCLUDE_DIRS",
-          ".git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage"
+          ".git,node_modules,dist,build,target,.idea,.venv,.gradle,out,.next,coverage,.code-crawler"
         )
           .split(",")
           .map((s) => s.trim())

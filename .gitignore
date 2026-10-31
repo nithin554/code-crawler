@@ -18,6 +18,8 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+# code-crawler keeps its index inside the project by default, plus SQLite's WAL sidecars
+.code-crawler/
 
 # Test / coverage
 .pytest_cache/
