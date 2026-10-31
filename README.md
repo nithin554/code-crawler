@@ -1,5 +1,9 @@
 # Code-Crawler
 
+[![npm version](https://img.shields.io/npm/v/@nithin554/code-crawler?logo=npm)](https://www.npmjs.com/package/@nithin554/code-crawler)
+[![npm downloads](https://img.shields.io/npm/dm/@nithin554/code-crawler?label=downloads%2Fmonth&logo=npm)](https://www.npmjs.com/package/@nithin554/code-crawler)
+[![npm total downloads](https://img.shields.io/npm/dt/@nithin554/code-crawler?label=total%20downloads&logo=npm)](https://www.npmjs.com/package/@nithin554/code-crawler)
+
 **Static + dynamic call tracing MCP server backed by a persistent property graph of your codebase.**
 
 Code-Crawler indexes a project into a SQLite-backed property graph — files, packages,
