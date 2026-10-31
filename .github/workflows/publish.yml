@@ -204,6 +204,11 @@ jobs:
       - create-release
       - build-and-test
     if: github.actor != 'dependabot[bot]'
+    # A called workflow inherits this job's GITHUB_TOKEN permissions, so the
+    # grant has to live here: it reads the release tag and checks that tag out,
+    # and writes nothing.
+    permissions:
+      contents: read
     # Publishes the skill at the tag created above, so the ClawHub version
     # matches the npm package. It depends on the tests only, not on the npm
     # environment approvals, so a ClawHub fix does not need an npm release.

@@ -202,4 +202,15 @@ describe("ClawHub publishing", () => {
     expect(workflow).toContain("uses: ./.github/workflows/publish-clawhub.yml");
     expect(workflow).toContain("tag: ${{ needs.create-release.outputs.tag }}");
   });
+
+  // A reusable workflow inherits the GITHUB_TOKEN permissions of the job that
+  // calls it, so the grant has to be on the caller, not only in the called file.
+  it("grants the called publish job a read-only token", () => {
+    const workflow = read(".github/workflows/publish.yml");
+    const start = workflow.indexOf("  publish-clawhub:");
+    expect(start).toBeGreaterThan(-1);
+    const called = workflow.slice(start, workflow.indexOf("  publish-mcp-registry:"));
+    expect(called).toContain("uses: ./.github/workflows/publish-clawhub.yml");
+    expect(called).toMatch(/permissions:\r?\n {6}contents: read\r?\n/);
+  });
 });
