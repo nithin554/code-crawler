@@ -178,11 +178,21 @@ export function matchAlias(rules: readonly AliasRule[], specifier: string): stri
     if (rule.suffix && !specifier.endsWith(rule.suffix)) continue;
     if (specifier.length < rule.prefix.length + rule.suffix.length) continue;
     const tail = specifier.slice(rule.prefix.length, specifier.length - rule.suffix.length);
-    return rule.targets.map((target) =>
-      target.includes("*") ? target.replace("*", tail) : target
-    );
+    return rule.targets.map((target) => fillWildcard(target, tail));
   }
   return null;
+}
+
+/**
+ * Substitute the single `*` in a target with the specifier's wildcard tail.
+ *
+ * Slicing rather than `replace("*", …)` states the contract: a `paths` target holds at
+ * most one wildcard, at a known position, and any later `*` is a literal character.
+ */
+function fillWildcard(target: string, tail: string): string {
+  const star = target.indexOf("*");
+  if (star === -1) return target;
+  return target.slice(0, star) + tail + target.slice(star + 1);
 }
 
 /**

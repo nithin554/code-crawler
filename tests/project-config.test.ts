@@ -174,6 +174,11 @@ describe("matchAlias", () => {
     expect(matchAlias(rules, "@/app/x")).toEqual(["src/app/x"]);
   });
 
+  it("maps a wildcard pattern onto a literal target", () => {
+    const rules = [{ prefix: "@app/", suffix: "", targets: ["src/app/index"], wildcard: true }];
+    expect(matchAlias(rules, "@app/anything")).toEqual(["src/app/index"]);
+  });
+
   it("ignores relative and absolute specifiers", () => {
     const rules = [{ prefix: "@", suffix: "", targets: ["src/*"], wildcard: true }];
     expect(matchAlias(rules, "./local")).toBeNull();
