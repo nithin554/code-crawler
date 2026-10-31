@@ -177,50 +177,125 @@ describe("ClawHub publishing", () => {
     }
   });
 
-  it("has a workflow that validates before publishing", () => {
+  it("delegates the skill publish to the official ClawHub workflow", () => {
     const workflow = read(".github/workflows/publish-clawhub.yml");
-    expect(workflow).toContain("secrets.CLAWHUB_TOKEN");
-    expect(workflow).toContain("skill publish ./skills/code-crawler");
-    expect(workflow).toContain("--slug code-crawler");
-    expect(workflow).toContain("--owner nithin554");
-    expect(workflow).toContain("--dry-run");
+    expect(workflow).toContain(
+      "uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1"
+    );
+    expect(workflow).toContain("skill_path: skills/code-crawler");
+    expect(workflow).toContain("owner: nithin554");
+    expect(workflow).toContain("dry_run: ${{ inputs.dry_run }}");
   });
 
-  // Without an explicit --version the CLI assumes 1.0.0, so every release after
-  // the first collides with the version already on the registry.
-  it("publishes the skill at the release tag version", () => {
+  // The upstream workflow names the secret `clawhub_token`, and `secrets:
+  // inherit` does not rename, so the mapping has to be explicit.
+  it("renames the repository token to the name upstream reads", () => {
+    for (const file of [
+      ".github/workflows/publish-clawhub.yml",
+      ".github/workflows/publish-plugin.yml",
+    ]) {
+      const workflow = read(file);
+      expect(workflow).toContain("clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}");
+    }
+  });
+
+  // Upstream takes no `version` input and bumps the patch of the registry's
+  // latest version, so the version is owned by ClawHub rather than by the tag.
+  it("leaves the skill version to ClawHub instead of inventing one", () => {
     const workflow = read(".github/workflows/publish-clawhub.yml");
-    expect(workflow).toContain("workflow_call:");
-    // The flag must carry the derived version, not a literal.
-    expect(workflow).toMatch(/--version "\$\{VERSION\}"/);
-    expect(workflow).toMatch(/version=\$\{TAG#v\}/);
-    expect(workflow).toContain("ref: ${{ steps.release.outputs.tag }}");
+    expect(workflow).not.toMatch(/^\s*version:/m);
+    expect(workflow).not.toContain("--version");
+  });
+
+  it("pins both ClawHub workflows to one upstream release", () => {
+    const refs = [
+      ...read(".github/workflows/publish-clawhub.yml").matchAll(
+        /openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g
+      ),
+      ...read(".github/workflows/publish-plugin.yml").matchAll(
+        /openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g
+      ),
+    ].map((match) => match[1]);
+    // A floating `v1` ref does not exist upstream, so every call pins a tag.
+    expect(refs.length).toBeGreaterThan(0);
+    expect(new Set(refs)).toEqual(new Set(["v0.24.1"]));
   });
 
   it("is wired to the release tag created by the publish workflow", () => {
     const workflow = read(".github/workflows/publish.yml");
-    expect(workflow).toContain("uses: ./.github/workflows/publish-clawhub.yml");
+    for (const file of ["publish-clawhub", "publish-plugin"]) {
+      expect(workflow).toContain(`uses: ./.github/workflows/${file}.yml`);
+    }
     expect(workflow).toContain("tag: ${{ needs.create-release.outputs.tag }}");
+    expect(workflow).toContain("secrets: inherit");
   });
 
-  // The registry answers a burst of writes with "Too many writes in a short
-  // period of time", so a single attempt turns an ordinary throttle into a
-  // failed release.
+  // Upstream makes exactly one attempt, so a throttle would otherwise turn an
+  // ordinary "Too many writes in a short period of time" into a failed release.
   it("retries a throttled publish instead of failing the release", () => {
-    const workflow = read(".github/workflows/publish-clawhub.yml");
-    expect(workflow).toMatch(/for attempt in 1 2 3; do/);
-    expect(workflow).toMatch(/too many writes/i);
-    expect(workflow).toMatch(/sleep "\$\{DELAY\}"/);
+    for (const file of ["publish-clawhub", "publish-plugin"]) {
+      const workflow = read(`.github/workflows/${file}.yml`);
+      expect(workflow).toContain("publish-retry:");
+      expect(workflow).toMatch(/if: .*!inputs\.dry_run/);
+    }
   });
 
   // A reusable workflow inherits the GITHUB_TOKEN permissions of the job that
   // calls it, so the grant has to be on the caller, not only in the called file.
-  it("grants the called publish job a read-only token", () => {
-    const workflow = read(".github/workflows/publish.yml");
-    const start = workflow.indexOf("  publish-clawhub:");
-    expect(start).toBeGreaterThan(-1);
-    const called = workflow.slice(start, workflow.indexOf("  publish-mcp-registry:"));
-    expect(called).toContain("uses: ./.github/workflows/publish-clawhub.yml");
-    expect(called).toMatch(/permissions:\r?\n {6}contents: read\r?\n/);
+  // The upstream workflows mint an OIDC token to pin their own CLI source.
+  it("grants the called publish jobs the permissions they need", () => {
+    const caller = read(".github/workflows/publish.yml");
+    const jobBlock = (job: string) => {
+      const start = caller.indexOf(`  ${job}:`);
+      expect(start).toBeGreaterThan(-1);
+      const rest = caller.slice(start + job.length + 3);
+      const next = rest.search(/\r?\n {2}[a-z][a-z-]*:\r?\n/);
+      return next === -1 ? rest : rest.slice(0, next);
+    };
+
+    expect(jobBlock("publish-clawhub")).toMatch(/permissions:\r?\n {6}contents: read/);
+    const pluginJob = jobBlock("publish-clawhub-plugin");
+    expect(pluginJob).toMatch(/permissions:\r?\n {6}contents: read/);
+    // The called workflow uploads its inspector and publish reports.
+    expect(pluginJob).toMatch(/actions: read/);
+
+    for (const file of ["publish-clawhub", "publish-plugin"]) {
+      const called = read(`.github/workflows/${file}.yml`);
+      expect(called).toMatch(/^permissions: \{\}$/m);
+      expect(called).toMatch(/id-token: write/);
+    }
+  });
+});
+
+describe("ClawHub plugin bundle", () => {
+  const bundle = "plugins/code-crawler";
+  const bundleManifest = JSON.parse(read(`${bundle}/.claude-plugin/plugin.json`)) as PluginManifest;
+  const bundleMcp = JSON.parse(read(`${bundle}/.mcp.json`)) as McpConfig;
+
+  it("declares exactly one bundle marker so the family is unambiguous", () => {
+    const markers = [".codex-plugin", ".claude-plugin", ".cursor-plugin"].filter((dir) =>
+      fs.existsSync(path.join(ROOT, bundle, dir, "plugin.json"))
+    );
+    expect(markers).toEqual([".claude-plugin"]);
+  });
+
+  // ClawHub names a bundle after its directory, so the folder fixes the slug.
+  it("is named after the directory ClawHub publishes it as", () => {
+    expect(path.basename(bundle)).toBe(claudeManifest.name);
+    expect(bundleManifest.name).toBe(claudeManifest.name);
+  });
+
+  // The bundle carries no server code; it resolves the published package.
+  it("mirrors the root manifests instead of drifting from them", () => {
+    expect(bundleManifest).toEqual(claudeManifest);
+    expect(bundleMcp).toEqual(claudeMcp);
+    expect(bundleMcp.mcpServers["code-crawler"].args).toEqual(["-y", pkg.name, "serve"]);
+  });
+
+  // A `version` here would have to be bumped by hand and would still be
+  // overridden, because the publish workflow passes the release version.
+  it("carries no version and no package.json of its own", () => {
+    expect(bundleManifest.version).toBeUndefined();
+    expect(fs.existsSync(path.join(ROOT, bundle, "package.json"))).toBe(false);
   });
 });

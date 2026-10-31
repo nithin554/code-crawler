@@ -1,183 +1,103 @@
 name: Publish Skill to ClawHub
 
-# Publishes skills/code-crawler to clawhub.ai at the version of a release tag.
+# Publishes skills/code-crawler with the official openclaw/clawhub reusable
+# workflow, so the publish path is the one ClawHub maintains rather than a copy
+# of it kept in this repository.
 #
-# The "Build & Publish" workflow tags every push to main and calls this one with
-# that tag, so the skill version always matches the npm package and the MCP
-# registry entry for the same commit. The skill is published from the tag
-# itself, not from main, so a re-run reproduces exactly what was released.
+# "Build & Publish" tags every push to main and calls this one with that tag, so
+# the skill ships from the released commit rather than from a moving branch.
+# `workflow_dispatch` publishes by hand (dry run by default) and is how a
+# previously failed publish is retried.
 #
-# `workflow_dispatch` re-publishes an existing tag by hand (defaults to the
-# latest release) and is how a previously failed publish is retried.
+# Pinned to a release tag because upstream has no `v1` floating ref. One tag
+# serves both workflows: skill-publish first appears in v0.23.0, and
+# package-publish only understands `.claude-plugin` bundles from v0.24.0 on
+# (v0.12.0 wanted an `openclaw.bundle.json`), so v0.24.1 is the oldest tag that
+# publishes everything this repository ships.
 #
-# Requires a CLAWHUB_TOKEN repository secret (`clawhub login` then `clawhub token`).
-# Without the secret the job reports a notice and exits successfully, so forks
-# and fresh clones are not broken by a missing credential.
+# Upstream derives the skill version itself - the workflow takes no `version`
+# input - by bumping the patch of whatever the registry already reports as the
+# latest version, and defaults to 1.0.0 when it reports none. The skill version
+# therefore follows ClawHub's own history and is not tied to this repository's
+# release tags.
+#
+# Requires a CLAWHUB_TOKEN repository secret. Upstream reads the secret under
+# the name `clawhub_token`, so it is renamed at this boundary; `secrets: inherit`
+# would not rename it.
 
 on:
   workflow_call:
     inputs:
       tag:
-        description: "Release tag to publish, for example v0.1.66"
+        description: "Release tag to publish from, for example v0.1.68"
         type: string
-        required: true
+        required: false
+        default: ""
       dry_run:
         description: "Validate the skill without publishing it"
         type: boolean
         default: false
-    secrets:
-      CLAWHUB_TOKEN:
-        required: false
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (empty uses the latest release)"
+        description: "Release tag to publish from (empty publishes the dispatched ref)"
         type: string
         required: false
+        default: ""
       dry_run:
         description: "Validate the skill without publishing it"
         type: boolean
-        default: false
+        default: true
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # One publish at a time; never cancel a run that is mid-upload.
+    name: publish
+    # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
+    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
+    # A called workflow can only narrow the caller's token, so the OIDC grant the
+    # upstream workflow needs to pin its own CLI source has to be made here.
+    permissions:
+      contents: read
+      id-token: write
+    # Never cancel a run that is mid-upload.
     concurrency:
       group: clawhub-publish
       cancel-in-progress: false
-    steps:
-      # The version comes from the release tag, never from a hardcoded default:
-      # the CLI otherwise assumes 1.0.0 and every release after the first
-      # collides with it. This runs before checkout because the tag is the
-      # checkout ref.
-      - name: Resolve version from the release tag
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
+    with:
+      skill_path: skills/code-crawler
+      owner: nithin554
+      ref: ${{ inputs.tag }}
+      dry_run: ${{ inputs.dry_run }}
+      categories: development
+      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
+      changelog: ${{ inputs.tag != '' && format('Release {0}', inputs.tag) || '' }}
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
-          TAG="${INPUT_TAG}"
-          if [ -z "${TAG}" ]; then
-            TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
-          fi
-
-          # The registry stores whatever is passed, so refuse anything that is
-          # not a semver release tag instead of publishing a bogus version.
-          if ! printf '%s' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::'${TAG}' is not a vX.Y.Z release tag"
-            exit 1
-          fi
-
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Publishing code-crawler at ${TAG}"
-
-      - name: Checkout release tag
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.release.outputs.tag }}
-
-      - name: Setup node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
-      - name: Publish skill
-        shell: bash
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
-          TAG: ${{ steps.release.outputs.tag }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${CLAWHUB_TOKEN}" ]; then
-            echo "::notice::CLAWHUB_TOKEN is not set; skipping the ClawHub publish."
-            exit 0
-          fi
-
-          # The CLI authenticates from a config file (CLAWHUB_CONFIG_PATH), not
-          # from CLAWHUB_TOKEN directly. Keep the token out of the command line,
-          # and build the JSON with Node so no shell escaping can corrupt it.
-          CONFIG="${RUNNER_TEMP}/clawhub-config.json"
-          umask 077
-          trap 'rm -f "${CONFIG}"' EXIT
-          node -e '
-            const fs = require("node:fs");
-            fs.writeFileSync(
-              process.argv[1],
-              JSON.stringify({
-                registry: "https://clawhub.ai",
-                token: process.env.CLAWHUB_TOKEN,
-              }) + "\n",
-            );
-          ' "${CONFIG}"
-          export CLAWHUB_CONFIG_PATH="${CONFIG}"
-
-          # Commit of the checked-out tag, which is not GITHUB_SHA on a manual
-          # dispatch from a branch.
-          SOURCE_COMMIT="$(git rev-parse HEAD)"
-
-          ARGS=(
-            skill publish ./skills/code-crawler
-            --slug code-crawler
-            --name "Code Crawler"
-            --owner nithin554
-            --version "${VERSION}"
-            --categories development
-            --topics "code-analysis,call-graph,static-analysis,mcp,dead-code"
-            --changelog "Release ${TAG}"
-            --source-repo "${GITHUB_REPOSITORY}"
-            --source-commit "${SOURCE_COMMIT}"
-            --source-ref "${TAG}"
-          )
-
-          # Always validate first; a bad SKILL.md should fail before it ships.
-          npx -y clawhub@latest "${ARGS[@]}" --dry-run
-
-          if [ "${DRY_RUN}" = "true" ]; then
-            echo "::notice::Dry run requested; not publishing to ClawHub."
-            exit 0
-          fi
-
-          # The registry answers a burst of writes with a rate-limit error and
-          # tells the caller when it resets, so a single attempt turns an
-          # ordinary throttle into a failed release. Retry with a backoff that
-          # outlasts the advertised reset. A re-run of a tag whose publish
-          # partially succeeded must also not fail on the version that is
-          # already there.
-          for attempt in 1 2 3; do
-            if OUTPUT="$(npx -y clawhub@latest "${ARGS[@]}" 2>&1)"; then
-              printf '%s\n' "${OUTPUT}"
-              exit 0
-            fi
-
-            printf '%s\n' "${OUTPUT}"
-            if printf '%s' "${OUTPUT}" | grep -qi "already exists"; then
-              echo "::notice::code-crawler@${VERSION} is already on ClawHub; nothing to publish."
-              exit 0
-            fi
-
-            if [ "${attempt}" -ge 3 ]; then
-              break
-            fi
-            if ! printf '%s' "${OUTPUT}" | grep -qiE "too many writes|rate.?limit|try again|429"; then
-              break
-            fi
-
-            DELAY=$((attempt * 45))
-            echo "::warning::ClawHub throttled the publish (attempt ${attempt}); retrying in ${DELAY}s"
-            sleep "${DELAY}"
-          done
-
-          echo "::error::ClawHub rejected code-crawler@${VERSION}"
-          exit 1
+  # The registry answers a burst of writes with "Too many writes in a short
+  # period of time", and upstream makes exactly one attempt, so a throttle would
+  # otherwise turn into a failed release. One retry outlasts the advertised
+  # reset window; a dry run never writes, so it never needs one.
+  publish-retry:
+    name: publish (retry)
+    needs: publish
+    if: failure() && !inputs.dry_run
+    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: clawhub-publish
+      cancel-in-progress: false
+    with:
+      skill_path: skills/code-crawler
+      owner: nithin554
+      ref: ${{ inputs.tag }}
+      dry_run: false
+      categories: development
+      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
+      changelog: ${{ inputs.tag != '' && format('Release {0}', inputs.tag) || '' }}
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
