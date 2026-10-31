@@ -15,6 +15,12 @@ The bundle carries no server code: `.mcp.json` launches the published npm packag
 with `npx -y @nithin554/code-crawler serve`, so every release of the plugin tracks
 the npm release with the same version.
 
+`package.json` here is packaging metadata only. ClawHub reads a package manifest
+to inspect the bundle and to build its ClawPack artifact, and reports "package
+metadata is missing" without one. Its `version` is the one ClawHub serves, so it
+is not maintained by hand: the release workflow stamps the tag's version into it
+and packs the bundle, and the committed `0.0.0` is a placeholder.
+
 The server resolves a project per tool call and keeps each repository's graph in
 `<project>/.code-crawler/index.db`, so one plugin install serves every repository
 you open.
