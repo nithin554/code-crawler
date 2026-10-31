@@ -209,7 +209,9 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          mapfile -t tarballs < <(find dist -maxdepth 1 -name '*.tgz')
+          # A relative `dist/x.tgz` parses as a GitHub `owner/repo` shorthand, so
+          # the CLI is given an absolute path and reads it as a tarball.
+          mapfile -t tarballs < <(find "$PWD/dist" -maxdepth 1 -name '*.tgz')
           if [[ ${#tarballs[@]} -ne 1 ]]; then
             echo "::error::expected exactly one packed bundle, found ${#tarballs[@]}"
             exit 1
@@ -287,7 +289,9 @@ jobs:
           COMMIT: ${{ needs.pack.outputs.commit }}
         run: |
           set -euo pipefail
-          mapfile -t tarballs < <(find dist -maxdepth 1 -name '*.tgz')
+          # A relative `dist/x.tgz` parses as a GitHub `owner/repo` shorthand, so
+          # the CLI is given an absolute path and reads it as a tarball.
+          mapfile -t tarballs < <(find "$PWD/dist" -maxdepth 1 -name '*.tgz')
           if [[ ${#tarballs[@]} -ne 1 ]]; then
             echo "::error::expected exactly one packed bundle, found ${#tarballs[@]}"
             exit 1
