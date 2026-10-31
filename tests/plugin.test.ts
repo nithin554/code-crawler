@@ -8,6 +8,19 @@ function read(file: string): string {
   return fs.readFileSync(path.join(ROOT, file), "utf8");
 }
 
+// This checkout may be CRLF while the committed file is LF.
+function workflow(file: string): string {
+  return read(file).replace(/\r\n/g, "\n");
+}
+
+function jobBlock(text: string, job: string): string {
+  const start = text.indexOf(`  ${job}:`);
+  expect(start).toBeGreaterThan(-1);
+  const rest = text.slice(start + job.length + 3);
+  const next = rest.search(/\n {2}[a-z][a-z-]*:\n/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 interface Author {
   name: string;
   url?: string;
@@ -188,14 +201,32 @@ describe("ClawHub publishing", () => {
   });
 
   // The upstream workflow names the secret `clawhub_token`, and `secrets:
-  // inherit` does not rename, so the mapping has to be explicit.
-  it("renames the repository token to the name upstream reads", () => {
+  // inherit` does not rename it. The value lives on the `clawhub-publish`
+  // environment, and an environment secret is only readable by a job that
+  // declares that environment - which a `uses:` job cannot do - so the guard
+  // job reads it and forwards it to the publish jobs.
+  it("forwards the environment token to the name upstream reads", () => {
     for (const file of [
       ".github/workflows/publish-clawhub.yml",
       ".github/workflows/publish-plugin.yml",
     ]) {
-      const workflow = read(file);
-      expect(workflow).toContain("clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}");
+      const text = workflow(file);
+      const guard = jobBlock(text, "guard");
+      expect(guard).toContain("environment: clawhub-publish");
+      expect(guard).toContain("clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}");
+      // Without the token upstream only reports "Not logged in", so the gate
+      // has to name the missing secret instead.
+      expect(guard).toContain("::error::CLAWHUB_TOKEN");
+
+      const mappings = text.match(/^ {6}clawhub_token: .+$/gm) ?? [];
+      // Exactly one job reads the secret, and only from its environment.
+      expect(mappings.filter((line) => line.includes("secrets.CLAWHUB_TOKEN"))).toEqual([
+        "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
+      ]);
+      // Both the publish and the retry consume the forwarded value.
+      expect(
+        mappings.filter((line) => line.includes("needs.guard.outputs.clawhub_token"))
+      ).toHaveLength(2);
     }
   });
 
@@ -246,8 +277,8 @@ describe("ClawHub publishing", () => {
   // environment, so the gate is a plain job the publishers depend on.
   it("restricts both publishes to main through the publish environment", () => {
     for (const file of ["publish-clawhub", "publish-plugin"]) {
-      const workflow = read(`.github/workflows/${file}.yml`).replace(/\r\n/g, "\n");
-      const blocks = workflow.split(/\n(?= {2}[a-z][\w-]*:\n)/);
+      const text = workflow(`.github/workflows/${file}.yml`);
+      const blocks = text.split(/\n(?= {2}[a-z][\w-]*:\n)/);
       const guard = blocks.find((block) => block.startsWith("  guard:\n"));
       expect(guard).toBeDefined();
       expect(guard).toContain("environment: clawhub-publish");
@@ -267,22 +298,13 @@ describe("ClawHub publishing", () => {
   // rejects the whole workflow as invalid and the run dies with a
   // `startup_failure` before a single job starts.
   it("grants the called publish jobs every permission they request", () => {
-    // This checkout may be CRLF while the committed file is LF.
-    const withoutCrlf = (text: string) => text.replace(/\r\n/g, "\n");
-    const caller = withoutCrlf(read(".github/workflows/publish.yml"));
-    const jobBlock = (job: string) => {
-      const start = caller.indexOf(`  ${job}:`);
-      expect(start).toBeGreaterThan(-1);
-      const rest = caller.slice(start + job.length + 3);
-      const next = rest.search(/\n {2}[a-z][a-z-]*:\n/);
-      return next === -1 ? rest : rest.slice(0, next);
-    };
+    const caller = workflow(".github/workflows/publish.yml");
 
     for (const [job, file] of [
       ["publish-clawhub", "publish-clawhub"],
       ["publish-clawhub-plugin", "publish-plugin"],
     ]) {
-      const called = withoutCrlf(read(`.github/workflows/${file}.yml`));
+      const called = workflow(`.github/workflows/${file}.yml`);
       const calledJobs = called.slice(called.indexOf("\njobs:\n"));
       const requested = [...calledJobs.matchAll(/^ {6}([\w-]+): (read|write)$/gm)].map(
         (match) => `${match[1]}: ${match[2]}`
@@ -292,14 +314,14 @@ describe("ClawHub publishing", () => {
       // Upstream mints an OIDC token to pin its own CLI source.
       expect(requested).toContain("id-token: write");
 
-      const callerGrants = jobBlock(job);
+      const callerGrants = jobBlock(caller, job);
       for (const grant of new Set(requested)) {
         expect(callerGrants).toContain(grant);
       }
     }
 
     // The called workflow uploads its inspector and publish reports.
-    expect(jobBlock("publish-clawhub-plugin")).toContain("actions: read");
+    expect(jobBlock(caller, "publish-clawhub-plugin")).toContain("actions: read");
   });
 });
 
