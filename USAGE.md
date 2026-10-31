@@ -103,7 +103,9 @@ re-crawl with `force: true` to re-parse everything.
 Outside plugin mode a process opens one database at startup, so one server serves one
 project. Register the server once per repository — `add-mcp` without `-g` writes the config into the checkout — and
 the per-project default keeps every repository on its own file. `crawl` resolves the same
-way, so `crawl repo/src` shares `repo`'s database instead of creating a nested one.
+way, so `crawl repo/src` shares `repo`'s database instead of creating a nested one. The
+plugin's per-project mode keeps only a few databases open at once and closes them when the
+session ends.
 
 ### What discovery skips
 

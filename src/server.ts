@@ -37,8 +37,7 @@ import {
   type WiringEdge,
 } from "./graph/queries.js";
 import { EDGE_KINDS, NODE_KINDS } from "./graph/schema.js";
-import type { GraphStore } from "./graph/store.js";
-import { type PluginProjects, scopedStore } from "./projects.js";
+import { type PluginProjects, type StoreSource, scopedStore } from "./projects.js";
 import { SERVER_VERSION } from "./version.js";
 
 /**
@@ -72,7 +71,7 @@ export interface ServerOptions {
 }
 
 export function createServer(
-  initialStore: GraphStore,
+  initialStore: StoreSource,
   config: Config,
   options: ServerOptions = {}
 ): McpServer {
@@ -189,6 +188,14 @@ export function createServer(
   };
 
   /**
+   * Bind `fn` to the database for the project the client is working in. This is
+   * also used by the prompt below: every handler that reads the graph must go
+   * through here, or plugin mode would silently use the fallback database.
+   */
+  const scoped = <T>(projectPath: string | undefined, fn: () => T | Promise<T>): T | Promise<T> =>
+    options.projects ? options.projects.withCall(projectPath, (bound) => run(bound, fn)) : fn();
+
+  /**
    * Every handler shares one error boundary so MCP clients always receive the
    * same `{ ok, error, hint }` shape instead of a mix of throws and payloads.
    */
@@ -206,15 +213,13 @@ export function createServer(
     ) => void;
     register(name, description, paramsSchema, async (...args: unknown[]) => {
       try {
-        if (!options.projects) return await handler(...(args as Args));
         // `crawl_project` names the project it wants; every other tool inherits
         // the client's roots or the project the previous call selected.
         const requested =
           name === "crawl_project" ? (args[0] as { path?: unknown } | undefined)?.path : undefined;
-        const store = await options.projects.forCall(
-          typeof requested === "string" ? requested : undefined
+        return await scoped(typeof requested === "string" ? requested : undefined, () =>
+          handler(...(args as Args))
         );
-        return await run(store, () => handler(...(args as Args)));
       } catch (err) {
         return errorResult(err);
       }
@@ -1319,9 +1324,25 @@ export function createServer(
       from: z.string().describe("Starting symbol"),
       to: z.string().describe("Destination symbol"),
     },
-    async ({ from, to }) => {
-      const paths = tracePath(store, from, to, { limit: 10 });
-      if (!paths || paths.length === 0) {
+    ({ from, to }) =>
+      scoped(undefined, () => {
+        const paths = tracePath(store, from, to, { limit: 10 });
+        if (!paths || paths.length === 0) {
+          return {
+            messages: [
+              {
+                role: "assistant",
+                content: {
+                  type: "text",
+                  text:
+                    `No static call path was found from \`${from}\` to \`${to}\`. ` +
+                    `Use \`search_symbols\` to confirm both symbols exist, and ` +
+                    `\`get_subgraph\` on each to inspect their neighborhoods.`,
+                },
+              },
+            ],
+          };
+        }
         return {
           messages: [
             {
@@ -1329,29 +1350,14 @@ export function createServer(
               content: {
                 type: "text",
                 text:
-                  `No static call path was found from \`${from}\` to \`${to}\`. ` +
-                  `Use \`search_symbols\` to confirm both symbols exist, and ` +
-                  `\`get_subgraph\` on each to inspect their neighborhoods.`,
+                  `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
+                  paths.map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`).join("\n") +
+                  `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
               },
             },
           ],
         };
-      }
-      return {
-        messages: [
-          {
-            role: "assistant",
-            content: {
-              type: "text",
-              text:
-                `Here are the static call paths from \`${from}\` to \`${to}\`:\n\n` +
-                paths.map((p, i) => `${i + 1}. ${p.path.join(" -> ")}`).join("\n") +
-                `\n\nUse \`get_callers\` or \`get_callees\` on intermediate symbols to explore further.`,
-            },
-          },
-        ],
-      };
-    }
+      })
   );
 
   return server;

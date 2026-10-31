@@ -6,7 +6,13 @@ import { type Config, loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
 import { searchSymbols } from "./graph/queries.js";
 import { GraphStore } from "./graph/store.js";
-import { PluginProjects, pluginDataDir, pluginModeFromEnv, pluginRootFromEnv } from "./projects.js";
+import {
+  PluginProjects,
+  pluginDataDir,
+  pluginModeFromEnv,
+  pluginRootFromEnv,
+  type StoreSource,
+} from "./projects.js";
 import { createServer } from "./server.js";
 
 /**
@@ -69,9 +75,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           })
         : undefined;
       const storeConfig = projects ? { ...config, dbPath: projects.fallbackDatabasePath } : config;
-      const store = makeStore(storeConfig);
+      // Plugin mode opens the fallback database only when no project is ever
+      // detected, so merely starting the server writes no database file.
+      const store: StoreSource = projects ? () => projects.fallbackStore() : makeStore(storeConfig);
       const server = createServer(store, storeConfig, { projects });
       const transport = new StdioServerTransport();
+      // Release SQLite handles (and checkpoint their WAL files) on the way out.
+      // `exit` is synchronous and does not suppress the default signal behavior
+      // the way a SIGINT/SIGTERM listener would.
+      transport.onclose = () => projects?.close();
+      if (projects) process.once("exit", () => projects.close());
       console.error(
         projects
           ? "code-crawler: MCP server ready (plugin mode: one database per project)"

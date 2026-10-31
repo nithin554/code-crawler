@@ -25,6 +25,13 @@ import { GraphStore } from "./graph/store.js";
 
 export type StoreFactory = (config: Config) => GraphStore;
 
+/** A store, or a factory for one. Plugin mode passes a factory so simply
+ * starting the server does not create a database file nobody asked for. */
+export type StoreSource = GraphStore | (() => GraphStore);
+
+/** Keep the number of open SQLite handles bounded in a long-lived session. */
+export const MAX_OPEN_STORES = 8;
+
 export interface PluginProjectOptions {
   config: Config;
   /** Directory the plugin was installed into; never indexed as a project. */
@@ -91,9 +98,13 @@ export class PluginProjects {
   private activeRoot?: string;
   /** Open stores stay open until shutdown so a parallel tool call can finish. */
   private readonly stores = new Map<string, GraphStore>();
-  private fallbackStore?: GraphStore;
+  /** Project roots with a tool call in flight; never evicted mid-call. */
+  private readonly inUse = new Map<string, number>();
+  private fallbackDb?: GraphStore;
   private rootsProvider?: () => Promise<string[]>;
   private cachedRoots?: string[];
+  private rootsGeneration = 0;
+  private rootsPending?: Promise<string[]>;
 
   constructor(options: PluginProjectOptions) {
     this.config = options.config;
@@ -128,6 +139,7 @@ export class PluginProjects {
   /** Drop the cached roots after `roots/list_changed`. */
   invalidateRoots(): void {
     this.cachedRoots = undefined;
+    this.rootsGeneration += 1;
   }
 
   /**
@@ -135,16 +147,38 @@ export class PluginProjects {
    * named (`crawl_project`), which always wins over roots and history.
    */
   async forCall(explicitProjectPath?: string): Promise<GraphStore> {
-    const root = await this.resolveRoot(explicitProjectPath);
-    if (root === undefined) return this.fallback();
-    return this.open(root);
+    return await this.withCall(explicitProjectPath, (store) => store);
   }
 
+  /**
+   * Resolve the store for one tool call, run `fn` against it, and release it.
+   * Concurrency: the store is reference counted for the duration of the call,
+   * so eviction never closes a database another call is still using.
+   */
+  async withCall<T>(
+    explicitProjectPath: string | undefined,
+    fn: (store: GraphStore) => T | Promise<T>
+  ): Promise<T> {
+    const root = await this.resolveRoot(explicitProjectPath);
+    const store = root === undefined ? this.fallbackStore() : this.open(root);
+    const key = root ?? "\u0000fallback";
+    this.inUse.set(key, (this.inUse.get(key) ?? 0) + 1);
+    try {
+      return await fn(store);
+    } finally {
+      const remaining = (this.inUse.get(key) ?? 1) - 1;
+      if (remaining > 0) this.inUse.set(key, remaining);
+      else this.inUse.delete(key);
+    }
+  }
+
+  /** Release every SQLite handle (called on transport close and signals). */
   close(): void {
     for (const store of this.stores.values()) this.closeStore(store);
     this.stores.clear();
-    this.closeStore(this.fallbackStore);
-    this.fallbackStore = undefined;
+    this.inUse.clear();
+    this.closeStore(this.fallbackDb);
+    this.fallbackDb = undefined;
     this.activeRoot = undefined;
   }
 
@@ -180,18 +214,33 @@ export class PluginProjects {
   private async roots(): Promise<string[]> {
     if (this.cachedRoots) return this.cachedRoots;
     if (!this.rootsProvider) return [];
-    try {
-      this.cachedRoots = await this.rootsProvider();
-    } catch {
-      this.cachedRoots = [];
+    // Share one in-flight `roots/list` between parallel tool calls, and drop the
+    // result when `roots/list_changed` arrived while the request was running.
+    if (!this.rootsPending) {
+      const generation = this.rootsGeneration;
+      const provider = this.rootsProvider;
+      this.rootsPending = (async () => {
+        try {
+          return { generation, roots: await provider() };
+        } catch {
+          return { generation, roots: [] as string[] };
+        }
+      })().then(({ generation: seen, roots }) => {
+        this.rootsPending = undefined;
+        if (seen === this.rootsGeneration) this.cachedRoots = roots;
+        return roots;
+      });
     }
-    return this.cachedRoots;
+    return await this.rootsPending;
   }
 
   private open(root: string): GraphStore {
     const resolved = path.resolve(root);
     const existing = this.stores.get(resolved);
     if (existing) {
+      // Refresh insertion order so eviction drops the least recently used handle.
+      this.stores.delete(resolved);
+      this.stores.set(resolved, existing);
       this.activeRoot = resolved;
       return existing;
     }
@@ -200,15 +249,32 @@ export class PluginProjects {
     this.stores.set(resolved, store);
     this.activeRoot = resolved;
     this.log(`using project database ${dbPath}`);
+    this.evictIdleStores(resolved);
     return store;
   }
 
-  private fallback(): GraphStore {
-    if (!this.fallbackStore) {
-      this.fallbackStore = this.makeStore({ ...this.config, dbPath: this.fallbackDatabasePath });
+  /** Close the least recently used handle, but only when no call is using it. */
+  private evictIdleStores(keep: string): void {
+    if (this.stores.size <= MAX_OPEN_STORES) return;
+    for (const [root, store] of this.stores) {
+      if (this.stores.size <= MAX_OPEN_STORES) return;
+      if (root === keep || this.inUse.has(root)) continue;
+      this.stores.delete(root);
+      this.closeStore(store);
+      this.log(`closed idle project database ${root}`);
+    }
+  }
+
+  /**
+   * Database used when no project can be identified (a chat with no workspace).
+   * Created lazily: plugin mode must not write a database just by starting up.
+   */
+  fallbackStore(): GraphStore {
+    if (!this.fallbackDb) {
+      this.fallbackDb = this.makeStore({ ...this.config, dbPath: this.fallbackDatabasePath });
       this.log(`no project detected; using ${this.fallbackDatabasePath}`);
     }
-    return this.fallbackStore;
+    return this.fallbackDb;
   }
 
   private closeStore(store: GraphStore | undefined): void {
@@ -224,17 +290,24 @@ export class PluginProjects {
 /**
  * Bind each tool call to a store through AsyncLocalStorage while every handler
  * keeps using one `GraphStore`-typed value. Concurrent calls cannot observe each
- * other's project, and a plain `createServer(store, config)` (tests, the CLI
- * fallback) resolves to `initial` unchanged.
+ * other's project, and a plain `createServer(store, config)` (tests, the CLI)
+ * resolves to `source` unchanged. A factory source is only called on first use,
+ * so plugin mode writes no fallback database until a call needs it.
  */
-export function scopedStore(initial: GraphStore): {
+export function scopedStore(source: StoreSource): {
   store: GraphStore;
   run: <T>(store: GraphStore, fn: () => T) => T;
 } {
   const storage = new AsyncLocalStorage<GraphStore>();
+  let lazy: GraphStore | undefined;
+  const initial = (): GraphStore => {
+    if (typeof source !== "function") return source;
+    lazy ??= source();
+    return lazy;
+  };
   const store = new Proxy({} as GraphStore, {
     get(_target, property) {
-      const active = storage.getStore() ?? initial;
+      const active = storage.getStore() ?? initial();
       const value = Reflect.get(active as object, property, active);
       return typeof value === "function"
         ? (value as (...args: unknown[]) => unknown).bind(active)

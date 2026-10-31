@@ -199,6 +199,9 @@ export class GraphStore {
     const dir = path.dirname(dbPath);
     if (dir && dir !== ".") fs.mkdirSync(dir, { recursive: true });
     this.db = new Database(dbPath);
+    // A project database can be shared by the CLI and a plugin server: wait for
+    // the write lock instead of failing the call with SQLITE_BUSY.
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);

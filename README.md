@@ -309,7 +309,9 @@ Outside plugin mode a server process opens one database at startup and a databas
 exactly one project, so the model is one registration per repository — which is what the
 per-project config above gives you. The plugin install instead resolves a database per
 project at call time, so one plugin serves every repository you open. Re-crawling a repository reuses its existing file and only re-parses what changed;
-two repositories never share a file, so they cannot clash.
+two repositories never share a file, so they cannot clash. Only a few project databases stay
+open at once (idle ones are closed), and every handle is released when the client
+disconnects.
 
 ### MCP Registry / `npx`
 

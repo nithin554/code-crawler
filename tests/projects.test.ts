@@ -6,11 +6,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Config } from "../src/config.js";
 import { GraphStore } from "../src/graph/store.js";
-import { PluginProjects } from "../src/projects.js";
+import { MAX_OPEN_STORES, PluginProjects } from "../src/projects.js";
 import { createServer } from "../src/server.js";
 
 let tmp: string;
 const managers: PluginProjects[] = [];
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "code-crawler-projects-"));
@@ -150,6 +152,111 @@ describe("per-project databases", () => {
   });
 });
 
+/** Track which databases were closed so eviction can be asserted. */
+function countingProjects(cwd: string, closed: string[]): PluginProjects {
+  const projects = new PluginProjects({
+    config: testConfig(),
+    dataDir: path.join(tmp, "data"),
+    cwd: () => cwd,
+    makeStore: (config) => {
+      const store = new GraphStore(config.dbPath, {
+        maxDepth: config.maxDepth,
+        defaultLimit: config.defaultLimit,
+      });
+      const close = store.close.bind(store);
+      store.close = () => {
+        closed.push(config.dbPath);
+        close();
+      };
+      return store;
+    },
+  });
+  managers.push(projects);
+  return projects;
+}
+
+describe("concurrency and resource handling", () => {
+  it("shares one roots/list request between parallel tool calls", async () => {
+    const app = project("app");
+    const projects = makeProjects(path.join(tmp, "unrelated"));
+    let calls = 0;
+    projects.setRootsProvider(async () => {
+      calls += 1;
+      await sleep(10);
+      return [app];
+    });
+
+    await Promise.all([projects.forCall(), projects.forCall(), projects.forCall()]);
+
+    expect(calls).toBe(1);
+  });
+
+  it("does not cache roots that came back after roots/list_changed", async () => {
+    const app = project("app");
+    const projects = makeProjects(path.join(tmp, "unrelated"));
+    let calls = 0;
+    let respond: (roots: string[]) => void = () => {};
+    projects.setRootsProvider(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return await new Promise<string[]>((resolve) => {
+          respond = resolve;
+        });
+      }
+      return [app];
+    });
+
+    const pending = projects.forCall();
+    await sleep(5);
+    projects.invalidateRoots();
+    respond([app]);
+    await pending;
+
+    await projects.forCall();
+    expect(calls).toBe(2);
+  });
+
+  it("keeps open databases bounded and reopens an evicted one", async () => {
+    const roots = Array.from({ length: MAX_OPEN_STORES + 4 }, (_, i) => project(`p${i}`));
+    const closed: string[] = [];
+    const projects = countingProjects(path.join(tmp, "unrelated"), closed);
+
+    for (const root of roots) await projects.forCall(root);
+
+    const dbFor = (root: string): string => path.join(root, ".code-crawler", "index.db");
+    expect(closed.length).toBeGreaterThanOrEqual(roots.length - MAX_OPEN_STORES);
+    expect(closed).not.toContain(dbFor(roots[roots.length - 1]));
+
+    const reopened = await projects.forCall(roots[0]);
+    reopened.setMeta("marker", "again");
+    expect((await projects.forCall(roots[0])).getMeta("marker")).toBe("again");
+    projects.close();
+  });
+
+  it("does not close a database a parallel call is still using", async () => {
+    const busy = project("busy");
+    const closed: string[] = [];
+    const projects = countingProjects(path.join(tmp, "unrelated"), closed);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const inFlight = projects.withCall(busy, async (store) => {
+      store.setMeta("marker", "busy");
+      await gate;
+      return store.getMeta("marker");
+    });
+    await sleep(10);
+    for (let i = 0; i < MAX_OPEN_STORES + 3; i++) await projects.forCall(project(`extra${i}`));
+
+    expect(closed).not.toContain(path.join(busy, ".code-crawler", "index.db"));
+    release();
+    expect(await inFlight).toBe("busy");
+    projects.close();
+  });
+});
+
 describe("plugin server routing", () => {
   function parse(result: {
     content: Array<{ type: string; text?: string }>;
@@ -186,6 +293,49 @@ describe("plugin server routing", () => {
       await client.close();
       projects.close();
       initial.close();
+    }
+  });
+
+  it("traces the prompt against the project database, never the fallback", async () => {
+    const app = project("app");
+    fs.mkdirSync(path.join(app, "src"));
+    fs.writeFileSync(
+      path.join(app, "src", "math.ts"),
+      "export function computeTotal() { return innerHelper(); }\n" +
+        "export function innerHelper() { return 1; }\n"
+    );
+
+    const config = testConfig();
+    const projects = makeProjects(path.join(tmp, "unrelated"));
+    projects.setRootsProvider(async () => []);
+    // Plugin mode hands the server a lazy fallback, so nothing may write it.
+    const server = createServer(() => projects.fallbackStore(), config, { projects });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const crawled = parse(
+        await client.callTool({ name: "crawl_project", arguments: { path: app } })
+      );
+      expect(crawled.ok).toBe(true);
+
+      const prompt = await client.getPrompt({
+        name: "trace-call-path",
+        arguments: {
+          from: "module:src.math#computeTotal",
+          to: "module:src.math#innerHelper",
+        },
+      });
+      const text = prompt.messages
+        .map((message) => (message.content.type === "text" ? message.content.text : ""))
+        .join("\n");
+      expect(text).toContain("Here are the static call paths");
+      expect(text).toContain("computeTotal");
+      expect(fs.existsSync(path.join(tmp, "data", "index.db"))).toBe(false);
+    } finally {
+      await client.close();
+      projects.close();
     }
   });
 });
