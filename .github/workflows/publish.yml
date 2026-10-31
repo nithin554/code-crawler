@@ -207,7 +207,10 @@ jobs:
     # A called workflow can only narrow this job's permissions, never widen them,
     # so every grant the nested jobs ask for has to be made here or the whole
     # workflow is rejected as invalid. It reads the release tag and checks that
-    # tag out, and swaps the OIDC token for the ClawHub credential.
+    # tag out, and swaps the OIDC token for the ClawHub credential. Publishing is
+    # limited to `main` by the `clawhub-publish` environment, which a job that
+    # calls a reusable workflow cannot declare itself, so the called workflow
+    # gates on it instead.
     permissions:
       contents: read
       id-token: write
@@ -229,7 +232,8 @@ jobs:
     # Same reasoning as publish-clawhub: the grants live on the job because a
     # called workflow can only narrow them, and this one reads the repository and
     # this run's artifacts, writes nothing, and needs the OIDC token upstream
-    # exchanges for the ClawHub credential.
+    # exchanges for the ClawHub credential. The `clawhub-publish` environment
+    # keeps both registers off every ref except `main`.
     permissions:
       contents: read
       actions: read # The upstream workflow uploads its inspector and publish reports

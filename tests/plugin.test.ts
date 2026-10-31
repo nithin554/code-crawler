@@ -240,6 +240,27 @@ describe("ClawHub publishing", () => {
     }
   });
 
+  // Nothing but `main` may write to the registries, so the publishes sit behind
+  // the `clawhub-publish` environment, whose deployment branch policy allows
+  // only that branch. A job that calls a reusable workflow cannot declare an
+  // environment, so the gate is a plain job the publishers depend on.
+  it("restricts both publishes to main through the publish environment", () => {
+    for (const file of ["publish-clawhub", "publish-plugin"]) {
+      const workflow = read(`.github/workflows/${file}.yml`).replace(/\r\n/g, "\n");
+      const blocks = workflow.split(/\n(?= {2}[a-z][\w-]*:\n)/);
+      const guard = blocks.find((block) => block.startsWith("  guard:\n"));
+      expect(guard).toBeDefined();
+      expect(guard).toContain("environment: clawhub-publish");
+      expect(guard).not.toContain("uses:");
+
+      const publishers = blocks.filter((block) => block.includes("uses: openclaw/"));
+      expect(publishers.length).toBeGreaterThan(0);
+      for (const publisher of publishers) {
+        expect(publisher).toMatch(/^ {4}needs: guard$|^ {6}- guard$/m);
+      }
+    }
+  });
+
   // A reusable workflow can only narrow the GITHUB_TOKEN permissions of the job
   // that calls it, never widen them, so every grant the nested jobs request must
   // also exist on the caller. Missing one does not fail at publish time: GitHub

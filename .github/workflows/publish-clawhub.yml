@@ -24,6 +24,10 @@ name: Publish Skill to ClawHub
 # Requires a CLAWHUB_TOKEN repository secret. Upstream reads the secret under
 # the name `clawhub_token`, so it is renamed at this boundary; `secrets: inherit`
 # would not rename it.
+#
+# The publish is gated on the `clawhub-publish` environment, whose deployment
+# branch policy allows only `main`. A `uses:` job cannot declare an environment,
+# so the gate is a separate `guard` job that everything else depends on.
 
 on:
   workflow_call:
@@ -52,8 +56,23 @@ on:
 permissions: {}
 
 jobs:
+  # The `clawhub-publish` environment only allows deployments from `main`, so a
+  # dispatch from a branch or tag stops here instead of writing to the registry.
+  # This is its own job because a job that calls a reusable workflow cannot
+  # declare an environment, and the gate has to sit in front of the publish.
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    environment: clawhub-publish
+    permissions: {}
+    steps:
+      - name: Confirm this ref may publish
+        shell: bash
+        run: echo "Publishing from ${GITHUB_REF}"
+
   publish:
     name: publish
+    needs: guard
     # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
     uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
     # A called workflow can only narrow the caller's token, so the OIDC grant the
@@ -82,7 +101,9 @@ jobs:
   # reset window; a dry run never writes, so it never needs one.
   publish-retry:
     name: publish (retry)
-    needs: publish
+    needs:
+      - guard
+      - publish
     if: failure() && !inputs.dry_run
     uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
     permissions:

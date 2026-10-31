@@ -314,9 +314,10 @@ List the aspects that intercept Payment#pay.</code></pre>
               keeps its own graph at <code>&lt;project&gt;/.code-crawler/index.db</code>, so
               one plugin install serves every repository you open. The skill is also on
               <a href="https://clawhub.ai">ClawHub</a> as <code>code-crawler</code>
-              (<code>clawhub install code-crawler</code>), where ClawHub owns the skill version, and
-              as a plugin bundle versioned by the release tag
-              (<code>v0.1.67</code> &rarr; <code>0.1.67</code>).
+              (<code>clawhub install code-crawler</code>), where ClawHub bumps the patch digit of
+              the version it holds, and as a plugin bundle versioned by the release tag
+              (<code>v0.1.67</code> &rarr; <code>0.1.67</code>). Both publishes are limited to
+              <code>main</code> by the <code>clawhub-publish</code> deployment environment.
             </p>
           </div>
         </div>
