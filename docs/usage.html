@@ -161,7 +161,8 @@ npx codecrawler serve</code></pre>
             Skipped the local build? Every card below has an <code>npx</code> equivalent &mdash;
             see <a href="#registry">Registry install</a>. Registering the server gives your agent
             the tools; adding the <a href="skill.html">agent skill</a> gives it the judgement to
-            know when a graph query beats plain search.
+            know when a graph query beats plain search &mdash; install it with
+            <code>npx skills add nithin554/code-crawler</code>.
           </p>
 
           <div class="grid grid-2" style="margin-top: 28px">
@@ -257,6 +258,24 @@ npx codecrawler serve</code></pre>
             <code>@nithin554/code-crawler</code>, so registry-aware clients can add it
             without cloning the repository or building it locally.
           </p>
+
+          <div class="note" style="margin-top: 24px">
+            <p>
+              <a href="https://github.com/neon-solutions/add-mcp">add-mcp</a> writes the entry
+              for you in Claude Code, Cursor, VS Code, Codex, OpenCode, Zed and the rest:
+            </p>
+            <pre><code>npx add-mcp @nithin554/code-crawler \
+  --args serve \
+  --env CODECRAWLER_DB=/absolute/path/index.db \
+  -a claude-code -g</code></pre>
+            <p>
+              It derives the server name <code>code-crawler</code> from the package.
+              <code>-a</code> picks the client &mdash; <code>npx add-mcp list-agents</code>
+              prints every accepted name &mdash; and <code>-g</code> writes user-level
+              config; drop it to register for the current project only. Repeat
+              <code>--args</code> and <code>--env</code> once per value.
+            </p>
+          </div>
 
           <div class="table-wrap" style="margin-top: 24px">
             <table>

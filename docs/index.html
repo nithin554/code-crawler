@@ -283,7 +283,9 @@ node dist/index.js status</code></pre>
 }</code></pre>
               <p class="small muted" style="margin-top: 10px">
                 No local build needed — the published package runs the same way:
-                <code>npx -y @nithin554/code-crawler@latest</code>.
+                <code>npx -y @nithin554/code-crawler@latest</code>. Or let
+                <code>npx add-mcp @nithin554/code-crawler -a claude-code -g</code> write the
+                entry for you.
                 <a href="usage.html#registry">Registry install →</a>
               </p>
             </div>
@@ -301,7 +303,8 @@ List the aspects that intercept Payment#pay.</code></pre>
               Full client setup, environment variables, and the indexing lifecycle live in
               <a href="usage.html">Usage</a>. Worked request/response pairs are in
               <a href="examples.html">Examples</a>, and the <a href="skill.html">agent skill</a>
-              teaches your agent when to reach for the graph.
+              teaches your agent when to reach for the graph &mdash; install it with
+              <code>npx skills add nithin554/code-crawler</code>.
             </p>
           </div>
         </div>

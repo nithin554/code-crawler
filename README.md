@@ -255,6 +255,22 @@ if green, **auto-releases**:
 
 ## Using as an MCP server
 
+### One command
+
+[`add-mcp`](https://github.com/neon-solutions/add-mcp) registers the server in whichever
+client you name — Claude Code, Cursor, VS Code, Claude Desktop, Codex, OpenCode, Zed, and
+more (`npx add-mcp list-agents`):
+
+```bash
+npx add-mcp @nithin554/code-crawler \
+  --args serve \
+  --env CODECRAWLER_DB=/absolute/path/to/index.db \
+  -a claude-code -g
+```
+
+The server name `code-crawler` is derived from the package. `-g` writes user-level config;
+drop it to register for the current project only.
+
 ### MCP Registry / `npx`
 
 The server is listed in the MCP Registry as `io.github.nithin554/code-crawler`.
@@ -361,7 +377,13 @@ crawl-first workflow, `reference/tools.md` mapping all 27 tools to the questions
 answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
 nodes.
 
-Copy the directory into your client's skills folder (`~/.claude/skills/code-crawler/`,
+```bash
+npx skills add nithin554/code-crawler
+```
+
+The [skills CLI](https://skills.sh) finds it by convention and installs to whichever agents
+you pick; `npx skills update` refreshes it. To install by hand instead, copy the directory
+into your client's skills folder (`~/.claude/skills/code-crawler/`,
 `.claude/skills/code-crawler/`, or a plugin's `skills/` root). No build step. See
 [`USAGE.md`](USAGE.md#installing-the-agent-skill).
 

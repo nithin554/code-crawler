@@ -15,6 +15,11 @@ registered and nothing else in this skill will run. Say so instead of falling ba
 `grep` — and ask before editing a client config file, which is the user's machine
 state, not yours.
 
+Installing the *skill* does not install the *server*: `npx skills add nithin554/code-crawler`
+delivers these instructions, and `npx add-mcp @nithin554/code-crawler` — or the config
+below — registers the server that delivers the tools. Both are needed, and they are
+independent.
+
 The server is the npm package `@nithin554/code-crawler` and needs Node.js ≥ 22.12. Every
 stdio MCP client takes the same command/args/env triple:
 
@@ -34,6 +39,21 @@ stdio MCP client takes the same command/args/env triple:
 `"command": "codecrawler"` with `"args": ["serve"]`. From a source checkout, point
 `"command": "node"` at `dist/index.js`, keeping `"args": ["serve"]`. `serve` is the default
 subcommand, so `args` may omit it.
+
+Writing that JSON by hand is the slow way. `add-mcp` fills it in for whichever client you
+name:
+
+```bash
+npx add-mcp @nithin554/code-crawler \
+  --args serve \
+  --env CODECRAWLER_DB=/absolute/path/to/index.db \
+  -a claude-code -g
+```
+
+It derives the server name `code-crawler` from the package, so no `--name` is needed. `-a`
+accepts `claude-code`, `cursor`, `vscode`, `claude-desktop`, `codex`, `opencode`, `zed` and
+about twenty more — `npx add-mcp list-agents` prints the list. `-g` writes user-level config;
+drop it to register for the current project only. Repeat `--args` and `--env` once per value.
 
 Three things decide whether the graph is usable:
 

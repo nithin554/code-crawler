@@ -140,6 +140,7 @@ describe("skill install instructions", () => {
     name: string;
     engines: { node: string };
     bin: Record<string, string>;
+    repository: { url: string };
   };
 
   it("names the real published package", () => {
@@ -156,6 +157,50 @@ describe("skill install instructions", () => {
       // Prose uses backticks, the config snippet uses JSON quotes.
       expect(skill, `${command} is not documented`).toMatch(new RegExp(`[\`"]${command}[\`"]`));
     }
+  });
+
+  it("points the skills CLI at the real repository", () => {
+    // `npx skills add owner/repo` discovers skills/<name>/SKILL.md by convention, so a
+    // wrong owner or repo name installs nothing at all.
+    const remote = /github\.com[/:]([^/\s]+)\/([^/\s.]+?)(?:\.git)?\s*$/.exec(pkg.repository.url);
+    expect(remote, `unrecognised repository url: ${pkg.repository.url}`).not.toBeNull();
+    const shorthand = /npx skills add ([a-z0-9-]+\/[a-z0-9-]+)/i.exec(read(SKILL));
+    expect(shorthand?.[1], "SKILL.md does not document `npx skills add`").toBe(
+      `${remote?.[1]}/${remote?.[2]}`
+    );
+  });
+
+  it("documents the add-mcp installer for the server", () => {
+    // add-mcp registers the server, and a wrong package name there installs nothing.
+    // Leaving it out entirely pushes the agent into hand-editing a config it does not own.
+    const addMcp = /npx add-mcp (@[a-z0-9-]+\/[a-z0-9-]+)/i.exec(read(SKILL))?.[1];
+    expect(addMcp, "SKILL.md does not document `npx add-mcp`").toBe(pkg.name);
+  });
+
+  it("offers the one-line installers from every entry point", () => {
+    // README, USAGE, and the docs site are where people land first. An installer
+    // documented in only one of them is effectively hidden.
+    const surfaces = [
+      "README.md",
+      "USAGE.md",
+      path.join("docs", "index.html"),
+      path.join("docs", "skill.html"),
+      path.join("docs", "usage.html"),
+    ];
+    for (const surface of surfaces) {
+      expect(read(path.join(ROOT, surface)), `${surface} does not mention add-mcp`).toContain(
+        "add-mcp"
+      );
+      expect(read(path.join(ROOT, surface)), `${surface} does not mention skills add`).toMatch(
+        /skills add|skills\.sh/
+      );
+    }
+  });
+
+  it("says that installing the skill does not install the server", () => {
+    // The two installs are independent; conflating them leaves an agent with
+    // instructions and no tools.
+    expect(read(SKILL).toLowerCase()).toContain("does not install the *server*".toLowerCase());
   });
 
   it("states a Node floor that matches engines.node", () => {

@@ -121,6 +121,20 @@ failure payload — handlers never throw across the MCP boundary:
 
 ### Wiring it into an MCP client
 
+[`add-mcp`](https://github.com/neon-solutions/add-mcp) writes the client config for you:
+
+```bash
+npx add-mcp @nithin554/code-crawler \
+  --args serve \
+  --env CODECRAWLER_DB=/absolute/path/to/index.db \
+  -a claude-code -g
+```
+
+`-a` takes `claude-code`, `cursor`, `vscode`, `claude-desktop`, `codex`, `opencode`, `zed`,
+and more (`npx add-mcp list-agents` lists them all). `-g` writes user-level config; drop it
+to register for the current project only. The rest of this section is the hand-written
+equivalent, useful when you want to inspect or version the file.
+
 Claude Desktop (`claude_desktop_config.json`):
 
 ```json
@@ -140,8 +154,26 @@ Cursor, Zed, VS Code, and other stdio MCP clients take the same command/args/env
 ### Installing the agent skill
 
 The MCP server tells an agent *what* it can call. The skill tells it *when* to — which
-question deserves a graph query and which is better answered by reading a file. Both
-ship in the npm package.
+question deserves a graph query and which is better answered by reading a file. The skill
+needs no build step and does not depend on `dist/`, so it can be installed on its own:
+
+```bash
+npx skills add nithin554/code-crawler
+```
+
+The [skills CLI](https://skills.sh) finds `skills/code-crawler/` by convention, asks which
+agents to install to, and writes a `skills-lock.json` you can commit so teammates reproduce
+the setup. Install to your user directory instead of the project with `-g`, or skip the
+prompts entirely:
+
+```bash
+npx skills add nithin554/code-crawler -g -a claude-code -y
+```
+
+`npx skills update` refreshes an installed copy. The CLI itself needs Node.js ≥ 22.20,
+which is stricter than the server's floor.
+
+Installing the server separately, or copying by hand? The skill is also in the npm package:
 
 ```bash
 npm install @nithin554/code-crawler
@@ -157,15 +189,12 @@ Copy `skills/code-crawler/` into whichever directory your client loads skills fr
 | Plugin or marketplace skill directory | `skills/code-crawler/` inside the plugin root |
 
 The directory is self-contained — `SKILL.md` plus a `reference/` folder — so a plain copy
-is the whole install. No build step, and no dependency on `dist/`.
+is the whole install.
 
-`SKILL.md` also repeats the client config above and the one-database-per-project rule, so an
-agent that has the skill but not the server can tell the difference and ask for the right fix.
-
-`SKILL.md` carries the discovery `description` and the crawl-first workflow;
-`reference/tools.md` maps all 27 tools to the questions they answer;
-`reference/edge-semantics.md` explains `confidence`, `external`, and phantom nodes, which
-are the three things agents misread most.
+`SKILL.md` carries the discovery `description`, the client config above, the
+one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps all
+27 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
+`external`, and phantom nodes, which are the three things agents misread most.
 
 ---
 

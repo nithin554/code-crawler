@@ -147,14 +147,27 @@
       <section class="section" id="install">
         <div class="wrap">
           <span class="eyebrow">Install</span>
-          <h2>Copy the directory</h2>
+          <h2>One command</h2>
           <div class="code-card">
-            <div class="code-title">From the npm package</div>
-            <pre><code>npm install @nithin554/code-crawler
+            <div class="code-title">Via the skills CLI</div>
+            <pre><code>npx skills add nithin554/code-crawler</code></pre>
+          </div>
+          <p>
+            <a href="https://skills.sh">skills.sh</a> finds <code>skills/code-crawler/</code>
+            by convention &mdash; no registry entry needed &mdash; and installs the whole
+            directory, <code>reference/</code> included. It writes a
+            <code>skills-lock.json</code> you can commit so the rest of the team reproduces
+            the setup. <code>npx skills update</code> refreshes it later.
+          </p>
+          <div class="code-card">
+            <div class="code-title">Non-interactive, or from the npm package</div>
+            <pre><code>npx skills add nithin554/code-crawler -g -a claude-code -y
+
+npm install @nithin554/code-crawler
 # skill lives at:
 #   node_modules/@nithin554/code-crawler/skills/code-crawler/</code></pre>
           </div>
-          <p>Copy <code>skills/code-crawler/</code> wherever your client loads skills from:</p>
+          <p>Or copy <code>skills/code-crawler/</code> wherever your client loads skills from:</p>
           <table>
             <thead>
               <tr><th>Layout</th><th>Destination</th></tr>
@@ -175,9 +188,23 @@
             </tbody>
           </table>
           <p>
-            The MCP server still needs registering separately &mdash; see
-            <a href="usage.html#registry">Usage</a>. The skill and the server are independent:
-            the skill is judgement, the server is capability.
+            The MCP server still needs registering separately &mdash; the skill is judgement,
+            the server is capability, and they are independent. The shortest route is
+            <a href="https://github.com/neon-solutions/add-mcp">add-mcp</a>:
+          </p>
+          <div class="code-card">
+            <div class="code-title">Register the server, not the skill</div>
+            <pre><code>npx add-mcp @nithin554/code-crawler \
+  --args serve \
+  --env CODECRAWLER_DB=/absolute/path/index.db \
+  -a claude-code -g</code></pre>
+          </div>
+          <p>
+            <code>-a</code> accepts <code>claude-code</code>, <code>cursor</code>,
+            <code>vscode</code>, <code>claude-desktop</code>, <code>codex</code>,
+            <code>opencode</code>, <code>zed</code> and more &mdash;
+            <code>npx add-mcp list-agents</code> lists them. Full details in
+            <a href="usage.html#registry">Usage</a>.
           </p>
         </div>
       </section>
