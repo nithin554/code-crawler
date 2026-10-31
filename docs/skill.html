@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="google-site-verification" content="URgYOLgzCY-V-CbXInuNNyseZdk3NOCpVA5K6nTz9Mw" />
+    <link rel="canonical" href="https://nithin554.github.io/code-crawler/skill.html" />
+    <title>Agent skill &mdash; Code-Crawler</title>
+    <meta
+      name="description"
+      content="Install the Code-Crawler agent skill so your coding agent knows when an indexed call graph beats plain search."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Code-Crawler" />
+    <meta property="og:title" content="Agent skill &mdash; Code-Crawler" />
+    <meta
+      property="og:description"
+      content="Install the Code-Crawler agent skill so your coding agent knows when an indexed call graph beats plain search."
+    />
+    <meta property="og:url" content="https://nithin554.github.io/code-crawler/skill.html" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a href="skill.html" aria-current="page">Skill</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Integration</span>
+          <h1>Agent skill</h1>
+          <p class="lead">
+            The MCP server tells an agent <em>what</em> it can call. The skill tells it
+            <em>when</em> &mdash; which questions deserve a graph query, and which are better
+            answered by reading the file in front of it.
+          </p>
+          <div class="toc">
+            <a href="#why">Why a skill</a>
+            <a href="#contents">What's inside</a>
+            <a href="#install">Install</a>
+            <a href="#drift">Drift guards</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="why">
+        <div class="wrap">
+          <span class="eyebrow">The gap</span>
+          <h2>Tools without judgement</h2>
+          <p>
+            Registering an MCP server answers &ldquo;what can I call&rdquo;. It does not answer
+            &ldquo;should I call anything at all&rdquo;. An agent that knows 27 tools exist will
+            still reach for <code>grep</code> when searching would do, and will crawl a monorepo
+            to answer a question about one file it already has open.
+          </p>
+          <p>
+            A skill is progressive-disclosure documentation the agent loads on demand. It costs
+            nothing until it is relevant, and it carries the one thing a tool schema cannot: the
+            decision rule.
+          </p>
+          <div class="grid grid-2">
+            <div class="card">
+              <h3>Graph questions</h3>
+              <p>
+                Who calls this? What breaks if I change it? Where does a request enter? Is this
+                reachable at all? These have no cheap text answer &mdash; the answer is spread
+                across files that never mention each other.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Search questions</h3>
+              <p>
+                Where is <code>ThingFactory</code> defined? Show me this function's body. Reading
+                the file is faster and more accurate than crawling, and the skill says so
+                explicitly.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="contents">
+        <div class="wrap">
+          <span class="eyebrow">Contents</span>
+          <h2>Three files, no build step</h2>
+          <p>
+            The skill is plain Markdown and ships inside the npm package, so installing it is a
+            copy. It does not depend on <code>dist/</code>.
+          </p>
+          <div class="grid grid-3">
+            <div class="card">
+              <h3>SKILL.md</h3>
+              <p>
+                Discovery frontmatter plus the crawl-first workflow: <code>index_status</code>
+                before trusting any index, <code>crawl_project</code> once and incrementally,
+                and <code>force</code> after a history rewrite.
+              </p>
+            </div>
+            <div class="card">
+              <h3>reference/tools.md</h3>
+              <p>
+                All 27 tools grouped by the question they answer, with the one argument that
+                matters for each and notes on when not to use them.
+              </p>
+            </div>
+            <div class="card">
+              <h3>reference/edge-semantics.md</h3>
+              <p>
+                <code>confidence</code>, <code>external</code>, and phantom nodes &mdash; the
+                three things agents misread most, plus the ways a &ldquo;missing&rdquo; edge is
+                legitimate.
+              </p>
+            </div>
+          </div>
+
+          <div class="code-card">
+            <div class="code-title">The decision rule, verbatim</div>
+            <pre><code>| Question                                   | Use                        |
+| Who calls this method?                     | get_callers                |
+| What breaks if I change this?              | impact_analysis            |
+| Where is ThingFactory defined?             | plain search - do not crawl|
+| Show me the body of this function          | plain file read - do not crawl |</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="wrap">
+          <span class="eyebrow">Install</span>
+          <h2>Copy the directory</h2>
+          <div class="code-card">
+            <div class="code-title">From the npm package</div>
+            <pre><code>npm install @nithin554/code-crawler
+# skill lives at:
+#   node_modules/@nithin554/code-crawler/skills/code-crawler/</code></pre>
+          </div>
+          <p>Copy <code>skills/code-crawler/</code> wherever your client loads skills from:</p>
+          <table>
+            <thead>
+              <tr><th>Layout</th><th>Destination</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Personal skills folder</td>
+                <td><code>~/.claude/skills/code-crawler/</code></td>
+              </tr>
+              <tr>
+                <td>Project-scoped skills</td>
+                <td><code>.claude/skills/code-crawler/</code></td>
+              </tr>
+              <tr>
+                <td>Plugin or marketplace</td>
+                <td><code>skills/code-crawler/</code> inside the plugin root</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            The MCP server still needs registering separately &mdash; see
+            <a href="usage.html#registry">Usage</a>. The skill and the server are independent:
+            the skill is judgement, the server is capability.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="drift">
+        <div class="wrap">
+          <span class="eyebrow">Maintenance</span>
+          <h2>It cannot rot</h2>
+          <p>
+            Documentation that is not asserted against code drifts. <code>tests/skill.test.ts</code>
+            parses the skill and fails when it disagrees with the live registry:
+          </p>
+          <div class="grid grid-2">
+            <div class="card">
+              <h3>Registry parity</h3>
+              <p>
+                The tool table in <code>reference/tools.md</code> must list exactly the tools the
+                server registers &mdash; no missing tool, no stale one.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Vocabulary parity</h3>
+              <p>
+                Every edge kind in <code>schema.ts</code>, every confidence band the resolver
+                emits, and every phantom prefix must be documented.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Give your agent the decision rule</h2>
+      <p>Install the server, then copy the skill into your client's skills directory.</p>
+      <a class="btn btn-primary" href="usage.html">Quickstart &rarr;</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler &middot; MIT licensed &middot; <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> &middot;
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> &middot;
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> &middot;
+          <a href="tools.html">Tools</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

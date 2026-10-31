@@ -137,6 +137,33 @@ Claude Desktop (`claude_desktop_config.json`):
 
 Cursor, Zed, VS Code, and other stdio MCP clients take the same command/args/env triple.
 
+### Installing the agent skill
+
+The MCP server tells an agent *what* it can call. The skill tells it *when* to — which
+question deserves a graph query and which is better answered by reading a file. Both
+ship in the npm package.
+
+```bash
+npm install @nithin554/code-crawler
+# the skill is at node_modules/@nithin554/code-crawler/skills/code-crawler/
+```
+
+Copy `skills/code-crawler/` into whichever directory your client loads skills from:
+
+| Layout | Destination |
+| --- | --- |
+| Personal skills folder | `~/.claude/skills/code-crawler/` (or your client's equivalent) |
+| Project-scoped skills | `.claude/skills/code-crawler/` beside the repo you index |
+| Plugin or marketplace skill directory | `skills/code-crawler/` inside the plugin root |
+
+The directory is self-contained — `SKILL.md` plus a `reference/` folder — so a plain copy
+is the whole install. No build step, and no dependency on `dist/`.
+
+`SKILL.md` carries the discovery `description` and the crawl-first workflow;
+`reference/tools.md` maps all 27 tools to the questions they answer;
+`reference/edge-semantics.md` explains `confidence`, `external`, and phantom nodes, which
+are the three things agents misread most.
+
 ---
 
 ## 2. Crawling a real project

@@ -1,0 +1,97 @@
+---
+name: code-crawler
+description: Answer questions about code relationships in an indexed repository - callers, callees, impact, entry points, routes, DI wiring, dead code, cycles - using the code-crawler MCP server's SQLite property graph. Use when the question is about how symbols connect (who calls this, what breaks if I change it, where does a request enter, is this reachable) rather than about text you can find by searching. Do not crawl a repository just to answer a question about a single file you already have open.
+---
+
+# Code Crawler
+
+A SQLite property graph of a codebase, exposed as 27 MCP tools. The graph is built
+once by a crawl, then queried cheaply many times.
+
+## When to reach for it
+
+The graph answers **relationship** questions. Text search answers **location** questions.
+Picking the wrong one wastes the most time of anything in this skill.
+
+| Question | Use |
+| --- | --- |
+| Who calls this method? | `get_callers` |
+| What does this method call? | `get_callees` |
+| What breaks if I change this? | `impact_analysis` |
+| Where does a request enter this system? | `find_entry_points`, `find_routes` |
+| Which implementation handles this interface? | `find_implementations` |
+| Is this method reachable at all? | `find_dead_code`, `find_hotspots` |
+| How does this request reach that handler? | `trace_path`, `trace_execution` |
+| What is wired in by DI or annotations? | `find_injections`, `find_annotated`, `get_decorators` |
+| What third-party code is actually used? | `find_external_dependencies` |
+| Where is `ThingFactory` defined? | **plain search** - do not crawl |
+| Show me the body of this function | **plain file read** - do not crawl |
+
+Crawling is not free: it parses every file in the project. Do it when you intend to ask
+several relationship questions, or when one relationship question has no cheaper answer.
+For a single-file question you already have open, reading the file beats crawling the repo.
+
+## Bootstrap
+
+1. `index_status` first. If it reports files and a recent crawl, the index is already
+   warm and you can skip step 2.
+2. `crawl_project` with the project root. It is idempotent and incremental - unchanged
+   files are skipped via a content manifest, so a second crawl is cheap.
+3. Only then run the query tools.
+
+**Never trust a stale index.** Call `index_status` before concluding "there are no
+callers". An empty result from an empty or stale index is indistinguishable from a true
+negative, and that is the single most common way this tool misleads.
+
+Re-index with the `force` option when the working tree changed underneath the index:
+
+- after a rebase, merge, or `git reset` that rewrote history
+- after switching branches with a large diff
+- after `git stash pop`
+
+An incremental crawl keys off file content and mtime, which is enough for ordinary
+editing but not for a history rewrite. `force: true` bypasses the manifest.
+
+## Reading the results
+
+Two fields decide whether a result means what you think: `confidence` and `external`.
+Phantom nodes mark the third trap. See
+[reference/edge-semantics.md](reference/edge-semantics.md) before reasoning about
+"unreachable" or "no callers".
+
+Short version:
+
+- `confidence` is not a probability. It is a band: `1.0` resolved by construction,
+  `0.9`/`0.85` strong static evidence, `0.8` inherited or external, `0.5` heuristics,
+  `0` phantom.
+- `external: true` means the target is outside the project. It is *not* dead code and
+  *not* unresolved.
+- `__phantom__:` / `__reflect__:` / `__inject__:` targets mark something the resolver
+  could not bind. They are inventory, not findings.
+
+## Reference
+
+- [reference/tools.md](reference/tools.md) - all 27 tools, grouped by the question they
+  answer, with the argument that matters most for each.
+- [reference/edge-semantics.md](reference/edge-semantics.md) - `confidence`, `external`,
+  phantom nodes, and the ways a "missing" edge is legitimate.
+
+## Budget discipline
+
+Every list-returning tool accepts `max_tokens` (100-200000) and `cursor`. The response
+then carries a `page` block with `totalCount`, `truncated`, and `nextCursor`.
+
+Start with a small `max_tokens` and widen only if the answer is genuinely incomplete.
+Reading one page of `get_callers` and reporting the shape is almost always better than
+paging through all of them. Prefer `explain_symbol` over chaining `get_node` +
+`get_callers` + `get_callees` + `get_decorators` when you want a digest rather than a
+specific list.
+
+## Do not
+
+- Crawl a monorepo to answer a question about one file.
+- Report "no callers" or "dead code" without checking `confidence` and `external` on the
+  edges you did get.
+- Treat `find_unresolved` as a bug list. It is a coverage report; some entries are
+  dynamic dispatch that cannot be resolved statically.
+- Page through an entire result set to count things. Use `totalCount` from the first page.

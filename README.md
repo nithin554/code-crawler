@@ -353,6 +353,21 @@ so cutting one list would leave edges pointing at omitted nodes. It is bounded b
 single-object tools (`get_node`, `index_status`, `get_schema`) return one object and take no
 budget.
 
+### Agent skill
+
+The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`
+ships in the npm package and is plain Markdown — `SKILL.md` for discovery and the
+crawl-first workflow, `reference/tools.md` mapping all 27 tools to the questions they
+answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
+nodes.
+
+Copy the directory into your client's skills folder (`~/.claude/skills/code-crawler/`,
+`.claude/skills/code-crawler/`, or a plugin's `skills/` root). No build step. See
+[`USAGE.md`](USAGE.md#installing-the-agent-skill).
+
+`tests/skill.test.ts` asserts the skill's tool table against the live registry, so it
+cannot drift as tools are added.
+
 ## Graph model
 
 **Nodes** — `kind` is one of `file | package | module | class | interface | enum | method |
