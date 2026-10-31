@@ -307,13 +307,20 @@ plugin is published there too:
   `plugins/code-crawler/package.json` is packaging metadata — ClawHub needs a package
   manifest to inspect the bundle and build its ClawPack artifact, and warns when one is
   missing — so the release workflow stamps the tag's version into it, packs the bundle, and
-  hands that tarball to the publish; the committed `version` is only a placeholder.
+  publishes that tarball; the committed `version` is only a placeholder.
 
-Publishing is restricted to `main`. Both jobs deploy through the `clawhub-publish`
+The plugin publish runs the official `clawhub` CLI itself, under Node, rather than calling
+upstream's reusable `package-publish.yml`. That workflow cannot publish this bundle: it
+inspects the packed artifact with `bun ... package validate`, and the CLI refuses to run under
+Bun ("Plugin validation requires Node.js 22.13+ (22.x) or 24+"). A ClawPack always contains
+`package/package.json` and no input skips the step, so the call only ever succeeded while the
+bundle had no manifest — the very thing ClawHub warns about.
+
+Publishing is restricted to `main`. The publishing jobs deploy through the `clawhub-publish`
 environment, whose deployment branch policy rejects any other ref, so a manual dispatch from
 a feature branch stops before it can upload. `CLAWHUB_TOKEN` is a repository secret, not an
-environment secret: an environment secret is only readable by a job that declares that
-environment, and a job that calls a reusable workflow cannot declare one. Forwarding the value
+environment secret: the skill call hands it to upstream, which reads it as `clawhub_token`, and
+a job that calls a reusable workflow cannot declare an environment. Forwarding the value
 through a job output does not help either — GitHub refuses to emit a secret-valued output and
 logs `Skip output 'clawhub_token' since it may contain secret`.
 

@@ -230,14 +230,13 @@ jobs:
       - build-and-test
     if: github.actor != 'dependabot[bot]'
     # Same reasoning as publish-clawhub: the grants live on the job because a
-    # called workflow can only narrow them, and this one reads the repository and
-    # this run's artifacts, writes nothing, and needs the OIDC token upstream
-    # exchanges for the ClawHub credential. The `clawhub-publish` environment
-    # keeps both registers off every ref except `main`.
+    # called workflow can only narrow them, and this one only downloads this
+    # run's packed bundle, so it needs no write scope and no OIDC token - the
+    # credential comes from the `clawhub-publish` environment, which is also what
+    # keeps the registry off every ref except `main`.
     permissions:
       contents: read
-      actions: read # The upstream workflow uploads its inspector and publish reports
-      id-token: write
+      actions: read # Downloading this run's artifact
     # The bundle is static JSON, so it could publish without waiting on a build,
     # but gating on the tests keeps a broken commit from reaching the catalog.
     uses: ./.github/workflows/publish-plugin.yml
