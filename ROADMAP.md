@@ -18,7 +18,7 @@
 | Resolution | One `Resolver` contract, two implementations: `java` (declared types + hierarchy) and `module` (imports and barrels) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 28 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
+| Tests | 29 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is the **per-language entry cost**: a new language needs a
@@ -34,15 +34,16 @@ row. Phase 0 shrank that to data.
 | Item | Change | Effort | Status |
 |---|---|---|---|
 | 0.1 | Collapse `javaResolver.ts` and `genericResolver.ts` behind one `Resolver` interface with declared capabilities | M | **done** — `Resolver` in `resolver/types.ts`, looked up through `resolver/registry.ts`; `crawler.ts` no longer branches on language |
-| 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M | **open** — parsers still own their conventions, though each now declares which frameworks it detects |
+| 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M | **done** — one module per framework in `parser/frameworks/`, resolved through `frameworks/index.ts`; a file's imports pick the evidence, its descriptor settles ties. Parsers keep only syntax: receiver heuristics, path joining and entry-point detail text |
 | 0.3 | One language descriptor: extensions → grammar → resolver → frameworks → fixture path | S | **done** — `LanguageDescriptor` in `parser/language.ts`, declared beside each parser |
 | 0.4 | Conformance suite every language must pass (types, calls, imports, one route, one reflection) | S | **done** — `tests/language-conformance.test.ts`, now also asserting it covers exactly the registered languages |
 | 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots | S | **partly done** — discovery globs and language overrides ship in `loadCrawlerRc`; module roots and tsconfig paths are still open |
 
 **Exit criteria:** a new language needs no edits to existing language modules, and CI
 fails if the conformance suite regresses. *Both now hold: dispatch reads the
-descriptor, and the conformance suite fails if a registered language has no contract
-row or points at a missing fixture.*
+descriptor, the conformance suite fails if a registered language has no contract
+row or points at a missing fixture, and a new framework is a module in
+`parser/frameworks/` rather than an edit to each parser that can host it.*
 
 ## Phase 1 — Resolution quality
 

@@ -1,4 +1,11 @@
 import { controlFlowOf, type FlowSpec, insideAny } from "../controlFlow.js";
+import {
+  entryPointIn,
+  type FrameworkScope,
+  frameworkScope,
+  injectableIn,
+  injectionIn,
+} from "../frameworks/index.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -64,17 +71,6 @@ const TS_FLOWS: FlowSpec[] = [
 
 const SKIP_CALL_ANCESTORS = new Set(["decorator", "import_statement"]);
 
-const HTTP_DECORATORS = new Set([
-  "Get",
-  "Post",
-  "Put",
-  "Delete",
-  "Patch",
-  "Head",
-  "Options",
-  "All",
-]);
-
 const HTTP_METHODS = new Set(["get", "post", "put", "delete", "patch", "head", "options", "all"]);
 
 const ROUTE_RECEIVERS = new Set([
@@ -86,41 +82,6 @@ const ROUTE_RECEIVERS = new Set([
   "routes",
   "express",
   "application",
-]);
-
-const PARAM_DECORATORS = new Set([
-  "Body",
-  "Param",
-  "Query",
-  "Headers",
-  "Req",
-  "Res",
-  "Session",
-  "UploadedFile",
-  "UploadedFiles",
-  "Ip",
-  "HostParam",
-]);
-
-const INJECT_DECORATORS = new Set([
-  "Inject",
-  "InjectRepository",
-  "InjectModel",
-  "InjectDataSource",
-  "Autowired",
-]);
-
-const DI_CLASS_DECORATORS = new Set([
-  "Injectable",
-  "Controller",
-  "Component",
-  "Service",
-  "Directive",
-  "Pipe",
-  "Guard",
-  "Gateway",
-  "Resolver",
-  "Module",
 ]);
 
 interface MethodRange {
@@ -183,6 +144,20 @@ export const typescriptConfig: LanguageDescriptor = {
     const reflectiveRefs: ReflectiveRef[] = [];
     const injections: InjectionPoint[] = [];
     const routes: RouteRegistration[] = [];
+
+    /**
+     * Conventions this file is judged against. Imports are collected as the tree
+     * is walked, so the scope is rebuilt whenever another import appears.
+     */
+    let scopeCache: FrameworkScope = frameworkScope([], typescriptConfig.frameworks);
+    let scopeImportCount = 0;
+    function scope(): FrameworkScope {
+      if (scopeImportCount !== imports.length) {
+        scopeCache = frameworkScope(imports, typescriptConfig.frameworks);
+        scopeImportCount = imports.length;
+      }
+      return scopeCache;
+    }
 
     const methodRanges: MethodRange[] = [];
     const typeRanges: TypeRange[] = [
@@ -292,24 +267,27 @@ export const typescriptConfig: LanguageDescriptor = {
     ): EntryPointInfo | undefined {
       for (const annotation of annotations) {
         const simple = annotation.name;
-        if (HTTP_DECORATORS.has(simple)) {
-          const path = annotationString(annotation);
-          return {
-            kind: "http",
-            detail: `${simple.toUpperCase()} ${joinPath(controllerPath, path)}`.trim(),
-          };
+        const match = entryPointIn(scope(), simple);
+        if (!match) continue;
+        switch (match.spec.kind) {
+          case "http":
+            return {
+              kind: "http",
+              detail:
+                `${simple.toUpperCase()} ${joinPath(controllerPath, annotationString(annotation))}`.trim(),
+            };
+          case "messaging":
+            return {
+              kind: "messaging",
+              detail: `${simple} ${annotationString(annotation)}`.trim(),
+            };
+          case "scheduler": {
+            const first = annotation.arguments[0] ? stringContent(annotation.arguments[0]) : "";
+            return { kind: "scheduler", detail: `${simple} ${first}`.trim() };
+          }
+          default:
+            return { kind: match.spec.kind, detail: simple };
         }
-        if (simple === "MessagePattern" || simple === "EventPattern" || simple === "OnMessage") {
-          return { kind: "messaging", detail: `${simple} ${annotationString(annotation)}`.trim() };
-        }
-        if (simple === "Cron" || simple === "Interval" || simple === "Timeout") {
-          const first = annotation.arguments[0] ? stringContent(annotation.arguments[0]) : "";
-          return { kind: "scheduler", detail: `${simple} ${first}`.trim() };
-        }
-        if (simple === "OnEvent" || simple === "EventSubscriber" || simple === "SubscribeMessage") {
-          return { kind: "event", detail: simple };
-        }
-        if (simple === "Test" || simple === "It") return { kind: "test", detail: simple };
       }
       if (/^(test|it)$/i.test(name)) return { kind: "test", detail: name };
       return undefined;
@@ -466,7 +444,7 @@ export const typescriptConfig: LanguageDescriptor = {
       typeRanges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, id });
       scopeTypes.set(name, id);
 
-      const injectable = annotations.some((a) => DI_CLASS_DECORATORS.has(a.name));
+      const injectable = annotations.some((a) => injectableIn(scope(), a.name));
       const controller = annotations.find((a) => a.name === "Controller");
       const controllerPath = controller ? annotationString(controller) : "";
 
@@ -539,14 +517,17 @@ export const typescriptConfig: LanguageDescriptor = {
         annotations
       );
 
-      const injectDecorator = annotations.find((a) => INJECT_DECORATORS.has(a.name));
+      const injectDecorator = annotations.find((a) => {
+        const label = injectionIn(scope(), a.name);
+        return label !== undefined && label !== "nestjs-param";
+      });
       if (injectDecorator || (injectable && !declared)) {
         injections.push({
           kind: "field",
           ownerId: classId,
           name,
           type: declared || (injectDecorator?.arguments[0] ?? "").trim(),
-          framework: injectDecorator?.name === "Autowired" ? "spring" : "nestjs",
+          framework: injectionIn(scope(), injectDecorator?.name ?? "") ?? "nestjs",
           line: node.startPosition.row,
         });
       }
@@ -578,7 +559,7 @@ export const typescriptConfig: LanguageDescriptor = {
         isConstructor: rawName === "constructor",
       });
       for (const annotation of annotations) {
-        if (!HTTP_DECORATORS.has(annotation.name)) continue;
+        if (entryPointIn(scope(), annotation.name)?.spec.kind !== "http") continue;
         routes.push({
           framework: "nestjs",
           httpMethod: annotation.name.toUpperCase(),
@@ -700,8 +681,13 @@ export const typescriptConfig: LanguageDescriptor = {
           addField(ownerTypeId, name, declared, param.startPosition.row);
         }
 
-        const injectDecorator = paramDecorators.find((d) => INJECT_DECORATORS.has(d.name));
-        const bindingDecorator = paramDecorators.find((d) => PARAM_DECORATORS.has(d.name));
+        const injectDecorator = paramDecorators.find((d) => {
+          const label = injectionIn(scope(), d.name);
+          return label !== undefined && label !== "nestjs-param";
+        });
+        const bindingDecorator = paramDecorators.find(
+          (d) => injectionIn(scope(), d.name) === "nestjs-param"
+        );
         if (injectDecorator) {
           const decoratorNode = childrenOfType(param, "decorator").find(
             (d) => decoratorName(d)?.name === injectDecorator.name

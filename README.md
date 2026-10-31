@@ -611,6 +611,16 @@ Adding a language requires:
 4. Optionally a resolver in `src/resolver/` exposed through `src/resolver/registry.ts`;
    most languages work with the shared `module` resolver and only override
    language-specific builtins.
+5. Any framework it should recognise that is not registered yet — a module in
+   `src/parser/frameworks/` declaring its entry points, injections and markers. That is
+   a data change: no parser is edited.
+
+Frameworks are resolved per file by import evidence, then by the descriptor's
+`frameworks` order, then by every registered module. A file that imports
+`dependency_injector` attributes its `@inject` there, while a Java file with no such
+import still falls back to the registry rather than losing the annotation. Parsers keep
+what is genuinely syntactic: receiver names for call-style routes, path joining, and the
+text recorded as an entry point's detail.
 
 No existing language module needs editing: dispatch in `src/crawler.ts` reads the
 descriptor's `resolver`, so a language never appears in a conditional.
@@ -669,6 +679,10 @@ src/
 │   ├── controlFlow.ts          enclosing branch/loop/try/catch + guard text
 │   ├── moduleId.ts             import-aware module id derivation
 │   ├── methodId.ts             method id scheme (overload signatures, constructor ids)
+│   ├── frameworks/
+│   │   ├── types.ts            FrameworkModule / FrameworkScope contracts
+│   │   ├── index.ts            registry + scope/entry-point/injection lookups
+│   │   └── <framework>.ts      one module per framework (spring, nestjs, fastapi, …)
 │   └── languages/
 │       ├── index.ts            descriptor table + per-file language detection
 │       ├── java.ts             Java structural extraction

@@ -1,4 +1,12 @@
 import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
+import {
+  adviceIn,
+  aspectIn,
+  entryPointIn,
+  type FrameworkScope,
+  frameworkScope,
+  injectionIn,
+} from "../frameworks/index.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -69,16 +77,6 @@ function typeKind(node: TSNode): TypeKind {
   return "class";
 }
 
-/** Framework annotations that mark advice methods (Spring/AspectJ). */
-const ADVICE_ANNOTATIONS: Record<string, string> = {
-  Before: "before",
-  After: "after",
-  Around: "around",
-  AfterReturning: "afterReturning",
-  AfterThrowing: "afterThrowing",
-  Pointcut: "pointcut",
-};
-
 /** Control-flow ancestors that make a call conditional in Java. */
 const JAVA_FLOW: FlowSpec[] = [
   { type: "if_statement", kind: "branch", guardField: "condition" },
@@ -91,26 +89,6 @@ const JAVA_FLOW: FlowSpec[] = [
   { type: "do_statement", kind: "loop", guardField: "condition" },
   { type: "catch_clause", kind: "exception" },
 ];
-
-/** HTTP mapping annotations and the verb they imply. */
-const HTTP_MAPPINGS: Record<string, string> = {
-  GetMapping: "GET",
-  PostMapping: "POST",
-  PutMapping: "PUT",
-  DeleteMapping: "DELETE",
-  PatchMapping: "PATCH",
-  RequestMapping: "ANY",
-};
-
-/** Framework-supplied injection annotations. */
-const INJECTION_ANNOTATIONS: Record<string, string> = {
-  Autowired: "spring",
-  Inject: "jakarta",
-  Resource: "jakarta",
-  Value: "spring",
-  Qualifier: "spring",
-  ManagedProperty: "jakarta",
-};
 
 /** Run-time lookup methods and the kind of target they produce. */
 const REFLECTIVE_METHODS: Record<
@@ -131,34 +109,28 @@ const REFLECTIVE_METHODS: Record<
 function javaEntryPointOf(
   annotations: AnnotationInfo[],
   name: string,
-  modifiers: string[]
+  modifiers: string[],
+  scope: FrameworkScope
 ): EntryPointInfo | undefined {
   for (const annotation of annotations) {
+    const match = entryPointIn(scope, annotation.name);
+    if (!match) continue;
     const simple = annotation.name;
-    const httpVerb = HTTP_MAPPINGS[simple];
-    if (httpVerb) {
-      const path = annotationValue(annotation) ?? "/";
-      return { kind: "http", detail: `${httpVerb} ${path}` };
-    }
-    if (
-      simple === "KafkaListener" ||
-      simple === "RabbitListener" ||
-      simple === "JmsListener" ||
-      simple === "StreamListener" ||
-      simple === "SqsListener"
-    ) {
-      const topic = annotationValue(annotation);
-      return { kind: "messaging", detail: topic ? `${simple}(${topic})` : simple };
-    }
-    if (simple === "Scheduled") {
-      const cron = annotation.arguments[0];
-      return { kind: "scheduler", detail: cron ? `@Scheduled(${cron})` : "@Scheduled" };
-    }
-    if (simple === "EventListener" || simple === "TransactionalEventListener") {
-      return { kind: "event", detail: simple };
-    }
-    if (simple === "Test" || simple === "ParameterizedTest" || simple === "RepeatedTest") {
-      return { kind: "test", detail: simple };
+    switch (match.spec.kind) {
+      case "http": {
+        const path = annotationValue(annotation) ?? "/";
+        return { kind: "http", detail: `${match.spec.httpMethod ?? "ANY"} ${path}` };
+      }
+      case "messaging": {
+        const topic = annotationValue(annotation);
+        return { kind: "messaging", detail: topic ? `${simple}(${topic})` : simple };
+      }
+      case "scheduler": {
+        const cron = annotation.arguments[0];
+        return { kind: "scheduler", detail: cron ? `@${simple}(${cron})` : `@${simple}` };
+      }
+      default:
+        return { kind: match.spec.kind, detail: simple };
     }
   }
   if (name === "main" && modifiers.includes("static")) {
@@ -168,9 +140,9 @@ function javaEntryPointOf(
 }
 
 /** Framework that injects the annotated symbol, if any. */
-function injectionFrameworkOf(annotations: AnnotationInfo[]): string | null {
+function injectionFrameworkOf(annotations: AnnotationInfo[], scope: FrameworkScope): string | null {
   for (const annotation of annotations) {
-    const framework = INJECTION_ANNOTATIONS[annotation.name];
+    const framework = injectionIn(scope, annotation.name);
     if (framework) return framework;
   }
   return null;
@@ -215,6 +187,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
 
   const packageName = extractPackage(root);
   const imports = extractImports(root);
+  const scope = frameworkScope(imports, javaConfig.frameworks);
 
   const types: TypeInfo[] = [];
   const methods: MethodInfo[] = [];
@@ -275,7 +248,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       startLine: node.startPosition.row,
       endLine: node.endPosition.row,
       annotations,
-      isAspect: annotations.some((a) => isNamed(a, "Aspect")),
+      isAspect: annotations.some((a) => aspectIn(scope, a.name)),
       ...(isRecord ? { isRecord: true } : {}),
     });
     nestingStack.push(id);
@@ -366,9 +339,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const params = extractParams(node);
     const id = methodIdFor(typeId, name, params, hasVarargs(node));
     const annotations = extractAnnotations(node);
-    const advice = adviceOf(annotations);
+    const advice = adviceOf(annotations, scope);
     const modifiers = extractModifiers(node);
-    const entryPoint = javaEntryPointOf(annotations, name, modifiers);
+    const entryPoint = javaEntryPointOf(annotations, name, modifiers, scope);
     methods.push({
       id,
       typeId,
@@ -397,9 +370,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   ): void {
     const paramsNode = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
     if (!paramsNode) return;
-    const memberFramework = injectionFrameworkOf(memberAnnotations);
+    const memberFramework = injectionFrameworkOf(memberAnnotations, scope);
     for (const fp of childrenOfType(paramsNode, "formal_parameter")) {
-      const framework = injectionFrameworkOf(extractAnnotations(fp));
+      const framework = injectionFrameworkOf(extractAnnotations(fp), scope);
       if (!framework) continue;
       const name = childOfType(fp, "identifier")?.text ?? "";
       if (!name) continue;
@@ -464,7 +437,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const typeNode = typeNodeOf(node);
     const type = typeNode ? baseTypeName(typeNode.text) : "";
     const annotations = extractAnnotations(node);
-    const framework = injectionFrameworkOf(annotations);
+    const framework = injectionFrameworkOf(annotations, scope);
     for (const declarator of childrenOfType(node, "variable_declarator")) {
       const name = childOfType(declarator, "identifier")?.text ?? "";
       if (!name) continue;
@@ -690,15 +663,6 @@ function extractAnnotations(node: TSNode): AnnotationInfo[] {
   return out;
 }
 
-/** Whether an annotation matches a simple or qualified name. */
-function isNamed(annotation: AnnotationInfo, simple: string): boolean {
-  return (
-    annotation.name === simple ||
-    annotation.fqn === simple ||
-    (annotation.fqn?.endsWith(`.${simple}`) ?? false)
-  );
-}
-
 /** First string-literal argument of an annotation, unquoted. */
 function annotationValue(annotation: AnnotationInfo): string | undefined {
   const raw =
@@ -715,13 +679,13 @@ function unquote(raw: string): string {
 }
 
 /** Detect advice methods and capture their pointcut expression. */
-function adviceOf(annotations: AnnotationInfo[]): { adviceKind?: string; pointcut?: string } {
+function adviceOf(
+  annotations: AnnotationInfo[],
+  scope: FrameworkScope
+): { adviceKind?: string; pointcut?: string } {
   for (const annotation of annotations) {
-    for (const [simple, kind] of Object.entries(ADVICE_ANNOTATIONS)) {
-      if (isNamed(annotation, simple)) {
-        return { adviceKind: kind, pointcut: annotationValue(annotation) };
-      }
-    }
+    const match = adviceIn(scope, annotation.name);
+    if (match) return { adviceKind: match.kind, pointcut: annotationValue(annotation) };
   }
   return {};
 }

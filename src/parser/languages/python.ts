@@ -1,4 +1,11 @@
 import { controlFlowOf, type FlowSpec, insideAny } from "../controlFlow.js";
+import {
+  entryPointIn,
+  type FrameworkScope,
+  frameworkScope,
+  injectionIn,
+  paramMarkerIn,
+} from "../frameworks/index.js";
 import type {
   AnnotationInfo,
   CallSite,
@@ -93,8 +100,6 @@ const ROUTE_RECEIVERS = new Set([
   "fastify",
 ]);
 
-const INJECTION_DECORATORS = new Set(["inject", "injectable", "autowired", "provide"]);
-
 const BUILTIN_TYPES = new Set([
   "str",
   "int",
@@ -174,6 +179,20 @@ export const pythonConfig: LanguageDescriptor = {
     const injections: InjectionPoint[] = [];
     const routes: RouteRegistration[] = [];
 
+    /**
+     * Conventions this file is judged against. Imports are collected as the tree
+     * is walked, so the scope is rebuilt whenever another import appears.
+     */
+    let scopeCache: FrameworkScope = frameworkScope([], pythonConfig.frameworks, true);
+    let scopeImportCount = 0;
+    function scope(): FrameworkScope {
+      if (scopeImportCount !== imports.length) {
+        scopeCache = frameworkScope(imports, pythonConfig.frameworks, true);
+        scopeImportCount = imports.length;
+      }
+      return scopeCache;
+    }
+
     const methodRanges: MethodRange[] = [];
     const typeRanges: TypeRange[] = [
       { startLine: 0, endLine: root.endPosition.row, id: moduleTypeId },
@@ -245,8 +264,14 @@ export const pythonConfig: LanguageDescriptor = {
         const lower = simple.toLowerCase();
         const qualified = (annotation.fqn ?? simple).toLowerCase();
         const hasReceiver = qualified.includes(".");
-
-        if (HTTP_VERBS.has(lower) && (hasReceiver || lower.endsWith("route"))) {
+        // A bare `@get` is a local helper; a verb decorator is a route only when
+        // it is written as `app.get`/`app.route` or the name says it is one.
+        const routeIsHttp = HTTP_VERBS.has(lower) && (hasReceiver || lower.endsWith("route"));
+        const match = entryPointIn(scope(), simple, qualified, (spec) =>
+          spec.kind === "http" ? routeIsHttp : true
+        );
+        if (!match) continue;
+        if (match.spec.kind === "http") {
           const path = stringArgument(annotation);
           const method =
             lower === "route" || lower === "api_route" || lower === "websocket_route"
@@ -254,25 +279,7 @@ export const pythonConfig: LanguageDescriptor = {
               : lower.toUpperCase();
           return { kind: "http", detail: `${method} ${path}`.trim() || qualified };
         }
-        if (["task", "shared_task", "periodic_task", "celery_task"].includes(lower)) {
-          return { kind: "messaging", detail: qualified };
-        }
-        if (["scheduled", "cron", "interval", "periodic_task"].includes(lower)) {
-          return { kind: "scheduler", detail: qualified };
-        }
-        if (
-          lower === "fixture" ||
-          qualified.endsWith(".fixture") ||
-          lower === "parametrize" ||
-          lower.startsWith("mark.")
-        ) {
-          return { kind: "test", detail: qualified };
-        }
-        if (
-          ["on_event", "listener", "receiver", "on_message", "subscribe", "handler"].includes(lower)
-        ) {
-          return { kind: "event", detail: qualified };
-        }
+        return { kind: match.spec.kind, detail: qualified };
       }
       if (name === "main" || name === "cli") return { kind: "cli", detail: name };
       if (/^test_/.test(name) || /_test$/.test(name)) return { kind: "test", detail: name };
@@ -496,7 +503,7 @@ export const pythonConfig: LanguageDescriptor = {
       typeRanges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, id });
       scopeTypes.set(name, id);
 
-      const injectable = annotations.some((a) => INJECTION_DECORATORS.has(a.name.toLowerCase()));
+      const injectable = annotations.some((a) => injectionIn(scope(), a.name) !== undefined);
       const body = fieldChild(node, "body") ?? childOfType(node, "block");
       if (!body) return;
 
@@ -599,15 +606,14 @@ export const pythonConfig: LanguageDescriptor = {
 
       // Parameters supplied by the framework rather than by the caller.
       if (paramsNode) {
-        const methodInjects = annotations.some((a) =>
-          INJECTION_DECORATORS.has(a.name.toLowerCase())
-        );
+        const methodInjects = annotations.some((a) => injectionIn(scope(), a.name) !== undefined);
         for (const param of paramsNode.namedChildren) {
           const named = paramName(param);
           if (!named) continue;
           const raw = param.text;
-          const depends = /Depends\s*\(/.test(raw);
-          const injectDecorator = /@?Inject\s*\(/.test(raw);
+          const marker = paramMarkerIn(scope(), raw);
+          const depends = marker === "fastapi";
+          const injectDecorator = marker !== undefined && marker !== "fastapi";
           let declared = named.type;
           if (depends && declared) declared = firstTypeArgument(declared, "Annotated");
           if (depends || injectDecorator) {
