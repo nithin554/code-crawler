@@ -131,7 +131,7 @@ Environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | Database path. Resolved from the cwd upward, so each project gets its own file; falls back to `~/.code-crawler/index.db` when no project encloses the cwd |
+| `CODECRAWLER_DB` | `<project>/.code-crawler/index.db` | Database path. Resolved from the cwd upward, so each project gets its own file; falls back to `~/.code-crawler/index.db` when no project encloses the cwd. The home directory is only that fallback, never an enclosing project |
 | `CODECRAWLER_EXCLUDE_DIRS` | `.git,node_modules,dist,build,target,...` | Dirs skipped during crawl |
 | `CODECRAWLER_DEFAULT_LIMIT` | `50` | Default result cap |
 | `CODECRAWLER_MAX_DEPTH` | `10` | Traversal depth cap (1–100) |
@@ -260,20 +260,28 @@ if green, **auto-releases**:
 
 [`add-mcp`](https://github.com/neon-solutions/add-mcp) registers the server in whichever
 client you name — Claude Code, Cursor, VS Code, Claude Desktop, Codex, OpenCode, Zed, and
-more (`npx add-mcp list-agents`):
+more (`npx add-mcp list-agents`). Run it from inside the repository you want indexed:
 
 ```bash
-npx add-mcp @nithin554/code-crawler \
-  --args serve \
-  --env CODECRAWLER_DB=/absolute/path/to/index.db \
-  -a claude-code -g
+npx add-mcp @nithin554/code-crawler --args serve -a cursor
 ```
 
-The server name `code-crawler` is derived from the package. `-g` writes user-level config;
-drop it to register for the current project only. `--env CODECRAWLER_DB` is optional — the
-server indexes into `<project>/.code-crawler/index.db`, created on first use. Pin it only to
-put the file somewhere else, or because the client's working directory is not the project
-(Claude Desktop starts outside your repo, so there the default is `~/.code-crawler/index.db`).
+That writes project-scoped config next to the code (`.mcp.json`, `.cursor/mcp.json`,
+`.vscode/mcp.json`, …), so each repository carries its own registration and its own
+`.code-crawler/index.db`. The server name `code-crawler` is derived from the package.
+
+`--env CODECRAWLER_DB` is optional — add it only to put the database somewhere else:
+`--env CODECRAWLER_DB=/absolute/path/to/index.db`. `-g` writes user-level config instead. Prefer that only for clients that launch the server
+with your checkout as its working directory: with `-g` and an unrelated working directory
+(Claude Desktop starts in its own install folder) the server falls back to
+`~/.code-crawler/index.db`, and every repository then competes for that one file.
+
+### One server per project
+
+A server process opens one database at startup and a database holds exactly one project, so
+the model is one registration per repository — which is what the per-project config above
+gives you. Re-crawling a repository reuses its existing file and only re-parses what changed;
+two repositories never share a file, so they cannot clash.
 
 ### MCP Registry / `npx`
 

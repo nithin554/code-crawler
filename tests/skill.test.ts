@@ -279,6 +279,46 @@ describe("skill install instructions", () => {
     }
   });
 
+  it("registers per project instead of globally in every add-mcp example", () => {
+    // A global registration whose working directory is not the project lands on the
+    // user-wide fallback, where every repository then collides on the one-project guard.
+    for (const surface of [
+      "README.md",
+      "USAGE.md",
+      path.join("skills", "code-crawler", "SKILL.md"),
+      path.join("docs", "index.html"),
+      path.join("docs", "skill.html"),
+      path.join("docs", "usage.html"),
+    ]) {
+      const text = read(path.join(ROOT, surface));
+      const invocations = text
+        .split(/\r?\n/)
+        .filter((line) => line.includes("add-mcp @nithin554/code-crawler"));
+      expect(invocations.length, `${surface} never shows an add-mcp command`).toBeGreaterThan(0);
+      for (const invocation of invocations) {
+        expect(
+          invocation,
+          `${surface} registers add-mcp globally with -g: ${invocation.trim()}`
+        ).not.toMatch(/(?:^|\s)-g(?:\s|$)/);
+      }
+    }
+  });
+
+  it("explains that one server serves one project", () => {
+    // The consequence readers hit second: a database holds one project, so a single
+    // global server cannot serve several repositories.
+    for (const surface of [
+      "README.md",
+      "USAGE.md",
+      path.join("skills", "code-crawler", "SKILL.md"),
+    ]) {
+      const text = read(path.join(ROOT, surface));
+      expect(text, `${surface} never says one server serves one project`).toMatch(
+        /one server per project|one server serves one project/i
+      );
+    }
+  });
+
   it("only names environment variables the config actually reads", () => {
     const config = read(path.join(ROOT, "src", "config.ts"));
     const real = new Set(config.match(/CODECRAWLER_[A-Z_]+/g) ?? []);

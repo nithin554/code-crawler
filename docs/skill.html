@@ -194,20 +194,23 @@ npm install @nithin554/code-crawler
           </p>
           <div class="code-card">
             <div class="code-title">Register the server, not the skill</div>
-            <pre><code>npx add-mcp @nithin554/code-crawler \
-  --args serve \
-  --env CODECRAWLER_DB=/absolute/path/index.db \
-  -a claude-code -g</code></pre>
+            <pre><code>npx add-mcp @nithin554/code-crawler --args serve -a cursor</code></pre>
           </div>
           <p>
-            <code>-a</code> accepts <code>claude-code</code>, <code>cursor</code>,
-            <code>vscode</code>, <code>claude-desktop</code>, <code>codex</code>,
-            <code>opencode</code>, <code>zed</code> and more &mdash;
-            <code>npx add-mcp list-agents</code> lists them. <code>--env CODECRAWLER_DB</code>
-            is optional: the server indexes into
-            <code>&lt;project&gt;/.code-crawler/index.db</code> by default, so each repository
-            gets its own file. Pin it only to move the file, or when the client's working
-            directory is not the project.
+            Run it from inside the repository you want indexed: without <code>-g</code> the
+            entry lands in the checkout (<code>.mcp.json</code>,
+            <code>.cursor/mcp.json</code>, <code>.vscode/mcp.json</code>), so each repository
+            carries its own registration and its own index. <code>-a</code> accepts
+            <code>claude-code</code>, <code>cursor</code>, <code>vscode</code>,
+            <code>claude-desktop</code>, <code>codex</code>, <code>opencode</code>,
+            <code>zed</code> and more &mdash; <code>npx add-mcp list-agents</code> lists them.
+            <code>-g</code> writes user-level config instead; prefer it only when the client
+            launches the server from your checkout, because a global entry started elsewhere
+            resolves <code>~/.code-crawler/index.db</code> and every repository then shares
+            that one file. <code>--env CODECRAWLER_DB</code> is optional: the server indexes
+            into <code>&lt;project&gt;/.code-crawler/index.db</code> by default, so pin it
+            &mdash; <code>--env CODECRAWLER_DB=/absolute/path/index.db</code> &mdash; only to
+            move the file, or when the client's working directory is not the project.
             Full details in <a href="usage.html#registry">Usage</a>.
           </p>
         </div>

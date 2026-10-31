@@ -42,6 +42,41 @@ export function userDatabasePath(): string {
 }
 
 /**
+ * Nearest directory at or above `start` that either already owns a database or looks like a
+ * project root. `undefined` when the walk reaches the filesystem root with neither.
+ *
+ * The user's home directory never answers for the directories beneath it. It is the fallback
+ * location, not a project: an unmarked folder under `~` that inherited `~/.code-crawler`
+ * would share one file with every other unmarked folder, and a crawl there would collide
+ * with whatever the fallback file held last.
+ */
+function nearestDatabaseRoot(start: string): string | undefined {
+  const home = path.resolve(os.homedir());
+  let dir = path.resolve(start);
+  for (;;) {
+    if (dir !== home) {
+      if (fs.existsSync(path.join(dir, DB_DIR_NAME, DB_FILE_NAME))) return dir;
+      if (PROJECT_MARKERS.some((marker) => fs.existsSync(path.join(dir, marker)))) return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || dir === home) return undefined;
+    dir = parent;
+  }
+}
+
+/**
+ * Database for the project that encloses `start`. Used when the caller knows what is being
+ * indexed, so a crawl of `repo/src` shares the database of `repo` rather than growing a
+ * second, nested one that the server started at `repo` would never see.
+ *
+ * Unlike `defaultDatabasePath` this never returns the user-wide path: an explicit project
+ * with no markers anywhere above it is still that project, not "somewhere global".
+ */
+export function projectDatabasePath(start: string): string {
+  return databasePathFor(nearestDatabaseRoot(start) ?? start);
+}
+
+/**
  * Database to use when `CODECRAWLER_DB` is unset, resolved from `start` (the process cwd
  * unless a caller knows better).
  *
@@ -51,20 +86,12 @@ export function userDatabasePath(): string {
  *
  * With no database and no project marker anywhere above it, the user-wide path is the
  * fallback: a client spawned with an unrelated cwd (Claude Desktop launches from its own
- * install directory) must not scatter databases into arbitrary directories.
+ * install directory) must not scatter databases into arbitrary directories. The home
+ * directory itself is never treated as an enclosing project.
  */
 export function defaultDatabasePath(start: string = process.cwd()): string {
-  let dir = path.resolve(start);
-  for (;;) {
-    const candidate = path.join(dir, DB_DIR_NAME, DB_FILE_NAME);
-    if (fs.existsSync(candidate)) return candidate;
-    if (PROJECT_MARKERS.some((marker) => fs.existsSync(path.join(dir, marker)))) {
-      return candidate;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return userDatabasePath();
-    dir = parent;
-  }
+  const root = nearestDatabaseRoot(start);
+  return root === undefined ? userDatabasePath() : databasePathFor(root);
 }
 
 function warn(message: string): void {
@@ -123,7 +150,7 @@ export interface Config {
 
 export function loadConfig(options: { projectRoot?: string } = {}): Config {
   const fallback = options.projectRoot
-    ? databasePathFor(options.projectRoot)
+    ? projectDatabasePath(options.projectRoot)
     : defaultDatabasePath();
   return {
     dbPath: envStr("CODECRAWLER_DB", fallback),

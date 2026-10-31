@@ -416,6 +416,12 @@ describe("MCP server error boundary", () => {
       );
       expect(failure.ok).toBe(false);
       expect(failure.error).toMatch(/already contains/);
+      // The remedy must lead with the non-destructive option: a whole second project's
+      // index is not something to suggest wiping first.
+      const error = failure.error.toLowerCase();
+      expect(error).toContain("per project");
+      expect(error).toContain("codecrawler_db");
+      expect(error.indexOf("per project")).toBeLessThan(error.indexOf("clear_index"));
       expect(failure.hint.length).toBeGreaterThan(0);
     } finally {
       fs.rmSync(first, { recursive: true, force: true });

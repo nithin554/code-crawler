@@ -264,19 +264,27 @@ npx codecrawler serve</code></pre>
               <a href="https://github.com/neon-solutions/add-mcp">add-mcp</a> writes the entry
               for you in Claude Code, Cursor, VS Code, Codex, OpenCode, Zed and the rest:
             </p>
-            <pre><code>npx add-mcp @nithin554/code-crawler \
-  --args serve \
-  --env CODECRAWLER_DB=/absolute/path/index.db \
-  -a claude-code -g</code></pre>
+            <pre><code>npx add-mcp @nithin554/code-crawler --args serve -a cursor</code></pre>
             <p>
-              It derives the server name <code>code-crawler</code> from the package.
-              <code>-a</code> picks the client &mdash; <code>npx add-mcp list-agents</code>
-              prints every accepted name &mdash; and <code>-g</code> writes user-level
-              config; drop it to register for the current project only. Repeat
-              <code>--args</code> and <code>--env</code> once per value. <code>--env</code>
-              is optional too: without <code>CODECRAWLER_DB</code> the server resolves
+              Run it from inside the repository you want indexed. It derives the server name
+              <code>code-crawler</code> from the package, and <code>-a</code> picks the client
+              &mdash; <code>npx add-mcp list-agents</code> prints every accepted name. Without
+              <code>-g</code> the entry is written into the checkout
+              (<code>.mcp.json</code>, <code>.cursor/mcp.json</code>,
+              <code>.vscode/mcp.json</code>), which is what you want: one registration per
+              repository, each with its own index. <code>-g</code> writes user-level config
+              instead &mdash; fine for a client that launches the server from your checkout,
+              but a global entry started elsewhere (Claude Desktop launches from its own
+              install directory) resolves <code>~/.code-crawler/index.db</code> and then every
+              repository shares one file.
+            </p>
+            <p>
+              <code>--env CODECRAWLER_DB</code> is optional: without it the server resolves
               <code>&lt;project&gt;/.code-crawler/index.db</code> from its working directory
-              and creates the directory on first use.
+              and creates the directory on first use. Pin it &mdash;
+              <code>--env CODECRAWLER_DB=/absolute/path/index.db</code> &mdash; only to move
+              the file, or when the client's working directory is not the project. A database
+              holds one project, so keep one server per project rather than one global entry.
             </p>
           </div>
 
@@ -472,8 +480,9 @@ npx codecrawler serve</code></pre>
                   <td><code>&lt;project&gt;/.code-crawler/index.db</code></td>
                   <td>Path to the SQLite graph database. Resolved by walking up from the working
                   directory to the nearest project root, so each project gets its own file;
-                  <code>~/.code-crawler/index.db</code> when no project encloses it. Created on
-                  first use.</td>
+                  <code>~/.code-crawler/index.db</code> when no project encloses it. The home directory is
+                                    only that fallback, never an enclosing project, so an unmarked folder under it
+                                    gets its own file. Created on first use.</td>
                 </tr>
                 <tr>
                   <td><code>CODECRAWLER_EXCLUDE_DIRS</code></td>

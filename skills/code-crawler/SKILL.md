@@ -41,23 +41,21 @@ stdio MCP client takes the same command/args/env triple:
 subcommand, so `args` may omit it.
 
 Writing that JSON by hand is the slow way. `add-mcp` fills it in for whichever client you
-name:
+name. Run it from inside the repository you want indexed:
 
 ```bash
-npx add-mcp @nithin554/code-crawler \
-  --args serve \
-  --env CODECRAWLER_DB=/absolute/path/to/index.db \
-  -a claude-code -g
+npx add-mcp @nithin554/code-crawler --args serve -a cursor
 ```
 
 It derives the server name `code-crawler` from the package, so no `--name` is needed. `-a`
 accepts `claude-code`, `cursor`, `vscode`, `claude-desktop`, `codex`, `opencode`, `zed` and
-about twenty more — `npx add-mcp list-agents` prints the list. `-g` writes user-level config;
-drop it to register for the current project only. Repeat `--args` and `--env` once per value.
+about twenty more — `npx add-mcp list-agents` prints the list. Without `-g` the entry lives
+in the project (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`); `-g` writes user-level
+config. Repeat `--args` and `--env` once per value.
 
 `--env CODECRAWLER_DB` is optional: the server indexes into `<project>/.code-crawler/index.db`
-by default. Pin it when you want the file elsewhere, or when the client's working directory
-is not the project.
+by default. Pin it — `--env CODECRAWLER_DB=/absolute/path/index.db` — when you want the file
+elsewhere, or when the client's working directory is not the project.
 
 Three things decide whether the graph is usable:
 
@@ -66,8 +64,15 @@ Three things decide whether the graph is usable:
   (`.git`, `package.json`, `pom.xml`, `build.gradle`, `pyproject.toml`, `setup.py`,
   `requirements.txt`, `go.mod`, `Cargo.toml`) and uses `<project>/.code-crawler/index.db`, so
   **each repository gets its own file**. With no enclosing project it falls back to
-  `~/.code-crawler/index.db`. A database still holds exactly one project — crawling a
-  different path into one fails with a `clear_index` hint rather than overwriting it.
+  `~/.code-crawler/index.db`. That home file is the fallback and nothing more, never an
+  enclosing project, so an unmarked folder under `~` gets its own file rather than sharing
+  it. A database still holds exactly one project — crawling a
+  different path into one is refused before anything is written; give that project its own
+  database (its own registration), or run `clear_index` to replace the existing index.
+- **One server per project.** A process opens one database at startup and a database holds
+  one project, so register the server once per repository (project-scoped config, above)
+  rather than once globally for all of them. `crawl` resolves the same way, so crawling a
+  subdirectory such as `repo/src` shares `repo`'s file instead of growing a second one.
 - **Never share one `CODECRAWLER_DB` across repositories.** Do that and the second project's
   crawl hits the one-project error above.
 - **Use absolute paths.** Clients launch servers from an unpredictable working directory,
