@@ -405,6 +405,9 @@ describe("ClawHub plugin bundle", () => {
       const block = jobBlock(text, job);
       expect(block).toContain("uses: actions/download-artifact@v8");
       expect(block).toContain("name: clawhub-plugin-package");
+      // A relative `dist/x.tgz` is parsed as a GitHub `owner/repo` shorthand, so
+      // the CLI has to be handed an absolute path.
+      expect(block).toContain('find "$PWD/dist" -maxdepth 1');
       expect(block).toContain('package publish "${tarballs[0]}"');
       expect(block).toContain('--source-commit "$COMMIT"');
     }
