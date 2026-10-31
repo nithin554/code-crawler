@@ -31,11 +31,12 @@ below — registers the server that delivers the tools. Both are needed, and the
 independent.
 
 If this skill arrived inside the **code-crawler plugin**, the server is registered for you.
-The plugin starts the server from the plugin directory, so it pins the graph to the plugin
-data directory: one graph at a time, shared by every project you open in that client, and
-`crawl_project` refuses a second repository until `clear_index`. That is the plugin
-trade-off. For one database per repository, register the server from inside the repository
-instead — `npx skills add` for these instructions plus `npx add-mcp` for the server.
+The plugin starts the server from the plugin directory, but resolves a project for each
+call — `crawl_project`, the client's workspace roots, or the project this session already
+selected — and keeps that repository's graph in `<project>/.code-crawler/index.db`. One
+plugin install serves
+every repository you open, each with its own database. Set `CODECRAWLER_DB` to pin a single
+file instead.
 
 The server is the npm package `@nithin554/code-crawler` and needs Node.js ≥ 22.12. Every
 stdio MCP client takes the same command/args/env triple:

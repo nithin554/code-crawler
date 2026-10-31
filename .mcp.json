@@ -4,7 +4,9 @@
       "command": "npx",
       "args": ["-y", "@nithin554/code-crawler", "serve"],
       "env": {
-        "CODECRAWLER_DB": "${CLAUDE_PLUGIN_DATA}/index.db"
+        "CODECRAWLER_PLUGIN": "1",
+        "CODECRAWLER_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}",
+        "CODECRAWLER_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}"
       }
     }
   }

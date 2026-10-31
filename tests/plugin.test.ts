@@ -118,13 +118,21 @@ describe("plugin MCP configuration", () => {
     expect(server.args).toEqual(["-y", pkg.name, "serve"]);
   });
 
-  it("keeps the Plugin-root cwd from swallowing the graph", () => {
+  it("resolves one database per project instead of pinning a shared file", () => {
     const server = agentMcp.mcpServers["code-crawler"];
+    expect(server.env?.CODECRAWLER_PLUGIN).toBe("1");
+    expect(server.env?.CODECRAWLER_DB).toBeUndefined();
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts the literal placeholder the client expands
-    expect(server.env?.CODECRAWLER_DB).toBe("${PLUGIN_DATA}/index.db");
+    expect(server.env?.CODECRAWLER_PLUGIN_ROOT).toBe("${PLUGIN_ROOT}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts the literal placeholder the client expands
+    expect(server.env?.CODECRAWLER_PLUGIN_DATA).toBe("${PLUGIN_DATA}");
     const claudeServer = claudeMcp.mcpServers["code-crawler"];
+    expect(claudeServer.env?.CODECRAWLER_PLUGIN).toBe("1");
+    expect(claudeServer.env?.CODECRAWLER_DB).toBeUndefined();
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts the literal placeholder the client expands
-    expect(claudeServer.env?.CODECRAWLER_DB).toBe("${CLAUDE_PLUGIN_DATA}/index.db");
+    expect(claudeServer.env?.CODECRAWLER_PLUGIN_ROOT).toBe("${CLAUDE_PLUGIN_ROOT}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts the literal placeholder the client expands
+    expect(claudeServer.env?.CODECRAWLER_PLUGIN_DATA).toBe("${CLAUDE_PLUGIN_DATA}");
   });
 
   it("gives Claude Code the same command and args", () => {

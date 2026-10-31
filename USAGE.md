@@ -71,6 +71,9 @@ MCP client:
 | `CODECRAWLER_MAX_FILE_BYTES` | `1000000` | Files larger than this are skipped instead of parsed (1 KB–64 MB) |
 | `CODECRAWLER_RESPECT_GITIGNORE` | `true` | Honor the project's `.gitignore` during file discovery |
 | `CODECRAWLER_HELPFUL_ERRORS` | `true` | Return fuzzy suggestions when a symbol is missing |
+| `CODECRAWLER_PLUGIN` | unset | Plugin mode: resolve one database per project at call time instead of opening one file at startup |
+| `CODECRAWLER_PLUGIN_ROOT` | unset | Plugin install directory, never indexed as a project |
+| `CODECRAWLER_PLUGIN_DATA` | temp dir | Writable directory for the no-project fallback database |
 
 Invalid values are never fatal: booleans fall back to their default, integers are clamped
 to their range, and both emit a one-line warning on stderr.
@@ -97,8 +100,8 @@ or a forced `language`) skip stale removal and report `pruned: false`. When some
 the project rewrote a file but restored its size and mtime, the manifest cannot see the edit —
 re-crawl with `force: true` to re-parse everything.
 
-Because a process opens one database at startup, one server serves one project. Register the
-server once per repository — `add-mcp` without `-g` writes the config into the checkout — and
+Outside plugin mode a process opens one database at startup, so one server serves one
+project. Register the server once per repository — `add-mcp` without `-g` writes the config into the checkout — and
 the per-project default keeps every repository on its own file. `crawl` resolves the same
 way, so `crawl repo/src` shares `repo`'s database instead of creating a nested one.
 
@@ -242,11 +245,12 @@ copilot plugin install code-crawler@code-crawler
 ```
 
 Agent Plugins 1.0 clients run a plugin's stdio servers with the plugin root as the working
-directory, which is not your checkout. `mcp.json` therefore sets `CODECRAWLER_DB` to
-`${PLUGIN_DATA}/index.db` (and `.mcp.json` uses `${CLAUDE_PLUGIN_DATA}/index.db` for Claude
-Code), so a plugin install keeps one graph at a time. Crawling a second repository is
-refused until `clear_index`. For one database per repository, use the per-project
-`add-mcp` registration above instead.
+directory, which is not your checkout. The plugin server therefore resolves a project per
+tool call — from `crawl_project`, the client's workspace roots, or the project this session
+already selected — and opens that project's `<project>/.code-crawler/index.db`, exactly like
+the CLI. One
+plugin install serves every repository you open, each with its own database. Set
+`CODECRAWLER_DB` to pin a single file instead.
 
 The same skill is published to ClawHub as `code-crawler`.
 

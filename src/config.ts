@@ -41,6 +41,11 @@ export function userDatabasePath(): string {
   return path.join(os.homedir(), DB_DIR_NAME, DB_FILE_NAME);
 }
 
+/** Project root that owns `start`, or `undefined` when no marker or database is found. */
+export function findProjectRoot(start: string): string | undefined {
+  return nearestDatabaseRoot(start);
+}
+
 /**
  * Nearest directory at or above `start` that either already owns a database or looks like a
  * project root. `undefined` when the walk reaches the filesystem root with neither.
@@ -50,7 +55,7 @@ export function userDatabasePath(): string {
  * would share one file with every other unmarked folder, and a crawl there would collide
  * with whatever the fallback file held last.
  */
-function nearestDatabaseRoot(start: string): string | undefined {
+export function nearestDatabaseRoot(start: string): string | undefined {
   const home = path.resolve(os.homedir());
   let dir = path.resolve(start);
   for (;;) {
