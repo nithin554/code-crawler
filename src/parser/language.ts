@@ -10,6 +10,8 @@
  * raw call sites to the language-specific resolver.
  */
 
+import type { AliasRule } from "./tsPaths.js";
+
 export type TypeKind = "class" | "interface" | "enum" | "annotation" | "module";
 
 /** How a call site is nested: unconditional, or behind a guard. */
@@ -262,6 +264,13 @@ export interface ParsedFile {
 export interface ParseContext {
   /** Project root, used to derive stable module ids. */
   projectRoot?: string;
+  /**
+   * Path prefixes (project-root-relative) that module ids start below, so
+   * `src/orders/service.ts` can be `orders.service` when `src` is a root.
+   */
+  moduleRoots?: string[];
+  /** `tsconfig` path-alias rules, resolved once per crawl. */
+  aliases?: AliasRule[];
 }
 
 export interface LanguageConfig {

@@ -154,14 +154,28 @@ other `CODECRAWLER_EXCLUDE_DIRS` entries. On top of that:
 - the project's **`.gitignore`** is honored (disable with
   `CODECRAWLER_RESPECT_GITIGNORE=false`),
 - an optional **`.crawlerrc`** in the project root can narrow or widen discovery
-  with gitignore-style globs:
+  with gitignore-style globs, and relocate where module ids start:
 
   ```json
-  { "include": ["src/", "packages/core/"], "exclude": ["**/generated/"] }
+  {
+    "include": ["src/", "packages/core/"],
+    "exclude": ["**/generated/"],
+    "moduleRoots": ["src"]
+  }
   ```
 
   When `include` is non-empty, only matching files are indexed. A malformed
   `.crawlerrc` is ignored with a warning rather than failing the crawl.
+
+  `moduleRoots` is opt-in: with `["src"]`, `src/orders/service.ts` becomes the
+  module `orders.service` instead of `src.orders.service`, which is what a
+  `baseUrl`-or-`PYTHONPATH` project actually imports. It is never inferred,
+  because inferring it would silently renumber an existing index. TypeScript and
+  JavaScript projects also get path aliases for free: `compilerOptions.paths` and
+  `baseUrl` are read from `tsconfig.json` (or `jsconfig.json`), following
+  `extends` within the project, so `import { x } from "@app/orders/service"`
+  resolves to the real module instead of being recorded as external. Changing
+  either setting re-parses cached files on the next crawl.
 - files above `CODECRAWLER_MAX_FILE_BYTES` and files that look binary are
   skipped; `crawl_project` reports them in `skippedFiles` with a reason.
 - per-file parse failures never abort the crawl; they are reported in

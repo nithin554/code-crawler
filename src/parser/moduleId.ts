@@ -42,22 +42,50 @@ export function relativeModulePath(filePath: string, projectRoot?: string): stri
   return rel.startsWith("../") || rel === ".." ? toPosix(path.basename(filePath)) : rel;
 }
 
+/**
+ * Strip the longest configured module root from a project-relative path.
+ *
+ * A monorepo's import graph does not start at the repository root: with
+ * `PYTHONPATH=src` or `baseUrl: "src"`, `src/orders/service.ts` is imported as
+ * `orders.service`. Roots are configuration, never inferred — inference would
+ * silently renumber every module id in an existing index.
+ */
+export function stripModuleRoots(relative: string, moduleRoots?: readonly string[]): string {
+  if (!moduleRoots || moduleRoots.length === 0) return relative;
+  const normalized = relative.split("/").filter(Boolean);
+  let best: string[] | null = null;
+  for (const root of moduleRoots) {
+    const segments = toPosix(root)
+      .split("/")
+      .filter((s) => s !== "" && s !== ".");
+    if (segments.length === 0 || segments.length > normalized.length) continue;
+    if (!segments.every((s, i) => normalized[i] === s)) continue;
+    if (!best || segments.length > best.length) best = segments;
+  }
+  return best ? normalized.slice(best.length).join("/") : relative;
+}
+
 function stripExtension(rel: string): string {
   const dot = rel.lastIndexOf(".");
   const slash = rel.lastIndexOf("/");
   return dot > slash ? rel.slice(0, dot) : rel;
 }
 
-export function pythonModuleId(filePath: string, projectRoot?: string): string {
-  const relative = stripExtension(relativeModulePath(filePath, projectRoot));
-  const parts = relative.split("/").filter(Boolean);
+/** Module id for a project-relative path (no filesystem access). */
+export function pythonModuleIdFromRelative(
+  relative: string,
+  moduleRoots?: readonly string[]
+): string {
+  const rooted = stripModuleRoots(toPosix(relative), moduleRoots);
+  const parts = stripExtension(rooted).split("/").filter(Boolean);
   if (parts.length > 0 && parts[parts.length - 1] === "__init__") parts.pop();
   return parts.join(".") || "__root__";
 }
 
-export function tsModuleId(filePath: string, projectRoot?: string): string {
-  const relative = stripExtension(relativeModulePath(filePath, projectRoot)).replace(/\.d$/, "");
-  const parts = relative.split("/").filter(Boolean);
+/** Module id for a project-relative path (no filesystem access). */
+export function tsModuleIdFromRelative(relative: string, moduleRoots?: readonly string[]): string {
+  const rooted = stripModuleRoots(toPosix(relative), moduleRoots);
+  const parts = stripExtension(rooted).replace(/\.d$/, "").split("/").filter(Boolean);
   if (
     parts.length > 1 &&
     (parts[parts.length - 1] === "index" || parts[parts.length - 1] === "mod")
@@ -65,6 +93,22 @@ export function tsModuleId(filePath: string, projectRoot?: string): string {
     parts.pop();
   }
   return parts.join(".") || "__root__";
+}
+
+export function pythonModuleId(
+  filePath: string,
+  projectRoot?: string,
+  moduleRoots?: readonly string[]
+): string {
+  return pythonModuleIdFromRelative(relativeModulePath(filePath, projectRoot), moduleRoots);
+}
+
+export function tsModuleId(
+  filePath: string,
+  projectRoot?: string,
+  moduleRoots?: readonly string[]
+): string {
+  return tsModuleIdFromRelative(relativeModulePath(filePath, projectRoot), moduleRoots);
 }
 
 /**

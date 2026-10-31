@@ -18,7 +18,7 @@
 | Resolution | One `Resolver` contract, two implementations: `java` (declared types + hierarchy) and `module` (imports and barrels) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 31 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
+| Tests | 32 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is the **per-language entry cost**: a new language needs a
@@ -37,7 +37,7 @@ row. Phase 0 shrank that to data.
 | 0.2 | Move framework detection out of parsers into `src/parser/frameworks/<framework>.ts`, keyed by import evidence | M | **done** — one module per framework in `parser/frameworks/`, resolved through `frameworks/index.ts`; a file's imports pick the evidence, its descriptor settles ties. Parsers keep only syntax: receiver heuristics, path joining and entry-point detail text |
 | 0.3 | One language descriptor: extensions → grammar → resolver → frameworks → fixture path | S | **done** — `LanguageDescriptor` in `parser/language.ts`, declared beside each parser |
 | 0.4 | Conformance suite every language must pass (types, calls, imports, one route, one reflection) | S | **done** — `tests/language-conformance.test.ts`, now also asserting it covers exactly the registered languages |
-| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots | S | **partly done** — discovery globs and language overrides ship in `loadCrawlerRc`; module roots and tsconfig paths are still open |
+| 0.5 | `.crawlerrc.json` — include/exclude globs, language overrides, module roots, tsconfig paths, Python package roots | S | **done** — discovery globs and language overrides ship in `loadCrawlerRc`; `moduleRoots` shortens module ids for source roots, and `tsconfig`/`jsconfig` `paths` + `baseUrl` are read in `parser/tsPaths.ts`. Both feed a `crawl_meta` fingerprint, so changing either re-parses cached files |
 
 **Exit criteria:** a new language needs no edits to existing language modules, and CI
 fails if the conformance suite regresses. *Both now hold: dispatch reads the

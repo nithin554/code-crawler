@@ -9,6 +9,7 @@ import { decodeParsedFile, encodeParsedFile } from "./parser/cache.js";
 import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
 import { getLanguageConfig, languageForFile } from "./parser/languages/index.js";
 import { isConstructorMethodId, ownerTypeOfMethodId } from "./parser/methodId.js";
+import { aliasSignature, readTsconfigAliases } from "./parser/tsPaths.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
@@ -115,9 +116,20 @@ export interface DiscoverOptions {
 /** Optional project-local crawl configuration. */
 const CRAWLER_RC = ".crawlerrc";
 
+/**
+ * Fingerprint of the settings that decide module ids and import targets. Cached
+ * parse summaries embed both, so a change must invalidate them.
+ */
+const PARSE_SIGNATURE_KEY = "parse_signature";
+
 interface CrawlerRc {
   include?: string[];
   exclude?: string[];
+  /**
+   * Path prefixes module ids start below, so `src/orders/service.ts` can be
+   * `orders.service`. Opt-in: inference would renumber existing indexes.
+   */
+  moduleRoots?: string[];
 }
 
 function loadCrawlerRc(projectPath: string): CrawlerRc {
@@ -139,6 +151,7 @@ function loadCrawlerRc(projectPath: string): CrawlerRc {
     return {
       include: strings(record.include, "include"),
       exclude: strings(record.exclude, "exclude"),
+      moduleRoots: strings(record.moduleRoots, "moduleRoots"),
     };
   } catch (err) {
     process.stderr.write(`code-crawler: ignoring ${CRAWLER_RC}: ${(err as Error).message}\n`);
@@ -865,6 +878,17 @@ export async function crawlProject(
   // language narrow the scan, so files outside that scope must be left alone.
   const scopedScan = Boolean(options.fileFilter || options.language);
 
+  // Module identity and import aliases are configuration, and cached parse
+  // summaries carry the module ids the old configuration produced. When either
+  // changes, every file has to be parsed again or the graph keeps stale ids.
+  const rc = loadCrawlerRc(absPath);
+  const moduleRoots = rc.moduleRoots ?? [];
+  const aliases = readTsconfigAliases(absPath);
+  const parseSignature = createHash("sha256")
+    .update(JSON.stringify({ moduleRoots, aliases: aliasSignature(aliases) }))
+    .digest("hex");
+  const configurationChanged = store.getMeta(PARSE_SIGNATURE_KEY) !== parseSignature;
+
   const files = discoverSourceFiles(absPath, excludeDirs, {
     language: options.language,
     respectGitignore: options.respectGitignore,
@@ -875,7 +899,7 @@ export async function crawlProject(
   }
 
   const maxFileBytes = options.maxFileBytes ?? 1_000_000;
-  const force = options.force === true;
+  const force = options.force === true || configurationChanged;
   const skipSampleBytes = 8192;
 
   // Incremental crawl: the manifest records size + mtime + content hash for
@@ -955,7 +979,11 @@ export async function crawlProject(
       }
 
       const source = buffer.toString("utf8");
-      const parsed = await config.parseFile(source, file, { projectRoot: absPath });
+      const parsed = await config.parseFile(source, file, {
+        projectRoot: absPath,
+        moduleRoots,
+        aliases,
+      });
       const full: ParsedFile = { ...parsed, lineCount: source.split("\n").length };
       parsedFiles.push(full);
       changedPaths.add(file);
@@ -1190,6 +1218,7 @@ export async function crawlProject(
 
   store.setMeta("last_crawl_at", new Date().toISOString());
   store.setMeta("last_project_path", absPath);
+  store.setMeta(PARSE_SIGNATURE_KEY, parseSignature);
 
   const stats = store.stats();
   return {

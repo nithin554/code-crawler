@@ -151,7 +151,7 @@ export const pythonConfig: LanguageDescriptor = {
     if (!tree) throw new Error(`failed to parse ${filePath}`);
     const root = tree.rootNode;
 
-    const moduleId = pythonModuleId(filePath, context?.projectRoot);
+    const moduleId = pythonModuleId(filePath, context?.projectRoot, context?.moduleRoots);
     const isPackageFile = /(^|[\\/])__init__\.[^\\/]+$/.test(filePath);
     const moduleTypeId = moduleNodeId(moduleId);
 
