@@ -1,39 +1,37 @@
 name: Publish Plugin to ClawHub
 
-# Publishes plugins/code-crawler with the official openclaw/clawhub reusable
-# workflow, so the publish path is the one ClawHub maintains rather than a copy
-# of it kept in this repository.
+# Publishes plugins/code-crawler to ClawHub as a ClawPack tarball, using the
+# official `clawhub` CLI pinned to the release the skill workflow calls.
+#
+# This used to delegate to openclaw/clawhub's `package-publish.yml` reusable
+# workflow, which cannot publish a bundle that carries a `package.json` - and
+# this one needs one, because ClawHub reports "package metadata is missing"
+# without it and cannot build a ClawPack from it. Upstream inspects the bundle
+# with `bun ... package validate`, the CLI refuses that command under Bun ("Plugin
+# validation requires Node.js 22.13+ (22.x) or 24+"), and a ClawPack always
+# contains `package/package.json` - upstream strips exactly one leading segment
+# before inspecting - so the step always runs, always fails, and no input skips
+# it. Vendoring the workflow does not help either: it resolves its own CLI source
+# from the OIDC `job_workflow_ref`, so a copy kept here would clone this
+# repository as the CLI. The CLI is therefore invoked directly, under Node, on
+# the tarball that `pack` builds.
 #
 # The bundle is Claude-format (it carries a `.claude-plugin/plugin.json`), which
 # upstream classifies as the `bundle-plugin` family. That family is the only one
 # ClawHub can publish without requiring `openclaw.plugin.json` and a matching
 # build output in the bundle, which is why the payload is a thin manifest rather
 # than the crawler itself: the plugin resolves its server through
-# `npx -y @nithin554/code-crawler`, so the npm release supplies the code. The
-# bundle does carry a `package.json`, because ClawHub reports "package metadata
-# is missing" without one and cannot build a ClawPack tarball from it.
+# `npx -y @nithin554/code-crawler`, so the npm release supplies the code.
 #
 # "Build & Publish" tags every push to main and calls this one with that tag, so
 # the plugin version tracks the npm release. `workflow_dispatch` publishes by
 # hand (dry run by default) and is how a previously failed publish is retried.
 #
-# Pinned to a release tag because upstream has no `v1` floating ref. One tag
-# serves both workflows: skill-publish first appears in v0.23.0, and
-# package-publish only understands `.claude-plugin` bundles from v0.24.0 on
-# (v0.12.0 wanted an `openclaw.bundle.json`), so v0.24.1 is the oldest tag that
-# publishes everything this repository ships.
-#
-# Requires a CLAWHUB_TOKEN repository secret, not an environment secret. Upstream
-# reads it under the name `clawhub_token`, so it is renamed at this boundary;
-# `secrets: inherit` would not rename it. An environment secret cannot be used
-# here: only a job that declares the environment can read one, and a `uses:` job
-# cannot declare one. Forwarding the value through a job output does not work
-# either - GitHub refuses to emit a secret-valued output and warns `Skip output
-# '<name>' since it may contain secret` - so the secret has to be repository-wide.
-#
-# The publish is gated on the `clawhub-publish` environment, whose deployment
-# branch policy allows only `main`. A `uses:` job cannot declare an environment,
-# so the gate is a separate `guard` job that everything else depends on.
+# The CLI reads its credentials from the JSON file named by CLAWHUB_CONFIG_PATH
+# and has no token environment variable, so the secret is written into that file
+# for the length of the job. The publishing jobs declare the `clawhub-publish`
+# environment, whose deployment branch policy allows only `main`, so nothing
+# else in the repository can reach the registry.
 
 on:
   workflow_call:
@@ -61,11 +59,16 @@ on:
 
 permissions: {}
 
+# Upstream has no floating `v1` ref, so the CLI is pinned to the same release
+# tag the skill workflow calls.
+env:
+  CLAWHUB_CLI_VERSION: "0.24.1"
+
 jobs:
   # The `clawhub-publish` environment only allows deployments from `main`, so a
-  # dispatch from a branch or tag stops here instead of writing to the registry.
-  # This is its own job because a job that calls a reusable workflow cannot
-  # declare an environment, and the gate has to sit in front of the publish.
+  # dispatch from a branch or tag stops here instead of building a release
+  # bundle. The publishing jobs declare the environment as well, because that is
+  # what grants them the credential.
   guard:
     name: guard
     runs-on: ubuntu-latest
@@ -76,9 +79,8 @@ jobs:
         shell: bash
         run: echo "Publishing from ${GITHUB_REF}"
 
-  # The reusable workflow takes the version as a plain string and cannot strip a
-  # leading `v` itself, and no expression function does that, so the tag is
-  # normalised in a throwaway job before the publish job can run.
+  # The CLI is told the version explicitly, and no expression function strips a
+  # leading `v`, so the tag is normalised in a throwaway job first.
   prepare:
     name: prepare
     runs-on: ubuntu-latest
@@ -104,10 +106,9 @@ jobs:
   # ClawHub needs a `package.json` in the bundle to inspect it and to build a
   # ClawPack tarball, but its `version` changes with every release, so the
   # committed file holds a placeholder and the release version is stamped here.
-  # The stamping has to happen in this workflow: the reusable workflow checks the
-  # repository out again, so edits made before the call would not reach it. The
-  # stamped bundle is therefore packed into a tarball and handed over as an
-  # artifact, which upstream publishes instead of the folder.
+  # The stamping has to happen in this workflow rather than before the call,
+  # because the tag is checked out here, so the stamped bundle is packed into a
+  # tarball that the publish job consumes.
   pack:
     name: pack
     needs:
@@ -140,7 +141,7 @@ jobs:
           '
           grep -q "\"version\": \"$VERSION\"" plugins/code-crawler/package.json
       # `npm pack` output is exactly the "gzip-compressed npm pack tarball" that
-      # upstream's ClawPack parser expects, and packing here is what upgrades the
+      # the ClawPack parser expects, and packing here is what upgrades the
       # release from the legacy ZIP that ClawHub flags as not ClawPack.
       - name: Pack the stamped bundle
         run: |
@@ -163,45 +164,80 @@ jobs:
       - guard
       - prepare
       - pack
-    # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.24.1
-    # A called workflow can only narrow the caller's token, so every grant the
-    # upstream workflow needs has to be made here: it reads this run's artifacts,
-    # checks the repository out, and mints the OIDC token it pins its own CLI
-    # source with.
+    runs-on: ubuntu-latest
+    environment: clawhub-publish
+    # The registry is only written through the credential in the environment,
+    # so the job itself needs nothing beyond reading this run's artifact.
     permissions:
-      actions: read
       contents: read
-      id-token: write
+      actions: read
     # Never cancel a run that is mid-upload.
     concurrency:
       group: clawhub-publish-plugin
       cancel-in-progress: false
-    with:
-      # Upstream publishes the `package_artifact_name` tarball and ignores this
-      # once the artifact resolves; it stays named so the bundle path is still
-      # visible here and the folder form remains the fallback.
-      source: ./plugins/code-crawler
-      package_artifact_name: clawhub-plugin-package
-      family: bundle-plugin
-      owner: nithin554
-      version: ${{ needs.prepare.outputs.version }}
-      tags: latest
-      changelog: ${{ format('Release {0}', inputs.tag) }}
-      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
-      # An artifact publish cannot infer this, so the release is attributed to
-      # the commit and tag the tarball was packed from.
-      source_repo: ${{ github.repository }}
-      source_commit: ${{ needs.pack.outputs.commit }}
-      source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
-      dry_run: ${{ inputs.dry_run }}
-    secrets:
-      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      # The CLI requires Node.js 22.13+ or 24+ and refuses to run under Bun, so
+      # the runtime is pinned instead of inherited from the runner image.
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Download the packed bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: clawhub-plugin-package
+          path: dist
+      - name: Write the ClawHub config
+        shell: bash
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node -e '
+          const fs = require("node:fs");
+          const file = `${process.env.RUNNER_TEMP}/clawhub-config.json`;
+          const config = { registry: "https://clawhub.ai", token: process.env.CLAWHUB_TOKEN };
+          fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLAWHUB_CONFIG_PATH=${file}\n`);
+          '
+      - name: Publish the bundle
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.pack.outputs.commit }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(find dist -maxdepth 1 -name '*.tgz')
+          if [[ ${#tarballs[@]} -ne 1 ]]; then
+            echo "::error::expected exactly one packed bundle, found ${#tarballs[@]}"
+            exit 1
+          fi
+          args=(
+            package publish "${tarballs[0]}"
+            --family bundle-plugin
+            --owner nithin554
+            --version "$VERSION"
+            --tags latest
+            --changelog "Release $TAG"
+            --topics code-analysis,call-graph,static-analysis,mcp,dead-code
+            --source-repo "$GITHUB_REPOSITORY"
+            --source-commit "$COMMIT"
+            --source-ref "refs/tags/$TAG"
+            --wait
+            --wait-timeout 1800
+            --json
+          )
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          npx --yes "clawhub@$CLAWHUB_CLI_VERSION" "${args[@]}"
 
   # The registry answers a burst of writes with "Too many writes in a short
-  # period of time", and upstream makes exactly one attempt, so a throttle would
-  # otherwise turn into a failed release. One retry outlasts the advertised
-  # reset window; a dry run never writes, so it never needs one.
+  # period of time", so a throttle would otherwise turn into a failed release.
+  # One retry outlasts the advertised reset window; a dry run never writes, so
+  # it never needs one.
   publish-retry:
     name: publish (retry)
     needs:
@@ -212,26 +248,61 @@ jobs:
     # Only a failed publish is worth retrying; a failed `prepare` already
     # reported the bad tag and would just fail again.
     if: needs.publish.result == 'failure' && !inputs.dry_run
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.24.1
+    runs-on: ubuntu-latest
+    environment: clawhub-publish
     permissions:
-      actions: read
       contents: read
-      id-token: write
+      actions: read
     concurrency:
       group: clawhub-publish-plugin
       cancel-in-progress: false
-    with:
-      source: ./plugins/code-crawler
-      package_artifact_name: clawhub-plugin-package
-      family: bundle-plugin
-      owner: nithin554
-      version: ${{ needs.prepare.outputs.version }}
-      tags: latest
-      changelog: ${{ format('Release {0}', inputs.tag) }}
-      topics: code-analysis,call-graph,static-analysis,mcp,dead-code
-      source_repo: ${{ github.repository }}
-      source_commit: ${{ needs.pack.outputs.commit }}
-      source_ref: ${{ format('refs/tags/{0}', inputs.tag) }}
-      dry_run: false
-    secrets:
-      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Download the packed bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: clawhub-plugin-package
+          path: dist
+      - name: Write the ClawHub config
+        shell: bash
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node -e '
+          const fs = require("node:fs");
+          const file = `${process.env.RUNNER_TEMP}/clawhub-config.json`;
+          const config = { registry: "https://clawhub.ai", token: process.env.CLAWHUB_TOKEN };
+          fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLAWHUB_CONFIG_PATH=${file}\n`);
+          '
+      - name: Publish the bundle
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.pack.outputs.commit }}
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(find dist -maxdepth 1 -name '*.tgz')
+          if [[ ${#tarballs[@]} -ne 1 ]]; then
+            echo "::error::expected exactly one packed bundle, found ${#tarballs[@]}"
+            exit 1
+          fi
+          npx --yes "clawhub@$CLAWHUB_CLI_VERSION" \
+            package publish "${tarballs[0]}" \
+            --family bundle-plugin \
+            --owner nithin554 \
+            --version "$VERSION" \
+            --tags latest \
+            --changelog "Release $TAG" \
+            --topics code-analysis,call-graph,static-analysis,mcp,dead-code \
+            --source-repo "$GITHUB_REPOSITORY" \
+            --source-commit "$COMMIT" \
+            --source-ref "refs/tags/$TAG" \
+            --wait \
+            --wait-timeout 1800 \
+            --json

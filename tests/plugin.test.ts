@@ -200,29 +200,26 @@ describe("ClawHub publishing", () => {
     expect(workflow).toContain("dry_run: ${{ inputs.dry_run }}");
   });
 
-  // The upstream workflow names the secret `clawhub_token`, and `secrets:
-  // inherit` does not rename it. The value has to be a repository secret: only
-  // a job that declares the `clawhub-publish` environment can read that
-  // environment's secrets, a `uses:` job cannot declare one, and GitHub drops
-  // secret-valued job outputs ("Skip output ... since it may contain secret"),
-  // so neither the guard nor an output can carry the value across that boundary.
-  it("renames the repository token to the name upstream reads", () => {
-    for (const file of [
-      ".github/workflows/publish-clawhub.yml",
-      ".github/workflows/publish-plugin.yml",
-    ]) {
-      const text = workflow(file);
-      // The gate is the only job that may bind the environment.
-      expect(jobBlock(text, "guard")).toContain("environment: clawhub-publish");
+  // The skill workflow delegates to upstream, which names the secret
+  // `clawhub_token` and cannot be renamed by `secrets: inherit`. The plugin
+  // workflow runs the CLI itself, so it passes the value under its own name.
+  it("passes the token to the publisher that reads it", () => {
+    const skill = read(".github/workflows/publish-clawhub.yml");
+    expect(skill.match(/^ {6}clawhub_token: .+$/gm) ?? []).toEqual([
+      "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
+      "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
+    ]);
 
-      const mappings = text.match(/^ {6}clawhub_token: .+$/gm) ?? [];
-      // Publish and retry both read the secret straight from the repository.
-      expect(mappings).toEqual([
-        "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
-        "      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}",
-      ]);
-      // A `uses:` job cannot read an environment secret, and forwarding one
-      // through a job output is silently dropped, so never do either.
+    const plugin = workflow(".github/workflows/publish-plugin.yml");
+    // Publish and retry both read the secret straight from the environment.
+    expect(plugin.match(/^ {10}CLAWHUB_TOKEN: .+$/gm) ?? []).toEqual([
+      "          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}",
+      "          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}",
+    ]);
+
+    // Forwarding a secret through a job output is silently dropped ("Skip
+    // output ... since it may contain secret"), so never do it.
+    for (const text of [skill, plugin]) {
       expect(text).not.toContain("needs.guard.outputs");
       expect(text).not.toMatch(/outputs:\s*\n\s+clawhub_token/);
     }
@@ -236,18 +233,18 @@ describe("ClawHub publishing", () => {
     expect(workflow).not.toContain("--version");
   });
 
-  it("pins both ClawHub workflows to one upstream release", () => {
+  // A floating `v1` ref does not exist upstream, so the skill call pins a
+  // release tag and the plugin workflow pins the CLI to the same release.
+  it("pins both ClawHub publishers to one upstream release", () => {
+    const skill = read(".github/workflows/publish-clawhub.yml");
     const refs = [
-      ...read(".github/workflows/publish-clawhub.yml").matchAll(
-        /openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g
-      ),
-      ...read(".github/workflows/publish-plugin.yml").matchAll(
-        /openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g
-      ),
+      ...skill.matchAll(/openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g),
     ].map((match) => match[1]);
-    // A floating `v1` ref does not exist upstream, so every call pins a tag.
-    expect(refs.length).toBeGreaterThan(0);
     expect(new Set(refs)).toEqual(new Set(["v0.24.1"]));
+
+    const plugin = workflow(".github/workflows/publish-plugin.yml");
+    expect(plugin).toContain('CLAWHUB_CLI_VERSION: "0.24.1"');
+    expect(plugin).toContain('npx --yes "clawhub@$CLAWHUB_CLI_VERSION"');
   });
 
   it("is wired to the release tag created by the publish workflow", () => {
@@ -269,24 +266,29 @@ describe("ClawHub publishing", () => {
     }
   });
 
-  // Nothing but `main` may write to the registries, so the publishes sit behind
-  // the `clawhub-publish` environment, whose deployment branch policy allows
-  // only that branch. A job that calls a reusable workflow cannot declare an
-  // environment, so the gate is a plain job the publishers depend on.
+  // Nothing but `main` may write to the registries. A job that calls a reusable
+  // workflow cannot declare an environment, so the skill publishers sit behind a
+  // plain gate job; the plugin jobs declare the environment themselves, which is
+  // also what grants them the credential.
   it("restricts both publishes to main through the publish environment", () => {
-    for (const file of ["publish-clawhub", "publish-plugin"]) {
-      const text = workflow(`.github/workflows/${file}.yml`);
-      const blocks = text.split(/\n(?= {2}[a-z][\w-]*:\n)/);
-      const guard = blocks.find((block) => block.startsWith("  guard:\n"));
-      expect(guard).toBeDefined();
-      expect(guard).toContain("environment: clawhub-publish");
-      expect(guard).not.toContain("uses:");
+    const skill = workflow(".github/workflows/publish-clawhub.yml");
+    const blocks = skill.split(/\n(?= {2}[a-z][\w-]*:\n)/);
+    const guard = blocks.find((block) => block.startsWith("  guard:\n"));
+    expect(guard).toBeDefined();
+    expect(guard).toContain("environment: clawhub-publish");
+    expect(guard).not.toContain("uses:");
 
-      const publishers = blocks.filter((block) => block.includes("uses: openclaw/"));
-      expect(publishers.length).toBeGreaterThan(0);
-      for (const publisher of publishers) {
-        expect(publisher).toMatch(/^ {4}needs: guard$|^ {6}- guard$/m);
-      }
+    const publishers = blocks.filter((block) => block.includes("uses: openclaw/"));
+    expect(publishers.length).toBeGreaterThan(0);
+    for (const publisher of publishers) {
+      expect(publisher).toMatch(/^ {4}needs: guard$|^ {6}- guard$/m);
+    }
+
+    const plugin = workflow(".github/workflows/publish-plugin.yml");
+    for (const job of ["publish", "publish-retry"]) {
+      const block = jobBlock(plugin, job);
+      expect(block).toContain("environment: clawhub-publish");
+      expect(block).toMatch(/^ {6}- guard$/m);
     }
   });
 
@@ -309,14 +311,22 @@ describe("ClawHub publishing", () => {
       );
 
       expect(requested).toContain("contents: read");
-      // Upstream mints an OIDC token to pin its own CLI source.
-      expect(requested).toContain("id-token: write");
 
       const callerGrants = jobBlock(caller, job);
       for (const grant of new Set(requested)) {
         expect(callerGrants).toContain(grant);
       }
+
+      if (job === "publish-clawhub") {
+        // Upstream mints an OIDC token to pin its own CLI source.
+        expect(requested).toContain("id-token: write");
+      }
     }
+
+    // The plugin publish authenticates with the stored token through the
+    // environment, so it must not ask for an OIDC token it never uses.
+    const plugin = workflow(".github/workflows/publish-plugin.yml");
+    expect(plugin.slice(plugin.indexOf("\njobs:\n"))).not.toContain("id-token: write");
 
     // The called workflow uploads its inspector and publish reports.
     expect(jobBlock(caller, "publish-clawhub-plugin")).toContain("actions: read");
@@ -386,16 +396,34 @@ describe("ClawHub plugin bundle", () => {
     expect(pack).toContain("npm pack ./plugins/code-crawler");
   });
 
-  // The publish job runs in its own checkout, so the stamped file only reaches
-  // it as the uploaded tarball.
+  // The publish job does not check the repository out, so the stamped file only
+  // reaches ClawHub through the tarball `pack` uploaded.
   it("publishes the packed tarball instead of the working tree", () => {
     const text = workflow(".github/workflows/publish-plugin.yml");
 
     for (const job of ["publish", "publish-retry"]) {
       const block = jobBlock(text, job);
-      expect(block).toContain("package_artifact_name: clawhub-plugin-package");
-      expect(block).toContain("source_commit: ${{ needs.pack.outputs.commit }}");
-      expect(block).toContain("version: ${{ needs.prepare.outputs.version }}");
+      expect(block).toContain("uses: actions/download-artifact@v8");
+      expect(block).toContain("name: clawhub-plugin-package");
+      expect(block).toContain('package publish "${tarballs[0]}"');
+      expect(block).toContain('--source-commit "$COMMIT"');
+    }
+  });
+
+  // Upstream inspects the bundle with `bun ... package validate`, which the CLI
+  // refuses: "Plugin validation requires Node.js 22.13+ (22.x) or 24+". A
+  // ClawPack always contains package/package.json, so that step always runs and
+  // always fails, which is why the CLI is invoked here instead.
+  it("runs the ClawHub CLI on Node rather than Bun", () => {
+    const text = workflow(".github/workflows/publish-plugin.yml");
+
+    expect(text).not.toContain("uses: openclaw/clawhub/");
+    for (const job of ["publish", "publish-retry"]) {
+      const block = jobBlock(text, job);
+      expect(block).toContain("uses: actions/setup-node@v5");
+      expect(block).toContain("node-version: 24");
+      // `bundle-plugin` and `bun` share a prefix, so match the command.
+      expect(block).not.toMatch(/(^|\s)bun\s/m);
     }
   });
 });
