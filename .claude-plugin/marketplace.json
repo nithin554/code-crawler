@@ -1,0 +1,16 @@
+{
+  "name": "code-crawler",
+  "owner": {
+    "name": "nithin554"
+  },
+  "metadata": {
+    "description": "Agent plugin packaging for Code Crawler"
+  },
+  "plugins": [
+    {
+      "name": "code-crawler",
+      "source": "./",
+      "description": "Static and dynamic call tracing MCP server backed by a SQLite property graph of your codebase"
+    }
+  ]
+}

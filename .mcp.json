@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "code-crawler": {
+      "command": "npx",
+      "args": ["-y", "@nithin554/code-crawler", "serve"],
+      "env": {
+        "CODECRAWLER_DB": "${CLAUDE_PLUGIN_DATA}/index.db"
+      }
+    }
+  }
+}

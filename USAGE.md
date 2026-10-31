@@ -226,6 +226,30 @@ one-database-per-project rule, and the crawl-first workflow; `reference/tools.md
 27 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
 `external`, and phantom nodes, which are the three things agents misread most.
 
+### Installing the plugin
+
+Claude Code and Copilot CLI install the server and the skill in one step from this
+repository:
+
+```bash
+# Claude Code
+/plugin marketplace add nithin554/code-crawler
+/plugin install code-crawler@code-crawler
+
+# Copilot CLI
+copilot plugin marketplace add nithin554/code-crawler
+copilot plugin install code-crawler@code-crawler
+```
+
+Agent Plugins 1.0 clients run a plugin's stdio servers with the plugin root as the working
+directory, which is not your checkout. `mcp.json` therefore sets `CODECRAWLER_DB` to
+`${PLUGIN_DATA}/index.db` (and `.mcp.json` uses `${CLAUDE_PLUGIN_DATA}/index.db` for Claude
+Code), so a plugin install keeps one graph at a time. Crawling a second repository is
+refused until `clear_index`. For one database per repository, use the per-project
+`add-mcp` registration above instead.
+
+The same skill is published to ClawHub as `code-crawler`.
+
 ---
 
 ## 2. Crawling a real project

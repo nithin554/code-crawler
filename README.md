@@ -256,6 +256,30 @@ if green, **auto-releases**:
 
 ## Using as an MCP server
 
+### Install as an agent plugin
+
+The repository is also an agent plugin, so Claude Code and Copilot CLI can install the
+server and the skill together:
+
+```bash
+# Claude Code
+/plugin marketplace add nithin554/code-crawler
+/plugin install code-crawler@code-crawler
+
+# Copilot CLI
+copilot plugin marketplace add nithin554/code-crawler
+copilot plugin install code-crawler@code-crawler
+```
+
+The plugin runs `npx -y @nithin554/code-crawler serve`. Agent Plugins clients start a
+plugin's stdio servers inside the plugin directory, so `mcp.json` pins `CODECRAWLER_DB` to
+the plugin's data directory rather than a checkout. That means one graph at a time:
+`crawl_project` refuses a second repository until `clear_index`. Pick the plugin for a
+one-command install when you mostly work in one repository; pick `add-mcp` below when you
+want a separate database per repository.
+
+The same skill is published to [ClawHub](https://clawhub.ai) as `code-crawler`.
+
 ### One command
 
 [`add-mcp`](https://github.com/neon-solutions/add-mcp) registers the server in whichever

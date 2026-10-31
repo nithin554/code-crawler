@@ -1,6 +1,16 @@
 ---
 name: code-crawler
 description: Answer questions about code relationships in an indexed repository - callers, callees, impact, entry points, routes, DI wiring, dead code, cycles - using the code-crawler MCP server's SQLite property graph. Use when the question is about how symbols connect (who calls this, what breaks if I change it, where does a request enter, is this reachable) rather than about text you can find by searching. Do not crawl a repository just to answer a question about a single file you already have open.
+metadata:
+  openclaw:
+    emoji: "🕸️"
+    homepage: https://nithin554.github.io/code-crawler/
+    requires:
+      bins: ["node"]
+    install:
+      - kind: node
+        package: "@nithin554/code-crawler"
+        bins: ["codecrawler"]
 ---
 
 # Code Crawler
@@ -19,6 +29,13 @@ Installing the *skill* does not install the *server*: `npx skills add nithin554/
 delivers these instructions, and `npx add-mcp @nithin554/code-crawler` — or the config
 below — registers the server that delivers the tools. Both are needed, and they are
 independent.
+
+If this skill arrived inside the **code-crawler plugin**, the server is registered for you.
+The plugin starts the server from the plugin directory, so it pins the graph to the plugin
+data directory: one graph at a time, shared by every project you open in that client, and
+`crawl_project` refuses a second repository until `clear_index`. That is the plugin
+trade-off. For one database per repository, register the server from inside the repository
+instead — `npx skills add` for these instructions plus `npx add-mcp` for the server.
 
 The server is the npm package `@nithin554/code-crawler` and needs Node.js ≥ 22.12. Every
 stdio MCP client takes the same command/args/env triple:
