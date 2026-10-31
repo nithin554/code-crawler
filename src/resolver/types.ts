@@ -26,6 +26,30 @@ export interface ResolvedCall {
 }
 
 /**
+ * What a resolver is able to do. Declared rather than discovered, so a language
+ * descriptor can state what it buys without the caller probing behaviour, and a
+ * gap (a language with no hierarchy support) is visible instead of silent.
+ */
+export type ResolverCapability =
+  /** Infers a receiver's declared type from locals, parameters, and fields. */
+  | "declared-types"
+  /** Follows extends/implements when a method is not on the receiver's own type. */
+  | "hierarchy"
+  /** Selects among overloads using argument count and inferred argument types. */
+  | "overloads"
+  /** Resolves through module ids: imports, barrels, `export default`. */
+  | "module-exports";
+
+/** A call resolver for one family of languages. */
+export interface Resolver {
+  /** Registry key, matched by a language descriptor's `resolver` field. */
+  readonly name: string;
+  readonly capabilities: readonly ResolverCapability[];
+  /** Turn a parsed file's raw call sites into resolved (or phantom) calls. */
+  resolveFile(parsed: ParsedFile, index: TypeIndex): ResolvedCall[];
+}
+
+/**
  * Global index over all parsed files, used to resolve type and method names
  * across the whole project. Built once per crawl pass.
  */

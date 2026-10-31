@@ -7,18 +7,16 @@ import { annotationNodeId, externalNodeId, fieldNodeId, importNodeId } from "./g
 import type { FileRecord, GraphStore } from "./graph/store.js";
 import { decodeParsedFile, encodeParsedFile } from "./parser/cache.js";
 import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/language.js";
-import { languageForFile } from "./parser/languages/index.js";
-import type { JavaParsedFile } from "./parser/languages/java.js";
+import { getLanguageConfig, languageForFile } from "./parser/languages/index.js";
 import { isConstructorMethodId, ownerTypeOfMethodId } from "./parser/methodId.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
-  resolveGenericFile,
   resolveInjectionTarget,
   resolveReflectiveTarget,
   resolveRouteHandler,
 } from "./resolver/genericResolver.js";
-import { resolveJavaFile } from "./resolver/javaResolver.js";
+import { DEFAULT_RESOLVER, resolveFileWith } from "./resolver/registry.js";
 import { buildTypeIndex, phantomNodeId } from "./resolver/types.js";
 
 /**
@@ -432,11 +430,11 @@ export function buildCallEdges(
   let unresolved = 0;
   let external = 0;
 
-  const javaParsed = parsed as JavaParsedFile;
-  const resolvedCalls =
-    parsed.language === "java"
-      ? resolveJavaFile(javaParsed, index)
-      : resolveGenericFile(parsed, index);
+  const resolvedCalls = resolveFileWith(
+    getLanguageConfig(parsed.language)?.resolver ?? DEFAULT_RESOLVER,
+    parsed,
+    index
+  );
 
   for (const rc of resolvedCalls) {
     // Calls in field/static initializers have no enclosing method; attribute

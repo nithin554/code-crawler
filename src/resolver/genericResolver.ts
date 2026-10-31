@@ -15,7 +15,7 @@ import {
   resolveScopeValue,
   resolveTypeCandidates,
 } from "./common.js";
-import { phantomNodeId, type ResolvedCall, type TypeIndex } from "./types.js";
+import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
 
 /**
  * Call-target resolution for module-based languages (Python, TypeScript).
@@ -45,6 +45,17 @@ export function resolveGenericFile(
   const searchInheritance = options.searchInheritance ?? true;
   return file.callSites.map((call) => resolveCall(call, file, index, searchInheritance));
 }
+
+/**
+ * Dynamic languages do not declare receiver types, so this resolver leans on
+ * module imports and barrel re-exports instead, plus argument-arity overload
+ * selection where a class does declare one.
+ */
+export const moduleResolver: Resolver = {
+  name: "module",
+  capabilities: ["module-exports", "overloads"],
+  resolveFile: (parsed, index) => resolveGenericFile(parsed, index),
+};
 
 function phantom(call: CallSite, reason: string): ResolvedCall {
   return { callSite: call, targetId: phantomNodeId(call), resolved: false, confidence: 0, reason };

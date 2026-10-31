@@ -592,8 +592,8 @@ Each resolved edge carries a `confidence` score and a human-readable `reason` tr
 | Language | Extensions | Extracted | Dynamic features |
 | --- | --- | --- | --- |
 | Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
-| Python | `.py` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask routes, `getattr`, `importlib`, `__main__`, tests |
-| TypeScript | `.ts`, `.tsx` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
+| Python | `.py`, `.pyi` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask routes, `getattr`, `importlib`, `__main__`, tests |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
 
 Crawling a directory mixes all of them automatically — language is chosen per file from
@@ -601,11 +601,19 @@ the extension, and a single crawl can return `languages: ["java", "python", "typ
 
 Adding a language requires:
 
-1. `src/parser/languages/<lang>.ts` — a `LanguageConfig` implementing `parseFile`
-   (module/package extraction, type/member extraction, raw call sites, local type tables).
-2. Register it in `src/parser/languages/index.ts`.
-3. Optionally a `src/resolver/<lang>Resolver.ts`; most languages work with the shared
-   `src/resolver/genericResolver.ts` and only override language-specific builtins.
+1. `src/parser/languages/<lang>.ts` — a `LanguageDescriptor` implementing `parseFile`
+   (module/package extraction, type/member extraction, raw call sites, local type tables)
+   plus three declarative fields: `resolver` (which call resolver handles it),
+   `frameworks` (what its parser recognises), and `fixture` (its conformance directory).
+2. One row in `src/parser/languages/index.ts`.
+3. One row in the `CONTRACTS` table in `tests/language-conformance.test.ts` — the suite
+   then holds the new language to the same graph invariants as every other one.
+4. Optionally a resolver in `src/resolver/` exposed through `src/resolver/registry.ts`;
+   most languages work with the shared `module` resolver and only override
+   language-specific builtins.
+
+No existing language module needs editing: dispatch in `src/crawler.ts` reads the
+descriptor's `resolver`, so a language never appears in a conditional.
 
 The graph schema, store, traversal queries, and MCP surface stay the same for every
 language. Candidate next languages, and the modelling each one needs, are ranked in
@@ -656,22 +664,23 @@ src/
 │   ├── store.ts                better-sqlite3 schema + idempotent file-scoped upserts
 │   └── queries.ts              recursive-CTE traversal (callers/callees/path/subgraph)
 ├── parser/
-│   ├── language.ts             LanguageConfig contract
+│   ├── language.ts             LanguageConfig / LanguageDescriptor contracts
 │   ├── treeSitter.ts           WASM runtime + grammar loading + CST walk helpers
 │   ├── controlFlow.ts          enclosing branch/loop/try/catch + guard text
 │   ├── moduleId.ts             import-aware module id derivation
 │   ├── methodId.ts             method id scheme (overload signatures, constructor ids)
 │   └── languages/
-│       ├── index.ts            language registry + per-file language detection
+│       ├── index.ts            descriptor table + per-file language detection
 │       ├── java.ts             Java structural extraction
 │       ├── python.ts           Python structural extraction
 │       └── typescript.ts       TypeScript, TSX and JavaScript extraction
 └── resolver/
-    ├── types.ts                TypeIndex (global name/method index) + ResolvedCall
+    ├── types.ts                TypeIndex (global name/method index) + Resolver contract
+    ├── registry.ts             resolver lookup, capability query, default fallback
     ├── common.ts               builtin types, external packages, receiver inference
     ├── dynamic.ts              virtual dispatch + AspectJ pointcut matching/advice edges
-    ├── genericResolver.ts      shared resolution for module-based languages
-    └── javaResolver.ts         Java call-target resolution heuristics
+    ├── genericResolver.ts      the `module` resolver (imports, barrels, overloads)
+    └── javaResolver.ts         the `java` resolver (declared types, hierarchy, overloads)
 ```
 
 ## Roadmap

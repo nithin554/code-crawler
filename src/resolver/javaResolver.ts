@@ -1,6 +1,6 @@
 import type { JavaParsedFile } from "../parser/languages/java.js";
 import { type ArgumentTypeHints, inferArgumentTypes, pickOverload } from "./common.js";
-import { phantomNodeId, type ResolvedCall, type TypeIndex } from "./types.js";
+import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
 
 /**
  * Java call-target resolution (v1 heuristics).
@@ -35,6 +35,16 @@ export function resolveJavaFile(
 
   return results;
 }
+
+/**
+ * Java declares its types, extends and implements them explicitly, and allows
+ * overloading, so this resolver relies on all three.
+ */
+export const javaResolver: Resolver = {
+  name: "java",
+  capabilities: ["declared-types", "hierarchy", "overloads"],
+  resolveFile: (parsed, index) => resolveJavaFile(parsed as JavaParsedFile, index),
+};
 
 function resolveCall(
   call: ResolvedCall["callSite"],
