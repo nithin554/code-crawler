@@ -78,7 +78,7 @@ jobs:
     name: publish
     needs: guard
     # No `v1` ref exists upstream, so a release tag is the only pinnable ref.
-    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
+    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.25.1
     # A called workflow can only narrow the caller's token, so the OIDC grant the
     # upstream workflow needs to pin its own CLI source has to be made here.
     permissions:
@@ -109,7 +109,7 @@ jobs:
       - guard
       - publish
     if: failure() && !inputs.dry_run
-    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1
+    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.25.1
     permissions:
       contents: read
       id-token: write
