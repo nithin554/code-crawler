@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="google-site-verification" content="URgYOLgzCY-V-CbXInuNNyseZdk3NOCpVA5K6nTz9Mw" />
+    <link rel="canonical" href="https://nithin554.github.io/code-crawler/accuracy.html" />
+    <title>Accuracy benchmark — Code-Crawler</title>
+    <meta
+      name="description"
+      content="Measured precision and recall of Code-Crawler's graph edges against hand-verified ground truth on pinned Spring Boot, FastAPI and NestJS projects."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Code-Crawler" />
+    <meta property="og:title" content="Accuracy benchmark — Code-Crawler" />
+    <meta
+      property="og:description"
+      content="Measured precision and recall of Code-Crawler's graph edges against hand-verified ground truth on pinned Spring Boot, FastAPI and NestJS projects."
+    />
+    <meta property="og:url" content="https://nithin554.github.io/code-crawler/accuracy.html" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a href="accuracy.html" aria-current="page">Accuracy</a>
+          <a href="skill.html">Skill</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Evidence</span>
+          <h1>Accuracy benchmark</h1>
+          <p class="lead">
+            The graph is only worth trusting if its edges are right. This page reports what the
+            edges actually do on real projects, including the parts that do not work yet.
+          </p>
+          <div class="toc">
+            <a href="#headline">Headline</a>
+            <a href="#methods">Method</a>
+            <a href="#by-edge">By edge type</a>
+            <a href="#by-language">By language</a>
+            <a href="#confidence">Confidence</a>
+            <a href="#weak">Where it is weak</a>
+            <a href="#reproduce">Reproduce</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="headline">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Headline</h2>
+            <p>
+              Across 82 labelled edges on four pinned projects: <strong>0 edges invented</strong>.
+              Every edge the graph claimed was correct. The failures are all edges it never
+              produced.
+            </p>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="badge">Precision</div>
+              <h3>1.000</h3>
+              <p class="muted">
+                0 false positives. No confidently wrong edge was observed in 82 labelled cases.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">Recall</div>
+              <h3>0.420</h3>
+              <p class="muted">
+                40 of 69 expected edges were produced. The gap is concentrated in two edge types.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">CALLS &amp; dispatch</div>
+              <h3>1.000 / 1.000</h3>
+              <p class="muted">
+                Call resolution and virtual dispatch are perfect on the sampled labels.
+              </p>
+            </div>
+          </div>
+
+          <div class="note" style="margin-top: 20px">
+            <strong>Read this before quoting the number.</strong> Precision here is
+            <em>sample-level</em>: of the edges the benchmark asked about, how many the graph
+            answered correctly. It is not a claim that every one of the ~12,000 edges in these
+            four graphs is correct. Recall is low on purpose — the labelled cases were chosen to
+            probe known-hard idioms, not to flatter the tool.
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="methods">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Method</h2>
+            <p>Four real projects, pinned by commit, crawled in memory and scored against expectations written from their source.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Stack</th>
+                  <th>Commit</th>
+                  <th>Files</th>
+                  <th>Nodes</th>
+                  <th>Edges</th>
+                  <th>Crawl</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>spring-petclinic</td>
+                  <td>Java · Spring Boot</td>
+                  <td><code>500158f73241</code></td>
+                  <td>50</td>
+                  <td>1,244</td>
+                  <td>2,637</td>
+                  <td>921 ms</td>
+                </tr>
+                <tr>
+                  <td>spring-boot-realworld</td>
+                  <td>Java · Spring Boot + MyBatis</td>
+                  <td><code>ee17e31aafe7</code></td>
+                  <td>116</td>
+                  <td>1,978</td>
+                  <td>5,029</td>
+                  <td>1,332 ms</td>
+                </tr>
+                <tr>
+                  <td>fastapi-template</td>
+                  <td>Python · FastAPI</td>
+                  <td><code>e4022a9502a6</code></td>
+                  <td>138</td>
+                  <td>1,798</td>
+                  <td>3,475</td>
+                  <td>1,394 ms</td>
+                </tr>
+                <tr>
+                  <td>nestjs-realworld</td>
+                  <td>TypeScript · NestJS + TypeORM</td>
+                  <td><code>c1c2cc4e448b</code></td>
+                  <td>36</td>
+                  <td>466</td>
+                  <td>865</td>
+                  <td>251 ms</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note" style="margin-top: 20px">
+            <strong>Ground truth is hand-verified, not runtime-captured.</strong> Every case was
+            derived by reading the pinned source, never by querying the graph, so the benchmark is
+            able to fail. But no execution trace was recorded for these projects: Maven is not
+            available in the build environment and the NestJS application's dependencies are not
+            installed, so the two Spring Boot apps and the NestJS app were crawled, not run.
+            A case describes what the code genuinely does at runtime (for example a Lombok-generated
+            all-arguments constructor, or a class-level <code>@RequestMapping</code> joined to a
+            bare <code>@GetMapping</code>), but a runtime call log would be stronger evidence.
+            Capturing real traces with a Java agent on a focused fixture is the next step, and
+            until then nothing on this page should be described as runtime-verified.
+          </div>
+
+          <div class="note" style="margin-top: 12px">
+            fastapi-template is pinned to tag 0.9.0 rather than <code>main</code>. Upstream
+            <code>main</code> and tag 0.12.0 both contain invalid Python at
+            <code>backend/app/api/deps.py:36</code> (<code>except InvalidTokenError,
+            ValidationError:</code>, Python 2 syntax), and a fixture that cannot run is not a fair
+            benchmark. At 0.9.0 the same line is correct.
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="by-edge">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>By edge type</h2>
+            <p>Cases include negative cases, so precision is not free.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Edge kind</th>
+                  <th>Cases</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>TP</th>
+                  <th>FP</th>
+                  <th>FN</th>
+                  <th>TN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>CALLS</code></td>
+                  <td>16</td>
+                  <td>1.000</td>
+                  <td>1.000</td>
+                  <td>11</td>
+                  <td>0</td>
+                  <td>0</td>
+                  <td>5</td>
+                </tr>
+                <tr>
+                  <td><code>DYNAMIC_DISPATCH</code></td>
+                  <td>7</td>
+                  <td>1.000</td>
+                  <td>1.000</td>
+                  <td>3</td>
+                  <td>0</td>
+                  <td>0</td>
+                  <td>4</td>
+                </tr>
+                <tr>
+                  <td><code>INJECTS</code></td>
+                  <td>20</td>
+                  <td>1.000</td>
+                  <td>0.133</td>
+                  <td>2</td>
+                  <td>0</td>
+                  <td>13</td>
+                  <td>5</td>
+                </tr>
+                <tr>
+                  <td><code>ROUTES</code></td>
+                  <td>40</td>
+                  <td>1.000</td>
+                  <td>0.325</td>
+                  <td>13</td>
+                  <td>0</td>
+                  <td>27</td>
+                  <td>0</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small" style="margin-top: 12px">
+            TP = expected edge present and correct. FP = graph asserted something that is not true
+            (an invented edge, or a route with the wrong verb or path). FN = expected edge missing.
+            TN = expected absence correctly not asserted, which is how over-approximation gets
+            caught — a self-loop on virtual dispatch, or a dispatch edge to the wrong interface,
+            fails here.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="by-language">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>By language and project</h2>
+            <p>TypeScript is the positive control; Java and Python carry the known gaps.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Language</th>
+                  <th>Cases</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>TP</th>
+                  <th>FP</th>
+                  <th>FN</th>
+                  <th>TN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>java</td>
+                  <td>44</td>
+                  <td>1.000</td>
+                  <td>0.250</td>
+                  <td>9</td>
+                  <td>0</td>
+                  <td>27</td>
+                  <td>8</td>
+                </tr>
+                <tr>
+                  <td>python</td>
+                  <td>20</td>
+                  <td>1.000</td>
+                  <td>0.235</td>
+                  <td>4</td>
+                  <td>0</td>
+                  <td>13</td>
+                  <td>3</td>
+                </tr>
+                <tr>
+                  <td>typescript</td>
+                  <td>19</td>
+                  <td>1.000</td>
+                  <td>1.000</td>
+                  <td>16</td>
+                  <td>0</td>
+                  <td>0</td>
+                  <td>3</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-wrap" style="margin-top: 16px">
+            <table>
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Cases</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>TP</th>
+                  <th>FP</th>
+                  <th>FN</th>
+                  <th>TN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>spring-petclinic</td>
+                  <td>27</td>
+                  <td>1.000</td>
+                  <td>0.182</td>
+                  <td>4</td>
+                  <td>0</td>
+                  <td>18</td>
+                  <td>5</td>
+                </tr>
+                <tr>
+                  <td>spring-boot-realworld</td>
+                  <td>17</td>
+                  <td>1.000</td>
+                  <td>0.357</td>
+                  <td>5</td>
+                  <td>0</td>
+                  <td>9</td>
+                  <td>3</td>
+                </tr>
+                <tr>
+                  <td>fastapi-template</td>
+                  <td>20</td>
+                  <td>1.000</td>
+                  <td>0.235</td>
+                  <td>4</td>
+                  <td>0</td>
+                  <td>13</td>
+                  <td>3</td>
+                </tr>
+                <tr>
+                  <td>nestjs-realworld</td>
+                  <td>19</td>
+                  <td>1.000</td>
+                  <td>1.000</td>
+                  <td>16</td>
+                  <td>0</td>
+                  <td>0</td>
+                  <td>3</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="confidence">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Confidence distribution</h2>
+            <p>Only three of the thirteen edge kinds carry a confidence value at all.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Edge kind</th>
+                  <th>Confidence buckets</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>spring-petclinic</td>
+                  <td><code>CALLS</code></td>
+                  <td>0.00: 1,118 · 0.86: 5 · 0.90: 137 · 0.95: 87 · 1.00: 79</td>
+                </tr>
+                <tr>
+                  <td>spring-petclinic</td>
+                  <td><code>INJECTS</code></td>
+                  <td>no confidence recorded: 17</td>
+                </tr>
+                <tr>
+                  <td>spring-boot-realworld</td>
+                  <td><code>CALLS</code></td>
+                  <td>0.00: 1,779 · 0.86: 1 · 0.90: 107 · 0.95: 338 · 1.00: 169</td>
+                </tr>
+                <tr>
+                  <td>spring-boot-realworld</td>
+                  <td><code>DYNAMIC_DISPATCH</code></td>
+                  <td>0.80: 19</td>
+                </tr>
+                <tr>
+                  <td>fastapi-template</td>
+                  <td><code>CALLS</code></td>
+                  <td>0.00: 644 · 0.80: 259 · 0.85: 230 · 0.90: 112 · 1.00: 4</td>
+                </tr>
+                <tr>
+                  <td>fastapi-template</td>
+                  <td><code>ROUTES</code></td>
+                  <td>no confidence recorded: 23</td>
+                </tr>
+                <tr>
+                  <td>nestjs-realworld</td>
+                  <td><code>CALLS</code></td>
+                  <td>0.00: 97 · 0.80: 42 · 0.90: 35</td>
+                </tr>
+                <tr>
+                  <td>nestjs-realworld</td>
+                  <td><code>INJECTS</code> / <code>ROUTES</code></td>
+                  <td>no confidence recorded: 21 / 21</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small" style="margin-top: 12px">
+            A <code>0.00</code> bucket is not a low-confidence guess: it is the unresolved marker
+            the crawler writes when it cannot prove a receiver, such as
+            <code>__unknown__:this.repository.save</code>. Filtering it out is the honest way to
+            read a call graph.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="weak">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Where Code-Crawler is weak</h2>
+            <p>Reproduced from the benchmark failures, in order of how much they cost you.</p>
+          </div>
+
+          <div class="card">
+            <h3>1. Spring mappings are not extracted at all</h3>
+            <p>
+              All 14 Spring route cases miss. The Spring framework descriptor declares entry
+              points but produces no route registrations, so a Java controller can never yield a
+              <code>ROUTES</code> edge. Nothing is invented either, which is why precision stays
+              at 1.000 — the feature is simply absent. <code>@GetMapping</code>,
+              <code>@PostMapping</code>, the array form <code>@GetMapping({"/vets"})</code>,
+              class-level <code>@RequestMapping</code> prefixes, and paths without a leading slash
+              all need to be joined, and none of it is implemented.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>2. Constructor injection produces no INJECTS edge</h3>
+            <p>
+              Only <code>@Autowired</code>-annotated field injection is modelled. The dominant
+              modern Spring styles — a single constructor with no annotation, and a Lombok
+              <code>@AllArgsConstructor</code> that generates the constructor entirely — produce
+              nothing. This is 4 of 4 cases in spring-petclinic and 4 of 4 in
+              spring-boot-realworld. Call resolution still succeeds through the field, at
+              confidence 0.95, so <code>get_callers</code> and <code>trace_path</code> mostly keep
+              working; what is lost is any query whose answer depends on the wiring edge itself,
+              such as which beans a controller depends on.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>3. FastAPI router prefixes are dropped</h3>
+            <p>
+              <code>APIRouter(prefix="/items")</code> is ignored, so <code>@router.get("/")</code>
+              is reported as <code>/</code> instead of <code>/items/</code>. Every route from a
+              prefixed router is wrong in its path while still being emitted, which is the most
+              dangerous shape of error: present, plausible and incorrect. The <code>login</code>
+              router, whose decorators spell out full paths, is correct, which isolates the cause.
+              Routes derived from a router prefix must be joined, and the trailing slash is
+              significant in FastAPI.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>4. <code>INJECTS</code> and <code>ROUTES</code> have no confidence model</h3>
+            <p>
+              Both edge kinds are written without a confidence value, so a consumer cannot tell a
+              proven mapping from a derived guess. The project rule is that no edge type exists
+              without a confidence model; these two are the standing exceptions, and they are
+              exactly the two with the worst recall. Adding confidence is a prerequisite for
+              trusting them.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>5. Dispatch is matched by name and arity, not by proof</h3>
+            <p>
+              A virtual dispatch edge carries a flat 0.80 and is emitted to every in-project
+              subtype with a same-named, same-arity method. It is correct on the sampled labels,
+              but that is partly because spring-boot-realworld's <code>ArticleRepository</code> has
+              exactly one implementation. With several implementations, or overloads differing
+              only by generics, the constant would overstate certainty. There is also no dispatch
+              for lambdas or method references.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>6. Foreign calls are unresolved by design</h3>
+            <p>
+              Calls into framework or library types resolve to an <code>ext:</code> node or to an
+              <code>__unknown__</code> marker, for example
+              <code>Repository&lt;ArticleEntity&gt;.save</code> in the NestJS project. This is the
+              correct trade — the tool does not have TypeORM's bytecode — but it means the graph
+              stops at the framework boundary. Event, messaging and proxy wiring that crosses that
+              boundary is not modelled at all.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="found">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>What the benchmark already found</h2>
+          </div>
+          <div class="card">
+            <p>
+              Writing the first fixtures exposed a parser crash that silently deleted files. A
+              lookup into a method table was resolving identifiers through <code>Object.prototype</code>,
+              so any file containing a call to <code>toString()</code>, <code>valueOf()</code> or
+              <code>hasOwnProperty()</code> threw during parsing. The crawler records parse
+              failures per file, so those files vanished from the graph with only a log line.
+            </p>
+            <p class="muted">
+              On spring-petclinic this had hidden 7 of 50 files, including the
+              <code>Owner</code> JPA entity: files parsed went from 43 to 50,
+              <code>CALLS</code> edges from 574 to 1,426, and total edges from 1,408 to 2,637.
+              The bug is fixed and covered by regression tests.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="reproduce">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Reproduce it</h2>
+            <p>One command. No services, no credentials, no database server.</p>
+          </div>
+          <div class="code-card">
+            <div class="code-title">shell</div>
+            <pre><code>git clone https://github.com/nithin554/code-crawler
+cd code-crawler
+npm ci
+npm run bench:accuracy</code></pre>
+          </div>
+          <p class="muted small" style="margin-top: 12px">
+            The runner clones each project into a gitignored <code>benchmarks/.cache/</code> at the
+            commit in <code>benchmarks/manifest.json</code>, crawls it into an in-memory SQLite
+            database, scores the labelled cases and writes
+            <code>benchmarks/reports/accuracy.md</code> and <code>accuracy.json</code>. It exits
+            non-zero when precision or recall drops below the floors in the manifest, and CI runs
+            it on every pull request, so an accuracy regression fails the build.
+          </p>
+          <div class="note" style="margin-top: 20px">
+            Thresholds in the manifest are ratchets, not targets: they sit at the value last
+            measured. Raise them when a measurement improves. Precision floors are 1.000, because
+            a confidently wrong edge is worse than a missing one.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="cta">
+      <h2>Ready to index?</h2>
+      <p>Install, crawl a project, and register the server with your MCP client.</p>
+      <a class="btn btn-primary" href="usage.html">Quickstart →</a>
+    </section>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> ·
+          <a href="tools.html">Tools</a> ·
+          <a href="accuracy.html">Accuracy</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>
