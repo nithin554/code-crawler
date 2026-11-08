@@ -637,6 +637,21 @@
               floors in the manifest are a floor on the sample, not a certificate for the tool.
             </p>
           </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>7. <code>change_impact</code>'s ranking is untested against reviewers</h3>
+            <p>
+              <code>change_impact</code> ranks changed declarations with a hand-picked score:
+              risk band, then routes, entry points, injection points, advice, event flows, then
+              raw caller count. No benchmark measures whether that order matches what a reviewer
+              would look at first, so treat the order as a convenience and read every kept entry.
+              What is tested is the mapping, not the ranking: diff hunks onto declarations by
+              line span, a member collapsing into its enclosing type, repo-relative paths
+              resolving against crawl-root-relative ones, and <code>unmatched</code> surviving
+              instead of being dropped. The tool adds no edge kind and no schema field, so its
+              accuracy is exactly the accuracy of the edges underneath it.
+            </p>
+          </div>
         </div>
       </section>
 

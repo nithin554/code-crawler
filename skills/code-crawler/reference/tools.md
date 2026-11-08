@@ -1,6 +1,6 @@
 # Tool reference
 
-All 28 tools, grouped by the question they answer. Run `index_status` before trusting any
+All 29 tools, grouped by the question they answer. Run `index_status` before trusting any
 result, and `crawl_project` before that if the index is empty.
 
 ## Orientation
@@ -56,6 +56,7 @@ and `edges` are two views of one slice and cutting one list leaves dangling refe
 | Tool | Use it when | Key argument |
 | --- | --- | --- |
 | `impact_analysis` | "What breaks if I change this?" - the one call to prefer | `id` |
+| `change_impact` | You have a diff, a changed-file list or several changed symbols | `diff`, `files`, `symbols` |
 | `find_implementations` | You have an interface and need its implementers | `id` |
 | `find_cycles` | You suspect mutual recursion or a dependency knot | none |
 | `find_dead_code` | You want methods with no incoming edges at all | none |
@@ -63,6 +64,14 @@ and `edges` are two views of one slice and cutting one list leaves dangling refe
 
 `impact_analysis` bundles callers, entry points, routes, overrides, and a risk band. Prefer
 it over assembling the same answer from four calls.
+
+`change_impact` is the same answer for a review rather than a single symbol: pass the output
+of `git diff` and every touched declaration is mapped by line span, then ranked. A changed
+method replaces its enclosing class, so a class-level and a method-level view of the same
+edit are not reported twice. It also adds what `impact_analysis` does not: who injects the
+changed type and which advice intercepts the changed method. The `score` field orders the
+report; it is not a probability, and a low score does not mean a change is safe. Pass
+`files` when the change is committed, `symbols` when you already know what moved.
 
 `find_dead_code` reports *no incoming call, dispatch, or advice edge*. Treat that as a
 candidate list: a method invoked purely by reflection or by an external framework will

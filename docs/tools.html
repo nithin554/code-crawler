@@ -8,14 +8,14 @@
     <title>Tool reference — Code-Crawler</title>
     <meta
       name="description"
-      content="Complete reference for all 28 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 29 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Tool reference — Code-Crawler" />
     <meta
       property="og:description"
-      content="Complete reference for all 28 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 29 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/tools.html" />
     <meta name="twitter:card" content="summary" />
@@ -50,7 +50,7 @@
           <span class="eyebrow">Reference</span>
           <h1>Tool reference</h1>
           <p class="lead">
-            All 28 MCP tools with their arguments, response shape, and a working call. Every
+            All 29 MCP tools with their arguments, response shape, and a working call. Every
             tool returns structured JSON.
           </p>
           <div class="toc">
@@ -865,6 +865,53 @@
               framework entry point reaches the symbol, <code>medium</code> when it has direct
               callers, <code>low</code> otherwise. Reflection and configuration-file dispatch are
               outside the graph, so a <code>low</code> band does not prove the symbol is unused.
+            </p>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>change_impact</code>
+              <span class="tag analytics">analytics</span>
+              <p>The <code>impact_analysis</code> answer for a whole diff: every touched declaration, ranked.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>diff</code></td><td>string</td><td>no</td><td>Unified diff text, straight from <code>git diff</code>.</td></tr>
+                    <tr><td><code>files</code></td><td>string[]</td><td>no</td><td>Changed paths. Expands to each file's top-level declarations.</td></tr>
+                    <tr><td><code>symbols</code></td><td>string[]</td><td>no</td><td>Changed symbol ids or qualified names.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Caller traversal depth per symbol, 1–50. Default <code>10</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers per symbol, 1–1000. Default <code>20</code>.</td></tr>
+                    <tr><td><code>max_symbols</code></td><td>number</td><td>no</td><td>Max ranked symbols, 1–200. Default <code>25</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Supply any combination of <code>diff</code>, <code>files</code> and
+                <code>symbols</code>. Hunk line ranges are mapped onto the declarations they
+                overlap by the node's <code>startLine</code>/<code>endLine</code>; a changed
+                method replaces its enclosing class so the same call sites are not counted twice.
+                Returns <code>input</code>, <code>totals</code>, <code>truncated</code>,
+                <code>unmatched</code>, and per symbol the <code>impact_analysis</code> sections
+                plus <code>injectionPoints[]</code> (<code>injects</code>/<code>injectedBy</code>)
+                and <code>advice[]</code>.
+              </p>
+              <pre><code>change_impact({ diff: "&lt;output of git diff&gt;" })</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              <code>change_impact</code> ranks by <code>score</code>, which is ordering only: a
+              framework entry point dominates, then routes, entry points, injection points,
+              advice and event flows, then raw caller count. It is not a probability and a low
+              score is not a safety guarantee. Paths are matched exactly, then by path suffix, so
+              a repo-relative diff resolves against crawl-root-relative file paths. Renames are
+              followed to their new path; deleted files and unreachable symbols come back in
+              <code>unmatched</code> instead of being silently dropped.
             </p>
           </div>
 

@@ -433,6 +433,7 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 | `find_external_dependencies` | Third-party packages with reference and file counts |
 | `find_unresolved` | Call sites the resolver could not bind, grouped by failure reason |
 | `impact_analysis` | Callers + entry points + routes + overrides + risk band in one call |
+| `change_impact` | Ranked blast radius for a whole diff, file list or symbol list, with injection points and advice |
 | `explain_symbol` | One-shot digest: members, decorators, callers, callees, wiring |
 | `find_cycles` | Call cycles (SCCs) with a sample closed path, plus direct recursion |
 | `export_graph` | Neighborhood rendered as Mermaid or Graphviz DOT |

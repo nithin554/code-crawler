@@ -6,6 +6,7 @@ import type { Config } from "./config.js";
 import { loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
 import { applyBudget, pageMeta } from "./graph/budget.js";
+import { changeImpact } from "./graph/changeImpact.js";
 import {
   explainSymbol,
   exportGraph,
@@ -1163,6 +1164,131 @@ export function createServer(
         })),
         affectedFiles: result.affectedFiles,
       });
+    }
+  );
+
+  tool(
+    "change_impact",
+    "Answers 'what does this change break?' for a whole diff instead of one symbol: pass a unified diff (from `git diff`), a list of files, or a list of symbols, in any combination. Hunk line ranges are mapped onto the declarations they overlap, and a changed method replaces its enclosing class so call sites are not counted twice. Every touched declaration gets the impact_analysis treatment plus injection points and AOP advice, ranked by exposure. The score orders the report and is not a probability. Unmatched paths and symbols are returned rather than silently dropped.",
+    {
+      diff: z
+        .string()
+        .optional()
+        .describe("Unified diff text (output of `git diff` or `git diff HEAD~1`)."),
+      files: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Changed file paths, repo- or crawl-root-relative. Expands to each file's top-level declarations."
+        ),
+      symbols: z
+        .array(z.string())
+        .optional()
+        .describe("Changed symbols, as ids or qualified names."),
+      max_depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Caller traversal depth per symbol (default 10)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (default true)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .describe("Max callers kept per symbol (default 20)."),
+      max_symbols: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe(
+          "Max ranked symbols in the report (default 25). Lower-risk symbols are dropped and counted in `truncated`."
+        ),
+    },
+    async ({ diff, files, symbols, max_depth, include_dynamic, limit, max_symbols }) => {
+      if (!diff?.trim() && !files?.length && !symbols?.length) {
+        return text({
+          ok: false,
+          error: "no change description supplied",
+          hint: "Pass at least one of `diff` (unified diff text), `files` (changed paths) or `symbols` (changed symbol ids).",
+        });
+      }
+      try {
+        const report = changeImpact(
+          store,
+          { diff, files, symbols },
+          {
+            maxDepth: max_depth,
+            includeDynamic: include_dynamic,
+            limit,
+            maxSymbols: max_symbols,
+          }
+        );
+        return text({
+          input: report.input,
+          totals: report.totals,
+          ...(report.truncated
+            ? {
+                truncated: true,
+                truncatedHint: `Report limited to ${max_symbols ?? 25} symbols by risk score; raise max_symbols or narrow the diff to see the rest.`,
+              }
+            : {}),
+          ...(report.unmatched.symbols.length || report.unmatched.files.length
+            ? { unmatched: report.unmatched }
+            : {}),
+          symbols: report.symbols.map((s) => ({
+            symbol: ref(s.symbol),
+            matchedBy: s.matchedBy,
+            ...(s.diffRanges ? { diffRanges: s.diffRanges } : {}),
+            score: s.score,
+            summary: s.summary,
+            callers: s.callers.map((c) => ({
+              caller: ref(c.caller),
+              depth: c.depth,
+              callSiteLine: line(c.callSiteLine),
+              edgeKind: c.edgeKind,
+            })),
+            entryPoints: s.entryPoints.map((e) => ({
+              symbol: ref(e.symbol),
+              entryPointKind: e.entryPointKind,
+              ...(e.detail ? { detail: e.detail } : {}),
+              viaDepth: e.viaDepth,
+            })),
+            routes: s.routes.map(wiring),
+            injectionPoints: s.injectionPoints.map((i) => ({
+              role: i.role,
+              symbol: ref(i.symbol),
+              ...(i.injectedName ? { injectedName: i.injectedName } : {}),
+              ...(i.framework ? { framework: i.framework } : {}),
+              ...(i.line !== undefined ? { line: line(i.line) } : {}),
+            })),
+            advice: s.advice.map((a) => ({
+              advice: ref(a.advice),
+              advised: ref(a.advised),
+              ...(a.framework ? { framework: a.framework } : {}),
+              ...(a.line !== undefined ? { line: line(a.line) } : {}),
+            })),
+            eventFlows: s.eventFlows.map(wiring),
+            implementations: s.implementations.map((i) => ({
+              type: ref(i.type),
+              ...(i.method ? { method: ref(i.method) } : {}),
+              depth: i.depth,
+              via: i.via,
+            })),
+            affectedFiles: s.affectedFiles,
+          })),
+        });
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 

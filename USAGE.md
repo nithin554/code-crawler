@@ -442,6 +442,32 @@ Incoming `CALLS` edges answer the static case; incoming `DYNAMIC_DISPATCH` edges
 the "called through an interface" case. Check both — a method with zero callers can still
 be reached through dispatch.
 
+### "What does this whole diff break?"
+
+```text
+change_impact(diff: "<output of git diff>")
+change_impact(files: ["app/repository/OrderRepository.java"])
+change_impact(symbols: ["app.repository.OrderRepository#find"])
+```
+
+`impact_analysis` answers for one symbol. `change_impact` answers for a review: hand it a
+unified diff, a list of files, or a list of symbols in any combination, and every touched
+declaration gets the same treatment — callers, entry points, routes, implementations — plus
+two things a call graph alone cannot show: who injects the changed type
+(`injectionPoints`, split into `injects` and `injectedBy`) and which advice intercepts the
+changed method (`advice`).
+
+Hunk line ranges are mapped onto declarations by their recorded line span, and a changed
+method replaces its enclosing class so a class-level and a method-level view of one edit are
+not counted twice. Files are matched exactly first, then by path suffix, because a diff is
+repository-relative while `file_path` is crawl-root-relative.
+
+Results are ordered by `score`. That score is for ordering only — a framework entry point
+dominates, then routes, entry points, injection points, advice and event flows, then raw
+caller count. It is not a probability, and a low score is not a safety guarantee. Paths and
+symbols that matched nothing come back in `unmatched` rather than being dropped, and
+`truncated` is set when `max_symbols` cut the report.
+
 ### "Who implements this interface?"
 
 ```text
@@ -824,6 +850,19 @@ Check `alternatives` on the edge. An overloaded call site whose argument type ca
 narrowed keeps the first declaration as the target and lists the rivals, at confidence `0.6`
 or below. Read the call site's argument type to settle it; if you assert one callee, say which
 rivals were ruled out and how.
+
+**`change_impact` returned an empty `symbols` list.**
+Read `unmatched`. Every path and symbol that resolved to nothing is listed there, so an
+all-`unmatched` report means the paths are not under the crawl root (they are matched by
+suffix against `file_path`) or the symbol names do not exist. A diff that only deletes lines
+touches no declaration and legitimately produces nothing. If files matched but no
+declarations did, the hunks fell in imports, comments or whitespace.
+
+**`change_impact` ranked something below what I expected.**
+The `score` field orders the report; it is not a probability, and a low rank is not a
+safety signal. It weighs the risk band first, then routes, entry points, injection points,
+advice and event flows, then caller count — so a widely-called private helper can sit under
+an endpoint nobody uses. Read the full list.
 
 **An unknown symbol has suggestions instead of an error.**
 That is `CODECRAWLER_HELPFUL_ERRORS` working as intended. Set it to `false` for strict
