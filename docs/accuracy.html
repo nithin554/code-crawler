@@ -61,6 +61,7 @@
             <a href="#confidence">Confidence</a>
             <a href="#runtime">Runtime proof</a>
             <a href="#weak">Where it is weak</a>
+            <a href="#ergonomics">Agent cost</a>
             <a href="#reproduce">Reproduce</a>
           </div>
         </div>
@@ -756,6 +757,162 @@
         </div>
       </section>
 
+      <section class="section" id="ergonomics">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Agent cost: graph versus grep-and-read</h2>
+            <p>
+              Accuracy only matters if the answer arrives inside a context window. Ten structural
+              questions, measured on both paths.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Project</th>
+                  <th>Graph calls</th>
+                  <th>Graph tokens</th>
+                  <th>Compact tokens</th>
+                  <th>Grep calls</th>
+                  <th>Grep tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Who calls <code>OwnerRepository.findAll</code>?</td>
+                  <td>spring-petclinic</td>
+                  <td>1</td>
+                  <td>698</td>
+                  <td>188</td>
+                  <td>8</td>
+                  <td>7,698</td>
+                </tr>
+                <tr>
+                  <td>What runs on <code>GET /owners/{ownerId}</code>?</td>
+                  <td>spring-petclinic</td>
+                  <td>2</td>
+                  <td>4,435</td>
+                  <td>1,486</td>
+                  <td>7</td>
+                  <td>12,616</td>
+                </tr>
+                <tr>
+                  <td>What breaks if I change the <code>Pet</code> entity?</td>
+                  <td>spring-petclinic</td>
+                  <td>1</td>
+                  <td>6,002</td>
+                  <td>2,448</td>
+                  <td>13</td>
+                  <td>18,230</td>
+                </tr>
+                <tr>
+                  <td>Which package-level declarations are dead?</td>
+                  <td>spring-petclinic</td>
+                  <td>1</td>
+                  <td>2,245</td>
+                  <td>826</td>
+                  <td>30</td>
+                  <td>18,328</td>
+                </tr>
+                <tr>
+                  <td>Who calls <code>User.getId</code>?</td>
+                  <td>spring-boot-realworld</td>
+                  <td>1</td>
+                  <td>592</td>
+                  <td>113</td>
+                  <td>21</td>
+                  <td>21,705</td>
+                </tr>
+                <tr>
+                  <td>What does <code>ArticleQueryService.findById</code> reach?</td>
+                  <td>spring-boot-realworld</td>
+                  <td>1</td>
+                  <td>1,832</td>
+                  <td>840</td>
+                  <td>21</td>
+                  <td>14,506</td>
+                </tr>
+                <tr>
+                  <td>Who depends on <code>get_current_user</code>?</td>
+                  <td>fastapi-template</td>
+                  <td>1</td>
+                  <td>2,362</td>
+                  <td>814</td>
+                  <td>2</td>
+                  <td>491</td>
+                </tr>
+                <tr>
+                  <td>What runs on <code>POST /items</code>?</td>
+                  <td>fastapi-template</td>
+                  <td>2</td>
+                  <td>4,058</td>
+                  <td>1,475</td>
+                  <td>7</td>
+                  <td>5,903</td>
+                </tr>
+                <tr>
+                  <td>Who calls <code>ArticleService.create</code>?</td>
+                  <td>nestjs-realworld</td>
+                  <td>1</td>
+                  <td>214</td>
+                  <td>109</td>
+                  <td>4</td>
+                  <td>3,161</td>
+                </tr>
+                <tr>
+                  <td>What breaks if I change <code>ArticleEntity</code>?</td>
+                  <td>nestjs-realworld</td>
+                  <td>1</td>
+                  <td>469</td>
+                  <td>254</td>
+                  <td>7</td>
+                  <td>3,120</td>
+                </tr>
+                <tr>
+                  <td><strong>Total</strong></td>
+                  <td>4 projects</td>
+                  <td><strong>12</strong></td>
+                  <td><strong>22,907</strong></td>
+                  <td><strong>8,553</strong></td>
+                  <td><strong>120</strong></td>
+                  <td><strong>105,758</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small" style="margin-top: 12px">
+            The graph answered all ten with a payload that is the answer, in 12 tool calls instead
+            of 120, reading 78% fewer tokens than grep-and-read and 92% fewer with
+            <code>compact: true</code>. One row goes the other way: on FastAPI,
+            <code>Depends(get_current_user)</code> appears in a single file, so two searches beat a
+            query — and the graph still wins on calls.
+          </p>
+          <p class="muted">
+            <strong>Method.</strong> Every graph number is the real MCP server running in-process
+            over the pinned projects, counting the exact JSON text each tool returns. The baseline
+            models an agent with only text search: one search per query, then opening every file
+            the search hit, because the matching lines do not say which enclosing method matched or
+            who dispatches to it. For the dead-code task it searches each declaration named in the
+            answer set one at a time — the answer set is handed over for free, so the baseline is
+            under-charged. Reads are capped at 20 files, which under-charges again: two tasks had
+            38 and 32 matching files. Both sides use the same four-characters-per-token heuristic
+            the server uses for its own budget, and the checkout prefix is stripped from payloads so
+            a CI runner measures the same graph the same way.
+          </p>
+          <div class="note" style="margin-top: 20px">
+            <strong>Where plain search wins.</strong> Two textual questions were measured the same
+            way and are not in the totals above. "Which templates use the i18n key
+            <code>welcome</code>?" has no graph answer at all — the graph indexes symbols, not
+            template text, so <code>search_symbols</code> returns same-named symbols and grep
+            answers in one call for 340 tokens. "Where is the owner search SQL defined?" is a
+            one-call lookup either way, and grep is competitive. If the question is about text —
+            a literal, a config key, a template — search is the right tool.
+          </div>
+        </div>
+      </section>
+
       <section class="section" id="reproduce">
         <div class="wrap">
           <div class="section-head">
@@ -768,7 +925,8 @@
 cd code-crawler
 npm ci
 npm run bench:accuracy
-npm run bench:runtime</code></pre>
+npm run bench:runtime
+npm run bench:ergonomics</code></pre>
           </div>
           <p class="muted small" style="margin-top: 12px">
             The runner clones each project into a gitignored <code>benchmarks/.cache/</code> at the
@@ -780,6 +938,10 @@ npm run bench:runtime</code></pre>
             <code>bench:runtime</code> is the separate dispatch proof described above: it needs a
             JDK 17 or newer (<code>javac</code> on <code>PATH</code>) and writes
             <code>benchmarks/reports/runtime.md</code>. CI installs Temurin 21 for it.
+            <code>bench:ergonomics</code> re-measures the token and tool-call comparison above
+            against the same four cached projects and writes
+            <code>benchmarks/reports/ergonomics.md</code>; it clones nothing, so run
+            <code>bench:accuracy</code> once first.
           </p>
           <div class="note" style="margin-top: 20px">
             Thresholds in the manifest are ratchets, not targets: they sit at the value last

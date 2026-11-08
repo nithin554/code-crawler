@@ -116,6 +116,7 @@ Picking the wrong one wastes the most time of anything in this skill.
 
 | Question | Use |
 | --- | --- |
+| What is this symbol, briefly? | `explain_symbol` - one call instead of five |
 | Who calls this method? | `get_callers` |
 | What does this method call? | `get_callees` |
 | What breaks if I change this? | `impact_analysis` |
@@ -128,11 +129,19 @@ Picking the wrong one wastes the most time of anything in this skill.
 | What is wired in by DI or annotations? | `find_injections`, `find_annotated`, `get_decorators` |
 | What third-party code is actually used? | `find_external_dependencies` |
 | Where is `ThingFactory` defined? | **plain search** - do not crawl |
+| Which templates use this i18n key? | **plain search** - the graph indexes symbols, not template text |
+| Where is this literal, config key or SQL string? | **plain search** - text only, no symbol |
 | Show me the body of this function | **plain file read** - do not crawl |
 
 Crawling is not free: it parses every file in the project. Do it when you intend to ask
 several relationship questions, or when one relationship question has no cheaper answer.
 For a single-file question you already have open, reading the file beats crawling the repo.
+
+The saving is measured, not asserted: on ten structural questions across four pinned
+projects the graph used 12 tool calls and 22.9k tokens, where search-then-read-every-hit
+cost 120 calls and 105.8k tokens (8.5k with `compact: true`). The reverse also holds —
+a question about text was one search (340 tokens) that the graph could not answer at all.
+So: structure and wiring go to the graph, literals and text go to search.
 
 ## Bootstrap
 

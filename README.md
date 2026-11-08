@@ -250,6 +250,21 @@ The index is 66 MB for those 14.4k nodes / 38.8k edges. `find_hotspots` and
 their band is an order of magnitude looser than the symbol lookups; both were profiled
 with `EXPLAIN QUERY PLAN` and are served by `idx_edges_target_kind`.
 
+### Agent cost: graph versus grep-and-read
+
+`npm run bench:ergonomics` measures ten structural questions (who calls this, what runs on
+this endpoint, what breaks if I change this, what is dead) on the four pinned benchmark
+projects, against the real MCP server and against a model of text search plus reading every
+file a search hit. Across the ten, the graph answered in **12 tool calls / 22,907 tokens**
+where grep-and-read cost **120 calls / 105,758 tokens** — and **8,553 tokens** with
+`compact: true`. Reads are capped at 20 files and the dead-code baseline is handed the
+answer set for free, so the baseline is under-charged.
+
+Where plain search wins is measured too: a question about template text or a config key has
+no graph answer, and a one-file lookup is cheaper as a search. Use the graph for structure,
+search for text. The full comparison, method and caveats are on the
+[accuracy page](https://nithin554.github.io/code-crawler/accuracy.html#ergonomics).
+
 ## CI & publishing
 
 GitHub Actions runs on every pull request (`pull-request.yml`): `npm ci` →
