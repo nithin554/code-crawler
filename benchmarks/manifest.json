@@ -25,7 +25,7 @@
       "subPath": "",
       "language": "python",
       "framework": "fastapi",
-      "note": "Official FastAPI full-stack template. Pinned to tag 0.9.0 rather than main: upstream main and tag 0.12.0 both contain invalid Python at backend/app/api/deps.py:36 (except InvalidTokenError, ValidationError:, which is Python 2 syntax), and a fixture that cannot run is not a fair benchmark. At 0.9.0 the same line is correct. Five routers, four of them with an APIRouter(prefix=...) whose prefix the graph currently drops."
+      "note": "Official FastAPI full-stack template. Pinned to tag 0.9.0 rather than main: upstream main and tag 0.12.0 both contain invalid Python at backend/app/api/deps.py:36 (except InvalidTokenError, ValidationError:, which is Python 2 syntax), and a fixture that cannot run is not a fair benchmark. At 0.9.0 the same line is correct. Five routers, four of them with an APIRouter(prefix=...) that the parser has to apply, and one without, which is the negative control."
     },
     {
       "name": "nestjs-realworld",
@@ -37,14 +37,14 @@
       "note": "NestJS + TypeORM implementation of the RealWorld spec. Included as the positive control: controller prefixes, path parameters and constructor injection are all modelled correctly here, so a regression in any of them is unambiguous."
     }
   ],
-  "_comment": "Floors were set from the first full run of this suite, rounded down to two decimals for recall and held at 1.000 for precision. They are deliberately floors and not targets: INJECTS recall of 0.66 and ROUTES recall of 0.80 are the measured size of the known defects that remain (FastAPI dependency aliases resolve to nothing, and APIRouter prefixes are dropped, which leaves prefixed routes present but wrong), recorded here so that fixing them shows up as a recall increase while breaking them shows up as a failure. Raise a floor whenever a measurement improves.",
+  "_comment": "Floors were set from the first full run of this suite, rounded down to two decimals for recall and held at 1.000 for precision. They are deliberately floors and not targets: INJECTS recall of 0.66 is the measured size of the one known defect that remains (FastAPI dependency aliases resolve to nothing), recorded here so that fixing it shows up as a recall increase while breaking it shows up as a failure. ROUTES reached 1.000 once APIRouter prefixes were applied, so its floor is the measurement, not the target. Raise a floor whenever a measurement improves.",
   "thresholds": {
     "default": { "precision": 1.0, "recall": 0.0 },
     "perEdgeKind": {
       "CALLS": { "precision": 1.0, "recall": 1.0 },
       "DYNAMIC_DISPATCH": { "precision": 1.0, "recall": 1.0 },
       "INJECTS": { "precision": 1.0, "recall": 0.66 },
-      "ROUTES": { "precision": 1.0, "recall": 0.8 }
+      "ROUTES": { "precision": 1.0, "recall": 1.0 }
     }
   }
 }

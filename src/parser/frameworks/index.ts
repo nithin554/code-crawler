@@ -203,6 +203,15 @@ export function constructorModeIn(
   return undefined;
 }
 
+/** Keyword argument holding a route group's path prefix, if `name` builds one. */
+export function routeGroupIn(scope: FrameworkScope, name: string): string | undefined {
+  for (const module of ordered(scope)) {
+    const key = matchKey(module.routeGroups, name, scope.caseInsensitive);
+    if (key !== undefined) return key;
+  }
+  return undefined;
+}
+
 /** Whether an annotation marks an aspect class. */
 export function aspectIn(scope: FrameworkScope, name: string): boolean {
   return ordered(scope).some((module) =>

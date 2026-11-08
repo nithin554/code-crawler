@@ -32,6 +32,11 @@ export interface FrameworkModule {
   injectables?: string[];
   /** Annotations that make a compiler generate a constructor, and what it takes. */
   constructors?: Record<string, "all" | "required">;
+  /**
+   * Calls that build a route group, mapped to the keyword argument holding the
+   * group's path prefix (`APIRouter` -> `prefix`). Decorator paths hang off it.
+   */
+  routeGroups?: Record<string, string>;
   /** Annotations that mark an aspect class. */
   aspects?: string[];
   /** Advice annotations: name -> advice kind (`before`, `around`, ...). */

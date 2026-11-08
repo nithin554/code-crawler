@@ -5,6 +5,7 @@ import {
   frameworkScope,
   injectionIn,
   paramMarkerIn,
+  routeGroupIn,
 } from "../frameworks/index.js";
 import type {
   AnnotationInfo,
@@ -99,6 +100,21 @@ function routeVerb(name: string): string {
   return name.toUpperCase();
 }
 
+/**
+ * Join a route group's prefix to a decorator path.
+ *
+ * FastAPI concatenates the two as written, so the trailing slash of
+ * `@router.get("/")` is part of the served path (`/items/`) and must survive.
+ * Only the doubled separator between prefix and path is collapsed.
+ */
+function joinPath(prefix: string, path: string): string {
+  if (!prefix) return path;
+  if (!path) return prefix;
+  const left = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+  const right = path.startsWith("/") ? path : `/${path}`;
+  return `${left}${right}`;
+}
+
 const ROUTE_RECEIVERS = new Set([
   "app",
   "api",
@@ -188,6 +204,8 @@ export const pythonConfig: LanguageDescriptor = {
     const reflectiveRefs: ReflectiveRef[] = [];
     const injections: InjectionPoint[] = [];
     const routes: RouteRegistration[] = [];
+    /** Route-group variable -> its path prefix (`router` -> `/items`). */
+    const routeGroupPrefixes = new Map<string, string>();
 
     /**
      * Conventions this file is judged against. Imports are collected as the tree
@@ -268,6 +286,55 @@ export const pythonConfig: LanguageDescriptor = {
       return "";
     }
 
+    /** Receiver of a decorator, e.g. `router` in `@router.get(...)`. */
+    function receiverOf(annotation: AnnotationInfo): string {
+      const qualified = annotation.fqn ?? annotation.name;
+      return qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
+    }
+
+    /**
+     * Served path of a route decorator, with its group's prefix applied:
+     * `router = APIRouter(prefix="/items")` makes `@router.get("/")` serve
+     * `/items/`, and recording the bare `/` would be actively misleading.
+     */
+    function servedPathOf(annotation: AnnotationInfo): string {
+      const prefix = routeGroupPrefixes.get(receiverOf(annotation)) ?? "";
+      return joinPath(prefix, stringArgument(annotation));
+    }
+
+    /** Literal value of a keyword argument, or `""` when absent or not a string. */
+    function keywordLiteralOf(call: TSNode, key: string): string {
+      const args = childOfType(call, "argument_list");
+      if (!args) return "";
+      for (const arg of childrenOfType(args, "keyword_argument")) {
+        if (fieldChild(arg, "name")?.text !== key) continue;
+        const value = fieldChild(arg, "value");
+        return value?.type === "string" ? unquote(value.text) : "";
+      }
+      return "";
+    }
+
+    /**
+     * `router = APIRouter(prefix="/items")` groups every route declared on the
+     * variable. Collected before the module walk because `servedPathOf` needs it.
+     */
+    function collectRouteGroupPrefixes(): void {
+      for (const statement of root.namedChildren) {
+        if (statement.type !== "expression_statement") continue;
+        const assignment = statement.namedChildren.find((c) => c.type === "assignment");
+        if (!assignment) continue;
+        const left = fieldChild(assignment, "left");
+        const right = fieldChild(assignment, "right");
+        if (left?.type !== "identifier" || right?.type !== "call") continue;
+        const callee = calleeName(fieldChild(right, "function"));
+        if (!callee) continue;
+        const prefixKey = routeGroupIn(scope(), callee.name);
+        if (!prefixKey) continue;
+        const prefix = keywordLiteralOf(right, prefixKey);
+        if (prefix) routeGroupPrefixes.set(left.text, prefix);
+      }
+    }
+
     function entryPointOf(annotations: AnnotationInfo[], name: string): EntryPointInfo | undefined {
       for (const annotation of annotations) {
         const simple = annotation.name;
@@ -282,7 +349,7 @@ export const pythonConfig: LanguageDescriptor = {
         );
         if (!match) continue;
         if (match.spec.kind === "http") {
-          const path = stringArgument(annotation);
+          const path = servedPathOf(annotation);
           const method = routeVerb(lower);
           return { kind: "http", detail: `${method} ${path}`.trim() || qualified };
         }
@@ -308,7 +375,7 @@ export const pythonConfig: LanguageDescriptor = {
         const lower = annotation.name.toLowerCase();
         if (!HTTP_VERBS.has(lower)) continue;
         const qualified = annotation.fqn ?? annotation.name;
-        const receiver = qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
+        const receiver = receiverOf(annotation);
         if (!annotation.arguments.length && !receiver && !lower.endsWith("route")) continue;
         // The framework is the library, not the receiver the handler hangs off:
         // `@router.get` in a FastAPI module reports `fastapi`, not `router`.
@@ -316,7 +383,7 @@ export const pythonConfig: LanguageDescriptor = {
         found.push({
           framework: match?.module.name || receiver || "flask",
           httpMethod: routeVerb(lower) || "ANY",
-          path: stringArgument(annotation),
+          path: servedPathOf(annotation),
           handlerName,
           moduleId,
           enclosingTypeId: ownerTypeId,
@@ -881,6 +948,10 @@ export const pythonConfig: LanguageDescriptor = {
     // ------------------------------------------------------- module structure
     // Runs before call-site collection so `enclosingOf` can see the type and
     // method ranges that calls are attributed to.
+
+    // Route prefixes must be known before decorators are visited: a handler's
+    // recorded path is relative to the group it hangs off.
+    collectRouteGroupPrefixes();
 
     for (const entry of definitionsIn(root)) {
       const annotations = annotationsOf(entry.decorators);
