@@ -1,0 +1,189 @@
+{
+  "project": "nestjs-realworld",
+  "language": "typescript",
+  "framework": "nestjs",
+  "cases": [
+    {
+      "id": "calls-controller-to-service-create",
+      "edgeKind": "CALLS",
+      "from": "src.article.article.controller.ArticleController#create",
+      "to": "src.article.article.service.ArticleService#create",
+      "expected": "present",
+      "source": "hand",
+      "note": "this.articleService.create(...) where articleService is a constructor parameter property."
+    },
+    {
+      "id": "calls-controller-to-service-findAll",
+      "edgeKind": "CALLS",
+      "from": "src.article.article.controller.ArticleController#findAll",
+      "to": "src.article.article.service.ArticleService#findAll",
+      "expected": "present",
+      "source": "hand",
+      "note": "Same receiver type, different method."
+    },
+    {
+      "id": "calls-route-name-differs-from-method",
+      "edgeKind": "CALLS",
+      "from": "src.article.article.controller.ArticleController#getFeed",
+      "to": "src.article.article.service.ArticleService#findFeed",
+      "expected": "present",
+      "source": "hand",
+      "note": "The controller method is getFeed but the service method is findFeed. Resolution must not assume the handler name equals the service method name."
+    },
+    {
+      "id": "calls-no-wrong-service-method",
+      "edgeKind": "CALLS",
+      "from": "src.article.article.controller.ArticleController#create",
+      "to": "src.article.article.service.ArticleService#findOne",
+      "expected": "absent",
+      "source": "hand",
+      "note": "create() calls create, not findOne, on the same receiver type."
+    },
+    {
+      "id": "dispatch-no-self-loop",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "src.article.article.service.ArticleService#create",
+      "to": "src.article.article.service.ArticleService#create",
+      "expected": "absent",
+      "source": "hand",
+      "note": "ArticleService is a concrete class, not an interface, so it has no dispatch targets and must not dispatch to itself."
+    },
+    {
+      "id": "injects-controller-service",
+      "edgeKind": "INJECTS",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.service.ArticleService",
+      "expected": "present",
+      "source": "hand",
+      "note": "constructor(private readonly articleService: ArticleService) is NestJS's idiomatic injection form."
+    },
+    {
+      "id": "injects-service-repository",
+      "edgeKind": "INJECTS",
+      "from": "src.article.article.service.ArticleService",
+      "to": "src.article.article.entity.ArticleEntity",
+      "expected": "present",
+      "source": "hand",
+      "note": "The service injects a TypeORM repository token, reported as injecting the entity type."
+    },
+    {
+      "id": "injects-no-transitive-repository",
+      "edgeKind": "INJECTS",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.entity.ArticleEntity",
+      "expected": "absent",
+      "source": "hand",
+      "note": "The controller declares only ArticleService. Repository injection happens one layer down and must not leak upward."
+    },
+    {
+      "id": "route-find-all",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#findAll",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/articles" },
+      "note": "@Controller('articles') with a bare @Get()."
+    },
+    {
+      "id": "route-create",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#create",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/articles" },
+      "note": "@Post() on the collection path."
+    },
+    {
+      "id": "route-find-one",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#findOne",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/articles/:slug" },
+      "note": "NestJS uses :param syntax rather than {param}; it must not be normalized to the OpenAPI form."
+    },
+    {
+      "id": "route-feed",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#getFeed",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/articles/feed" },
+      "note": "Literal path that also matches the :slug pattern; kept distinct by declaration order at runtime."
+    },
+    {
+      "id": "route-update",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#update",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "PUT", "path": "/articles/:slug" },
+      "note": "Verb from @Put."
+    },
+    {
+      "id": "route-delete",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#delete",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/articles/:slug" },
+      "note": "Verb from @Delete."
+    },
+    {
+      "id": "route-comments-list",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#findComments",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/articles/:slug/comments" },
+      "note": "@Get(':slug/comments') joined with the controller prefix."
+    },
+    {
+      "id": "route-comments-create",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#createComment",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/articles/:slug/comments" },
+      "note": "Same path as route-comments-list, different verb."
+    },
+    {
+      "id": "route-comment-delete",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#deleteComment",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/articles/:slug/comments/:id" },
+      "note": "Two path parameters in one method path."
+    },
+    {
+      "id": "route-favorite",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#favorite",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/articles/:slug/favorite" },
+      "note": "Sub-resource POST."
+    },
+    {
+      "id": "route-unfavorite",
+      "edgeKind": "ROUTES",
+      "from": "src.article.article.controller.ArticleController",
+      "to": "src.article.article.controller.ArticleController#unFavorite",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/articles/:slug/favorite" },
+      "note": "Sub-resource DELETE on the same path as route-favorite."
+    }
+  ]
+}

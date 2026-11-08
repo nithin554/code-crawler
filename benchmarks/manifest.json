@@ -1,0 +1,50 @@
+{
+  "projects": [
+    {
+      "name": "spring-petclinic",
+      "repo": "https://github.com/spring-projects/spring-petclinic.git",
+      "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "subPath": "",
+      "language": "java",
+      "framework": "spring-boot",
+      "note": "The reference Spring Boot sample application. Small, hand-written, no generated code, and deliberately ordinary: constructor injection without @Autowired, three overloads of Owner#getPet, and one controller with a class-level @RequestMapping prefix."
+    },
+    {
+      "name": "spring-boot-realworld",
+      "repo": "https://github.com/gothinkster/spring-boot-realworld-example-app.git",
+      "commit": "ee17e31aafe733d98c4853c8b9a74d7f2f6c924a",
+      "subPath": "",
+      "language": "java",
+      "framework": "spring-boot",
+      "note": "Layered Spring Boot + MyBatis application. Chosen for interface-to-implementation dispatch (ArticleRepository has exactly one implementation), Lombok @AllArgsConstructor injection, and controllers whose @RequestMapping lives on the class while the verb annotations carry no path."
+    },
+    {
+      "name": "fastapi-template",
+      "repo": "https://github.com/fastapi/full-stack-fastapi-template.git",
+      "commit": "e4022a9502a6b61c857e3cbdaddc69e7219c9d53",
+      "subPath": "",
+      "language": "python",
+      "framework": "fastapi",
+      "note": "Official FastAPI full-stack template. Pinned to tag 0.9.0 rather than main: upstream main and tag 0.12.0 both contain invalid Python at backend/app/api/deps.py:36 (except InvalidTokenError, ValidationError:, which is Python 2 syntax), and a fixture that cannot run is not a fair benchmark. At 0.9.0 the same line is correct. Five routers, four of them with an APIRouter(prefix=...) whose prefix the graph currently drops."
+    },
+    {
+      "name": "nestjs-realworld",
+      "repo": "https://github.com/lujakob/nestjs-realworld-example-app.git",
+      "commit": "c1c2cc4e448b279ff083272df1ac50d20c3304fa",
+      "subPath": "",
+      "language": "typescript",
+      "framework": "nestjs",
+      "note": "NestJS + TypeORM implementation of the RealWorld spec. Included as the positive control: controller prefixes, path parameters and constructor injection are all modelled correctly here, so a regression in any of them is unambiguous."
+    }
+  ],
+  "_comment": "Floors were set from the first full run of this suite, rounded down to two decimals for recall and held at 1.000 for precision. They are deliberately floors and not targets: INJECTS recall of 0.13 and ROUTES recall of 0.32 are the measured size of known defects (constructor injection and Spring mappings are not modelled at all), recorded here so that fixing them shows up as a recall increase while breaking them shows up as a failure. Raise a floor whenever a measurement improves.",
+  "thresholds": {
+    "default": { "precision": 1.0, "recall": 0.0 },
+    "perEdgeKind": {
+      "CALLS": { "precision": 1.0, "recall": 1.0 },
+      "DYNAMIC_DISPATCH": { "precision": 1.0, "recall": 1.0 },
+      "INJECTS": { "precision": 1.0, "recall": 0.13 },
+      "ROUTES": { "precision": 1.0, "recall": 0.32 }
+    }
+  }
+}

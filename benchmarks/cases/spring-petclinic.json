@@ -1,0 +1,264 @@
+{
+  "project": "spring-petclinic",
+  "language": "java",
+  "framework": "spring-boot",
+  "cases": [
+    {
+      "id": "calls-derived-query",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController#findPaginatedForOwnersLastName",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository#findByLastNameStartingWith",
+      "expected": "present",
+      "source": "hand",
+      "note": "owners.findByLastNameStartingWith(lastname, pageable) through a constructor-injected field. Declared on the project's own repository interface."
+    },
+    {
+      "id": "calls-inherited-repo-method",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController#findOwner",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository#findById",
+      "expected": "present",
+      "source": "hand",
+      "note": "findById is inherited from the external CrudRepository. Resolving it onto the project interface is the pragmatic choice; the alternative is dropping the call."
+    },
+    {
+      "id": "calls-overload-two-arg",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.Owner#getPet",
+      "to": "org.springframework.samples.petclinic.owner.Owner#getPet(String,boolean)",
+      "expected": "present",
+      "source": "hand",
+      "note": "Owner#getPet(String) calls the two-argument overload. Tests both overload naming and bare-call resolution inside the declaring type."
+    },
+    {
+      "id": "calls-overload-from-param",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.PetController#processCreationForm",
+      "to": "org.springframework.samples.petclinic.owner.Owner#getPet(String,boolean)",
+      "expected": "present",
+      "source": "hand",
+      "note": "owner.getPet(name, true) where owner is a @ModelAttribute parameter. Overload must be picked by arity, not declaration order."
+    },
+    {
+      "id": "calls-no-cross-class-collision",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController#processCreationForm",
+      "to": "org.springframework.samples.petclinic.owner.PetController#processCreationForm",
+      "expected": "absent",
+      "source": "hand",
+      "note": "Two unrelated controllers both declare processCreationForm. resolveTypeName falls back to any simple-name match, so a same-named method in another class is the realistic false positive."
+    },
+    {
+      "id": "calls-no-wrong-overload",
+      "edgeKind": "CALLS",
+      "from": "org.springframework.samples.petclinic.owner.PetController#updatePetDetails",
+      "to": "org.springframework.samples.petclinic.owner.Owner#getPet(String,boolean)",
+      "expected": "absent",
+      "source": "hand",
+      "note": "updatePetDetails calls the one-argument getPet. Emitting the two-argument overload would be an arity mismatch."
+    },
+    {
+      "id": "dispatch-no-self-loop",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "org.springframework.samples.petclinic.owner.OwnerRepository#save",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository#save",
+      "expected": "absent",
+      "source": "hand",
+      "note": "OwnerRepository is a Spring Data interface with no in-project implementation, so there is no dispatch target at all. A self-loop would be noise."
+    },
+    {
+      "id": "dispatch-no-unrelated-interface",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "org.springframework.samples.petclinic.owner.OwnerRepository#findById",
+      "to": "org.springframework.samples.petclinic.vet.VetRepository#findById",
+      "expected": "absent",
+      "source": "hand",
+      "note": "Two unrelated repository interfaces expose the same method name. Name-only matching would fabricate this."
+    },
+    {
+      "id": "injects-constructor-owner-repo",
+      "edgeKind": "INJECTS",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Constructor injection: private final OwnerRepository owners plus a single-argument constructor. No @Autowired anywhere, which is the dominant modern Spring style."
+    },
+    {
+      "id": "injects-constructor-pet-owner-repo",
+      "edgeKind": "INJECTS",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Constructor injection in PetController."
+    },
+    {
+      "id": "injects-constructor-pet-type-repo",
+      "edgeKind": "INJECTS",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.PetTypeRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Second constructor parameter of PetController."
+    },
+    {
+      "id": "injects-constructor-vet-repo",
+      "edgeKind": "INJECTS",
+      "from": "org.springframework.samples.petclinic.vet.VetController",
+      "to": "org.springframework.samples.petclinic.vet.VetRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Constructor injection in VetController."
+    },
+    {
+      "id": "injects-no-undeclared-dependency",
+      "edgeKind": "INJECTS",
+      "from": "org.springframework.samples.petclinic.vet.VetController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerRepository",
+      "expected": "absent",
+      "source": "hand",
+      "note": "VetController never mentions OwnerRepository. Guards against injecting every repository in the package."
+    },
+    {
+      "id": "route-owner-new-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#initCreationForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/new" },
+      "note": "@GetMapping(\"/owners/new\")."
+    },
+    {
+      "id": "route-owner-new-post",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#processCreationForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/owners/new" },
+      "note": "Same path, different verb as route-owner-new-get. Verb must be carried, not defaulted to GET."
+    },
+    {
+      "id": "route-owner-find-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#initFindForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/find" },
+      "note": "@GetMapping(\"/owners/find\")."
+    },
+    {
+      "id": "route-owner-list-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#processFindForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners" },
+      "note": "@GetMapping(\"/owners\")."
+    },
+    {
+      "id": "route-owner-edit-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#initUpdateOwnerForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/{ownerId}/edit" },
+      "note": "Path variable syntax must be preserved verbatim."
+    },
+    {
+      "id": "route-owner-edit-post",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#processUpdateOwnerForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/owners/{ownerId}/edit" },
+      "note": "@PostMapping(\"/owners/{ownerId}/edit\")."
+    },
+    {
+      "id": "route-owner-show",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.OwnerController",
+      "to": "org.springframework.samples.petclinic.owner.OwnerController#showOwner",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/{ownerId}" },
+      "note": "@GetMapping(\"/owners/{ownerId}\")."
+    },
+    {
+      "id": "route-vets-html",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.vet.VetController",
+      "to": "org.springframework.samples.petclinic.vet.VetController#showVetList",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/vets.html" },
+      "note": "A route path with a file extension, which string-munging heuristics often strip."
+    },
+    {
+      "id": "route-vets-array-form",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.vet.VetController",
+      "to": "org.springframework.samples.petclinic.vet.VetController#showResourcesVetList",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/vets" },
+      "note": "@GetMapping({ \"/vets\" }) uses the array form, so the annotation argument is a brace literal rather than a bare string."
+    },
+    {
+      "id": "route-welcome-root",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.system.WelcomeController",
+      "to": "org.springframework.samples.petclinic.system.WelcomeController#welcome",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/" },
+      "note": "Root mapping."
+    },
+    {
+      "id": "route-pet-new-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.PetController#initCreationForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/{ownerId}/pets/new" },
+      "note": "Class-level @RequestMapping(\"/owners/{ownerId}\") must be joined with the method-level @GetMapping(\"/pets/new\")."
+    },
+    {
+      "id": "route-pet-new-post",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.PetController#processCreationForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/owners/{ownerId}/pets/new" },
+      "note": "Class prefix joined with @PostMapping(\"/pets/new\")."
+    },
+    {
+      "id": "route-pet-edit-get",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.PetController#initUpdateForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/owners/{ownerId}/pets/{petId}/edit" },
+      "note": "Class prefix joined with a method path that has its own path variable."
+    },
+    {
+      "id": "route-pet-edit-post",
+      "edgeKind": "ROUTES",
+      "from": "org.springframework.samples.petclinic.owner.PetController",
+      "to": "org.springframework.samples.petclinic.owner.PetController#processUpdateForm",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/owners/{ownerId}/pets/{petId}/edit" },
+      "note": "Class prefix joined with @PostMapping(\"/pets/{petId}/edit\")."
+    }
+  ]
+}

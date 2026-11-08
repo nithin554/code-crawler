@@ -1,0 +1,165 @@
+{
+  "project": "spring-boot-realworld",
+  "language": "java",
+  "framework": "spring-boot",
+  "cases": [
+    {
+      "id": "calls-controller-to-service",
+      "edgeKind": "CALLS",
+      "from": "io.spring.api.ArticleApi#article",
+      "to": "io.spring.application.ArticleQueryService#findBySlug",
+      "expected": "present",
+      "source": "hand",
+      "note": "Field receiver resolution through a Lombok-generated constructor-injected field."
+    },
+    {
+      "id": "calls-service-to-mapper",
+      "edgeKind": "CALLS",
+      "from": "io.spring.application.ArticleQueryService#findBySlug",
+      "to": "io.spring.infrastructure.mybatis.readservice.ArticleReadService#findBySlug",
+      "expected": "present",
+      "source": "hand",
+      "note": "Crossing into a MyBatis mapper interface, where the implementation is a runtime proxy."
+    },
+    {
+      "id": "calls-no-wrong-service-method",
+      "edgeKind": "CALLS",
+      "from": "io.spring.api.ArticleApi#article",
+      "to": "io.spring.application.ArticleQueryService#findById",
+      "expected": "absent",
+      "source": "hand",
+      "note": "article() calls findBySlug, while the same receiver type also exposes findById. Guards method-name discrimination once the receiver type is known."
+    },
+    {
+      "id": "dispatch-single-impl-findBySlug",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "io.spring.core.article.ArticleRepository#findBySlug",
+      "to": "io.spring.infrastructure.repository.MyBatisArticleRepository#findBySlug",
+      "expected": "present",
+      "source": "hand",
+      "note": "The interface has exactly one implementation in the project, so this dispatch target is certain, not merely possible."
+    },
+    {
+      "id": "dispatch-single-impl-save",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "io.spring.core.article.ArticleRepository#save",
+      "to": "io.spring.infrastructure.repository.MyBatisArticleRepository#save",
+      "expected": "present",
+      "source": "hand",
+      "note": "save is annotated @Override in the implementation."
+    },
+    {
+      "id": "dispatch-single-impl-remove",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "io.spring.core.article.ArticleRepository#remove",
+      "to": "io.spring.infrastructure.repository.MyBatisArticleRepository#remove",
+      "expected": "present",
+      "source": "hand",
+      "note": "remove is annotated @Override in the implementation."
+    },
+    {
+      "id": "dispatch-no-self-loop",
+      "edgeKind": "DYNAMIC_DISPATCH",
+      "from": "io.spring.core.article.ArticleRepository#findBySlug",
+      "to": "io.spring.core.article.ArticleRepository#findBySlug",
+      "expected": "absent",
+      "source": "hand",
+      "note": "An abstract interface method cannot dispatch to itself."
+    },
+    {
+      "id": "injects-query-service",
+      "edgeKind": "INJECTS",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.application.ArticleQueryService",
+      "expected": "present",
+      "source": "hand",
+      "note": "ArticleApi is annotated @AllArgsConstructor, so Lombok generates the constructor and the source contains no constructor at all. Injection is real at runtime but invisible in the AST."
+    },
+    {
+      "id": "injects-repository",
+      "edgeKind": "INJECTS",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.core.article.ArticleRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Second field of ArticleApi, injected via the Lombok-generated all-arguments constructor."
+    },
+    {
+      "id": "injects-command-service",
+      "edgeKind": "INJECTS",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.application.article.ArticleCommandService",
+      "expected": "present",
+      "source": "hand",
+      "note": "Third field of ArticleApi."
+    },
+    {
+      "id": "injects-favorite-repository",
+      "edgeKind": "INJECTS",
+      "from": "io.spring.api.ArticleFavoriteApi",
+      "to": "io.spring.core.article.ArticleRepository",
+      "expected": "present",
+      "source": "hand",
+      "note": "Field injection in a second Lombok-constructed controller."
+    },
+    {
+      "id": "injects-no-undeclared-dependency",
+      "edgeKind": "INJECTS",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.core.favorite.ArticleFavoriteRepository",
+      "expected": "absent",
+      "source": "hand",
+      "note": "ArticleApi does not declare ArticleFavoriteRepository. Prevents 'inject every repository in the project' behaviour."
+    },
+    {
+      "id": "route-article-get",
+      "edgeKind": "ROUTES",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.api.ArticleApi#article",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/articles/{slug}" },
+      "note": "Class-level @RequestMapping(path = \"/articles/{slug}\") with a bare @GetMapping on the method: the method contributes nothing and the class path is the route."
+    },
+    {
+      "id": "route-article-put",
+      "edgeKind": "ROUTES",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.api.ArticleApi#updateArticle",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "PUT", "path": "/articles/{slug}" },
+      "note": "Same path as route-article-get with a different verb."
+    },
+    {
+      "id": "route-article-delete",
+      "edgeKind": "ROUTES",
+      "from": "io.spring.api.ArticleApi",
+      "to": "io.spring.api.ArticleApi#deleteArticle",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/articles/{slug}" },
+      "note": "Third verb on the same path."
+    },
+    {
+      "id": "route-favorite-post",
+      "edgeKind": "ROUTES",
+      "from": "io.spring.api.ArticleFavoriteApi",
+      "to": "io.spring.api.ArticleFavoriteApi#favoriteArticle",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/articles/{slug}/favorite" },
+      "note": "Source declares @RequestMapping(path = \"articles/{slug}/favorite\") with no leading slash. The served path is rooted, so a leading slash must be normalized in."
+    },
+    {
+      "id": "route-favorite-delete",
+      "edgeKind": "ROUTES",
+      "from": "io.spring.api.ArticleFavoriteApi",
+      "to": "io.spring.api.ArticleFavoriteApi#unfavoriteArticle",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/articles/{slug}/favorite" },
+      "note": "Verb from @DeleteMapping on the same unrooted class path."
+    }
+  ]
+}
