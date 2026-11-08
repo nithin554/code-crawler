@@ -14,6 +14,11 @@ import { buildChannelEdges } from "./resolver/channels.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
+  INJECT_CONFIDENCE_ALIAS,
+  INJECT_CONFIDENCE_EXTERNAL,
+  INJECT_CONFIDENCE_PROVIDER,
+  INJECT_CONFIDENCE_UNIQUE_TYPE,
+  INJECT_CONFIDENCE_UNRESOLVED,
   resolveDependencyAliasProvider,
   resolveDependencyProvider,
   resolveInjectionTarget,
@@ -668,6 +673,7 @@ export function buildDependencyGraph(
           injectedName: inj.name,
           framework: inj.framework,
           inferred: true,
+          confidence: INJECT_CONFIDENCE_ALIAS,
         },
       });
       continue;
@@ -677,7 +683,9 @@ export function buildDependencyGraph(
     let target: string | undefined = inj.provider
       ? (resolveDependencyProvider(parsed, index, inj.provider) ?? undefined)
       : undefined;
+    let confidence = INJECT_CONFIDENCE_PROVIDER;
     if (!target) {
+      confidence = INJECT_CONFIDENCE_UNIQUE_TYPE;
       // Primitive/structural types carry no dependency identity, so they get a
       // count but no target edge (`@Body() body: { id: string }`).
       if (isBuiltinTypeText(inj.type)) continue;
@@ -688,16 +696,30 @@ export function buildDependencyGraph(
     if (!target && parsed.language !== "java") {
       const resolved = resolveInjectionTarget(parsed, index, inj.type);
       if (resolved?.targetId) {
+        // A phantom id has no node behind it yet; materialise it below so the
+        // edge survives the global rebuild and reads as unresolved rather than
+        // disappearing.
         target = resolved.targetId.startsWith("ext:")
           ? externalNode(resolved.external ?? inj.type)
           : resolved.targetId;
         isExternal = Boolean(resolved.external);
+        confidence = isExternal
+          ? INJECT_CONFIDENCE_EXTERNAL
+          : resolved.targetId.startsWith("__inject__:")
+            ? INJECT_CONFIDENCE_UNRESOLVED
+            : INJECT_CONFIDENCE_UNIQUE_TYPE;
       }
     }
-    if (!target)
+    if (!target) {
+      confidence = INJECT_CONFIDENCE_UNRESOLVED;
       target = unknownNode(`__inject__:${inj.type || inj.name}`, inj.type || inj.name, {
         reason: "unresolved injected type",
       });
+    } else if (target.startsWith("__inject__:")) {
+      target = unknownNode(target, inj.type || inj.name, {
+        reason: "injected dependency is not named in source",
+      });
+    }
     edges.push({
       source: owner,
       target,
@@ -707,6 +729,7 @@ export function buildDependencyGraph(
         injectedName: inj.name,
         framework: inj.framework,
         ...(isExternal ? { external: true } : {}),
+        confidence,
       },
     });
   }
@@ -749,21 +772,22 @@ export function buildDependencyGraph(
   for (const route of parsed.routes ?? []) {
     const owner = route.enclosingTypeId;
     if (!owner) continue;
-    const handlerId = resolveRouteHandler(parsed, index, route.handlerName, route.moduleId);
-    if (!handlerId) continue;
+    const handler = resolveRouteHandler(parsed, index, route.handlerName, route.moduleId);
+    if (!handler) continue;
     routes++;
     edges.push({
       source: owner,
-      target: handlerId,
+      target: handler.id,
       kind: "ROUTES",
       properties: {
         line: route.line,
         framework: route.framework,
         httpMethod: route.httpMethod,
         path: route.path,
+        confidence: handler.confidence,
       },
     });
-    entryPointMarks.set(handlerId, {
+    entryPointMarks.set(handler.id, {
       kind: "http",
       detail: `${route.httpMethod} ${route.path}`,
     });

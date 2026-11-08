@@ -916,21 +916,26 @@ it and re-crawl if disk matters more than the re-index time.
 
 ### What the confidence number means
 
-Every `CALLS` edge carries `confidence` (0 to 1) and `resolved`. `DYNAMIC_DISPATCH` and
-`ADVISES` edges carry their own confidence, derived from the pointcut that produced them. The
-band tells you how the target was found, which is the only thing that varies:
+Every edge that names an inferred target carries `confidence` (0 to 1) and `resolved`: `CALLS`,
+`DYNAMIC_DISPATCH`, `ADVISES`, `INJECTS`, `ROUTES` and `EMITS`. The band tells you how the target
+was found, which is the only thing that varies:
 
 | Confidence | How the target was found |
 | --- | --- |
 | `1.00` | Receiver is a local variable or parameter, or the type is named at the call site |
-| `0.95` | Field receiver, bare call in the enclosing type, `this(...)`, `super(...)` |
+| `0.95` | Field receiver, bare call in the enclosing type, `this(...)`, `super(...)`; the only project type matching a declared name |
 | `0.90` | Implicit default constructor, or pointcut `execution()` |
-| `0.85` | Receiver type inferred from an assignment, field or return type; `within()`, `@annotation()` |
-| `0.80` | External package call; `@within()`; a `DYNAMIC_DISPATCH` candidate |
+| `0.85` | Receiver type inferred from an assignment, field or return type; `within()`, `@annotation()`; an import-bound dependency alias |
+| `0.80` | External package call; `@within()`; a `DYNAMIC_DISPATCH` candidate; a dependency or handler resolved through a module prefix |
 | `0.75` | Target found by searching base types or interface default methods |
-| `0.60` | Ambiguous overload; `args()` pointcut arity |
+| `0.60` | Ambiguous overload; `args()` pointcut arity; two equally good route handlers |
 | `0.55` | `target()` / `this()` pointcuts, a static approximation of a run-time type test |
 | `0.00` | Unresolved. Always paired with `resolved: false` and a `reason` |
+
+The same numbers describe the same kind of evidence whichever edge they sit on: for `INJECTS`
+they grade **the provider the container calls** (`1.00` named at the injection site, `0.00`
+supplied but unnamed), and for `ROUTES` they grade **the handler dispatched to** (path and HTTP
+method are read from source, so only the lookup can be uncertain).
 
 Treat `0.95` and above as fact. Verify anything at `0.85` whose type has overriding subclasses.
 When you see `0.60`, read `alternatives` instead of trusting the pick.

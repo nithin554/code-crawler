@@ -694,10 +694,13 @@ npx codecrawler serve</code></pre>
 
           <h3 id="confidence">Reading edge confidence</h3>
           <p>
-            Every call edge records <code>confidence</code> (0 to 1) and <code>resolved</code>.
-            <code>get_callers</code>, <code>get_callees</code> and <code>trace_path</code> return
-            both, so a trace never presents a guess as a fact. The bands are stable and come from
-            how the receiver was found:
+            Every edge that names an inferred target records <code>confidence</code> (0 to 1) and
+            <code>resolved</code> &mdash; <code>CALLS</code>, <code>DYNAMIC_DISPATCH</code>,
+            <code>ADVISES</code>, <code>INJECTS</code>, <code>ROUTES</code> and
+            <code>EMITS</code>. <code>get_callers</code>, <code>get_callees</code>,
+            <code>find_injections</code> and <code>find_routes</code> return both, so an answer
+            never presents a guess as a fact. The bands are stable and come from how the target
+            was found:
           </p>
           <div class="table-wrap">
             <table>
@@ -714,7 +717,8 @@ npx codecrawler serve</code></pre>
                 <tr>
                   <td><code>0.95</code></td>
                   <td>Field receiver, bare call in the enclosing type, <code>this(...)</code> or
-                  <code>super(...)</code>.</td>
+                  <code>super(...)</code>; the only project declaration matching a supplied
+                  name.</td>
                   <td>Treat as fact.</td>
                 </tr>
                 <tr>
@@ -725,13 +729,15 @@ npx codecrawler serve</code></pre>
                 <tr>
                   <td><code>0.85</code></td>
                   <td>Receiver type inferred from an assignment, field type or return type;
-                  <code>within()</code> and <code>@annotation()</code> pointcuts.</td>
+                  <code>within()</code> and <code>@annotation()</code> pointcuts; a dependency
+                  reached through an import-bound alias.</td>
                   <td>Usually right. Verify when the type has subclasses that override.</td>
                 </tr>
                 <tr>
                   <td><code>0.80</code></td>
-                  <td>Call into an external package, <code>@within()</code> pointcut, or a
-                  <code>DYNAMIC_DISPATCH</code> candidate.</td>
+                  <td>Call into an external package, <code>@within()</code> pointcut, a
+                  <code>DYNAMIC_DISPATCH</code> candidate, or a dependency or handler matched
+                  through a module prefix.</td>
                   <td>Right about the package or the override set, not about one exact method.</td>
                 </tr>
                 <tr>
@@ -741,10 +747,11 @@ npx codecrawler serve</code></pre>
                 </tr>
                 <tr>
                   <td><code>0.60</code></td>
-                  <td>Ambiguous overload, or <code>args()</code> pointcut arity.</td>
+                  <td>Ambiguous overload, <code>args()</code> pointcut arity, or two equally good
+                  route handlers.</td>
                   <td>
-                    Several overloads matched. The edge also carries <code>alternatives</code>:
-                    read them instead of trusting the pick.
+                    Several candidates matched. For a call the edge also carries
+                    <code>alternatives</code>: read them instead of trusting the pick.
                   </td>
                 </tr>
                 <tr>
@@ -764,6 +771,15 @@ npx codecrawler serve</code></pre>
               </tbody>
             </table>
           </div>
+
+          <p>
+            The same numbers describe the same kind of evidence whichever edge they sit on. For
+            <code>INJECTS</code> they grade <em>the provider the container calls</em> &mdash;
+            <code>1.00</code> when the provider is named at the injection site, <code>0.00</code>
+            when a dependency is supplied but cannot be named at all. For <code>ROUTES</code> they
+            grade <em>the handler dispatched to</em>; the path and HTTP method are read from source
+            and are exact, so only the lookup can be uncertain.
+          </p>
 
           <h3>When a call does not resolve</h3>
           <p>

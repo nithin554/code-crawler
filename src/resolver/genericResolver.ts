@@ -457,43 +457,113 @@ export function resolveInjectionTarget(
   return { targetId: `__inject__:${text}` };
 }
 
+/**
+ * Confidence for `INJECTS`, which describes the *identity* of the provider the
+ * container calls — not whether it calls it. A field marked `@Autowired` is
+ * certainly injected; the question the number answers is whether we named the
+ * right provider.
+ *
+ * The values reuse the ladder the call resolver already uses (exact 1.0, local
+ * scope 0.95, inference 0.85, external 0.8, unknown 0) so that a consumer can
+ * compare an injection and a call on the same scale.
+ */
+/** The framework calls a callable named at the injection site. */
+export const INJECT_CONFIDENCE_PROVIDER = 1;
+/** Exactly one project type in scope matches the declared type. */
+export const INJECT_CONFIDENCE_UNIQUE_TYPE = 0.95;
+/** Resolved through a module-level dependency alias (`Annotated[..., Depends(f)]`). */
+export const INJECT_CONFIDENCE_ALIAS = 0.85;
+/** The declared type is a package outside the crawled tree. */
+export const INJECT_CONFIDENCE_EXTERNAL = 0.8;
+/** Token-only injection: a dependency is supplied, but it cannot be named. */
+export const INJECT_CONFIDENCE_UNRESOLVED = 0;
+
+/**
+ * Confidence for `ROUTES`, which describes whether the handler we attached is
+ * the one the framework dispatches to. Route paths are read from source and are
+ * exact; only the handler lookup can be indirect.
+ */
+/** The handler is declared in the module, or the file, that registers the route. */
+export const ROUTE_CONFIDENCE_DIRECT = 1;
+/** The handler belongs to another type declared in the same file. */
+export const ROUTE_CONFIDENCE_SIBLING_TYPE = 0.95;
+/** Resolved through a scope alias or import binding. */
+export const ROUTE_CONFIDENCE_SCOPED = 0.85;
+/** Found by scanning module types that share the route's module prefix. */
+export const ROUTE_CONFIDENCE_MODULE_PREFIX = 0.8;
+/**
+ * More than one method at the same tier answers to the handler's name, so the
+ * edge names a candidate rather than a certainty. 0.6 is the cap the call
+ * resolver already applies to ambiguous overloads.
+ */
+export const ROUTE_CONFIDENCE_AMBIGUOUS = 0.6;
+
+/** A route registration resolved to the handler the framework will invoke. */
+export interface ResolvedRouteHandler {
+  id: string;
+  confidence: number;
+}
+
+/**
+ * The first candidate at a tier, damped to `ROUTE_CONFIDENCE_AMBIGUOUS` when the
+ * tier offers no unique answer. Taking `[0]` silently would be a guess.
+ */
+function pickHandler(ids: string[], certain: number): ResolvedRouteHandler | null {
+  const first = ids[0];
+  if (first === undefined) return null;
+  return {
+    id: first,
+    confidence: ids.length > 1 ? ROUTE_CONFIDENCE_AMBIGUOUS : certain,
+  };
+}
+
 /** Resolve a route registration to the handler method node id. */
 export function resolveRouteHandler(
   file: ParsedFile,
   index: TypeIndex,
   handlerName: string,
   moduleId: string
-): string | null {
+): ResolvedRouteHandler | null {
   const moduleTypeId = moduleNodeId(moduleId);
-  const direct = findMethodsNamed(index, moduleTypeId, handlerName)[0];
-  if (direct) return direct.id;
-  const inFile = file.methods.find((m) => m.name === handlerName);
-  if (inFile) return inFile.id;
+  const direct = pickHandler(
+    findMethodsNamed(index, moduleTypeId, handlerName).map((m) => m.id),
+    ROUTE_CONFIDENCE_DIRECT
+  );
+  if (direct) return direct;
+  const inFile = pickHandler(
+    file.methods.filter((m) => m.name === handlerName).map((m) => m.id),
+    ROUTE_CONFIDENCE_DIRECT
+  );
+  if (inFile) return inFile;
+  const siblings: string[] = [];
   for (const type of file.types) {
-    const method = findMethodsNamed(index, type.id, handlerName)[0];
-    if (method) return method.id;
+    siblings.push(...findMethodsNamed(index, type.id, handlerName).map((m) => m.id));
   }
+  const sibling = pickHandler(siblings, ROUTE_CONFIDENCE_SIBLING_TYPE);
+  if (sibling) return sibling;
   const scoped = file.scopeTypes?.get(handlerName);
   if (scoped) {
     const firstType = resolveTypeCandidates(file, index, scoped)[0];
     if (firstType) {
-      const method = findInherited(index, firstType, handlerName)[0];
-      if (method) return method.id;
+      const inherited = pickHandler(
+        findInherited(index, firstType, handlerName).map((m) => m.id),
+        ROUTE_CONFIDENCE_SCOPED
+      );
+      if (inherited) return inherited;
     }
     const moduleCandidate = index.resolveModuleId(
       scoped.split(".").slice(0, -1).join(".") || scoped
     );
     if (moduleCandidate) {
       const member = resolveModuleMember(index, moduleCandidate, handlerName);
-      if (member) return member;
+      if (member) return { id: member, confidence: ROUTE_CONFIDENCE_SCOPED };
     }
   }
-  const moduleTypes = file.types.filter((t) => t.id.startsWith(moduleTypeId));
-  for (const type of moduleTypes) {
-    const method = findMethodsNamed(index, type.id, handlerName)[0];
-    if (method) return method.id;
+  const prefixed: string[] = [];
+  for (const type of file.types.filter((t) => t.id.startsWith(moduleTypeId))) {
+    prefixed.push(...findMethodsNamed(index, type.id, handlerName).map((m) => m.id));
   }
-  return null;
+  return pickHandler(prefixed, ROUTE_CONFIDENCE_MODULE_PREFIX);
 }
 
 export { resolveScopeValue };

@@ -38,7 +38,16 @@ Read the two ends of an `INJECTS` edge carefully: the **source is what the frame
 populates** - a constructor's type, or the function whose parameters are filled - and the
 **target is the provider the framework calls**. So `service: OrderService =
 Depends(get_service)` is an edge to `get_service`, not to `OrderService`: the container
-invokes `get_service` and passes back whatever it returns.
+invokes `get_service` and passes back whatever it returns. That distinction is what
+`confidence` measures here: `1.0` when the provider is named at the injection site, `0.95`
+when one project type matches the declared type, `0.85` when reached through a dependency
+alias, `0.8` for a package outside the index, and `0` when the dependency exists but cannot
+be named at all.
+
+`ROUTES` confidence answers a narrower question - whether the attached handler is the one
+dispatched to. The path and HTTP method are read from source and are exact; only the
+handler lookup can be indirect, so `0.6` on a `ROUTES` edge means two handlers in the same
+file matched equally and the first was kept.
 
 Spring's event bus and messaging brokers are the same shape, with `EMITS`: the **source is
 the publisher method** (the one that hands a message to the framework) and the **target is
@@ -62,17 +71,29 @@ confidence - but an `AFTER_ROLLBACK` listener will not run on the happy path.
 Do not average it, threshold it, or present it as certainty. It is a coarse label telling
 you *what kind of evidence* produced the edge.
 
+Every edge that names an inferred target carries a number: `CALLS`, `DYNAMIC_DISPATCH`,
+`ADVISES`, `INJECTS`, `ROUTES` and `EMITS`. Structural edges (`DECLARED_IN`, `CONTAINS`,
+`IMPLEMENTS`, `EXTENDS`, `IMPORTS`, `ANNOTATED_WITH`, `REFERENCES`) do not - they are read
+from a declaration, so there is nothing to be uncertain about.
+
 | Value | Evidence |
 | --- | --- |
-| `1.0` | Resolved by construction - a constructor, overload, or event type matched exactly |
+| `1.0` | Resolved by construction - a constructor, overload, or event type matched exactly; a route handler declared in the type that registers it |
+| `0.95` | One project declaration matches the name, with no rival in scope |
 | `0.9` | Same-module declaration, typed local, or default constructor |
 | `0.85` | Imported from a named module, or a literal topic/queue name |
 | `0.8` | Inherited from a supertype, or an external target |
 | `0.75` | Call to an imported class resolved through its import |
-| `0.6` | Pointcut `args(...)` matched on arity only, or an ambiguous overload tie |
+| `0.6` | Pointcut `args(...)` matched on arity only, an ambiguous overload tie, or a tie between handlers |
 | `0.55` | Pointcut primitive matched by static approximation |
 | `0.3` | Empty pointcut - the advice matches everything |
 | `0` | Phantom - nothing was resolved |
+
+The same numbers mean the same thing across kinds: for `CALLS` and `DYNAMIC_DISPATCH` they
+describe the callee's identity, for `INJECTS` the **provider the container calls**, for
+`ROUTES` the **handler the framework dispatches to**. None of them describe whether the
+edge fires at run time - a `@Transactional` method marked `inert`, or a listener whose
+publisher is outside the index, still has a confident edge.
 
 Practical rule: `>= 0.75` is safe to report as fact, `0.5`-`0.7` deserves a hedge, and `0`
 carries no information about the target at all.
@@ -148,6 +169,10 @@ carry `confidence: 0` and `resolved: false`, and their ids are prefixed:
 | `__phantom__:` | A call site with no resolvable target |
 | `__reflect__:` | A runtime lookup whose type or method was not found |
 | `__inject__:` | An injection marker that named neither a type nor a package |
+
+An unresolved injection is still an edge. The placeholder is materialised as a node with
+`reason: "unresolved injected type"` and the edge keeps `confidence: 0`, so the dependency
+counts and reads as unresolved. It is never deleted from the graph for want of a target.
 
 Phantoms are **inventory, not findings**. A phantom is a statement about the analyser, not
 about the code. Never report one as "calls something unknown" without reading its `reason` -

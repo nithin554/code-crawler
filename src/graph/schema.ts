@@ -98,7 +98,14 @@ export interface EdgeProperties {
   line?: number;
   /** For CALLS edges: whether the target was statically resolved. */
   resolved?: boolean;
-  /** For CALLS edges: heuristic confidence 0..1 when resolved. */
+  /**
+   * Confidence 0..1 that the edge names the right target.
+   *
+   * Present on every edge whose target is inferred rather than read from
+   * source: `CALLS`, `DYNAMIC_DISPATCH`, `INJECTS`, `ROUTES` and `EMITS`.
+   * Structural edges (`CONTAINS`, `EXTENDS`, `IMPLEMENTS`) are certain by
+   * construction and carry no number rather than a meaningless `1`.
+   */
   confidence?: number;
   /** For CALLS: rival overloads an ambiguous call site could equally target. */
   alternatives?: string[];

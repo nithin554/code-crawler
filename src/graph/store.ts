@@ -122,8 +122,13 @@ CREATE INDEX IF NOT EXISTS idx_nodes_entry_point
  * only the JSON contract moved. Databases created before versioning was
  * introduced are stamped at this version when first opened, because the schema
  * is already idempotent.
+ *
+ * 5: `find_injections` and `find_routes` now report `confidence` on every edge,
+ *    so an index built by version 4 would answer without the field until it is
+ *    re-crawled. No migration is needed — the value lives in the edge properties
+ *    JSON and is rebuilt by the crawl.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 interface Migration {
   version: number;

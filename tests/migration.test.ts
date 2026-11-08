@@ -96,6 +96,9 @@ describe("schema migration", () => {
   it("invalidates a v3 index so the next crawl rebuilds event edges", async () => {
     const file = tempDb();
     const seeded = new GraphStore(file, { maxDepth: 10 });
+    // The version this build writes; asserted against rather than hardcoded so
+    // the test keeps testing the upgrade, not the current number.
+    const currentVersion = seeded.schemaVersion;
     seeded.upsertNode({
       id: "com.acme.events.OrderPublisher#place",
       kind: "method",
@@ -112,7 +115,7 @@ describe("schema migration", () => {
 
     const upgraded = new GraphStore(file, { maxDepth: 10 });
     try {
-      expect(upgraded.schemaVersion).toBe(4);
+      expect(upgraded.schemaVersion).toBe(currentVersion);
       expect(upgraded.getNode("com.acme.events.OrderPublisher#place")).toBeNull();
     } finally {
       upgraded.close();
