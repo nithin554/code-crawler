@@ -18,11 +18,15 @@ nodes. Read this before reporting "no callers", "dead code", or "unresolved".
 | `ANNOTATED_WITH` | Symbol to an annotation or decorator |
 | `REFERENCES` | A non-call reference, such as a field or type use |
 | `REFLECTS` | A runtime lookup that may reach a symbol |
-| `INJECTS` | A DI-supplied dependency |
+| `INJECTS` | A DI-supplied dependency: a field or parameter the container fills |
 | `ROUTES` | An HTTP route to its handler |
 
 A method reached only by `DYNAMIC_DISPATCH`, `ADVISES`, or `ROUTES` **is still called**.
 When asking "who calls this", look at all inbound edge kinds, not just `CALLS`.
+
+Spring wiring is usually not annotated. The sole constructor of a `@Service` is autowired
+without `@Autowired`, and a Lombok `@AllArgsConstructor` writes no constructor into the
+source at all. `find_injections` reports these; grepping for `@Autowired` will not.
 
 ## `confidence` is a band, not a probability
 

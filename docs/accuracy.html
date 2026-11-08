@@ -86,10 +86,10 @@
             </div>
             <div class="card">
               <div class="badge">Recall</div>
-              <h3>0.696</h3>
+              <h3>0.812</h3>
               <p class="muted">
-                48 of 69 expected edges were produced. What remains is almost entirely one edge
-                type.
+                56 of 69 expected edges were produced. Every remaining miss is in one project: the
+                FastAPI template.
               </p>
             </div>
             <div class="card">
@@ -137,8 +137,8 @@
                   <td><code>500158f73241</code></td>
                   <td>50</td>
                   <td>1,244</td>
-                  <td>2,654</td>
-                  <td>659 ms</td>
+                  <td>2,660</td>
+                  <td>671 ms</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
@@ -146,8 +146,8 @@
                   <td><code>ee17e31aafe7</code></td>
                   <td>116</td>
                   <td>1,978</td>
-                  <td>5,048</td>
-                  <td>973 ms</td>
+                  <td>5,057</td>
+                  <td>956 ms</td>
                 </tr>
                 <tr>
                   <td>fastapi-template</td>
@@ -165,7 +165,7 @@
                   <td>36</td>
                   <td>466</td>
                   <td>865</td>
-                  <td>156 ms</td>
+                  <td>161 ms</td>
                 </tr>
               </tbody>
             </table>
@@ -241,10 +241,10 @@
                   <td><code>INJECTS</code></td>
                   <td>20</td>
                   <td>1.000</td>
-                  <td>0.133</td>
-                  <td>2</td>
+                  <td>0.667</td>
+                  <td>10</td>
                   <td>0</td>
-                  <td>13</td>
+                  <td>5</td>
                   <td>5</td>
                 </tr>
                 <tr>
@@ -295,10 +295,10 @@
                   <td>java</td>
                   <td>44</td>
                   <td>1.000</td>
-                  <td>0.778</td>
-                  <td>28</td>
+                  <td>1.000</td>
+                  <td>36</td>
                   <td>0</td>
-                  <td>8</td>
+                  <td>0</td>
                   <td>8</td>
                 </tr>
                 <tr>
@@ -343,20 +343,20 @@
                   <td>spring-petclinic</td>
                   <td>27</td>
                   <td>1.000</td>
-                  <td>0.818</td>
-                  <td>18</td>
+                  <td>1.000</td>
+                  <td>22</td>
                   <td>0</td>
-                  <td>4</td>
+                  <td>0</td>
                   <td>5</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
                   <td>17</td>
                   <td>1.000</td>
-                  <td>0.714</td>
-                  <td>10</td>
+                  <td>1.000</td>
+                  <td>14</td>
                   <td>0</td>
-                  <td>4</td>
+                  <td>0</td>
                   <td>3</td>
                 </tr>
                 <tr>
@@ -560,16 +560,16 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>2. Constructor injection produces no INJECTS edge</h3>
+            <h3>2. FastAPI dependency aliases produce no INJECTS edge</h3>
             <p>
-              Only <code>@Autowired</code>-annotated field injection is modelled. The dominant
-              modern Spring styles — a single constructor with no annotation, and a Lombok
-              <code>@AllArgsConstructor</code> that generates the constructor entirely — produce
-              nothing. This is 4 of 4 cases in spring-petclinic and 4 of 4 in
-              spring-boot-realworld. Call resolution still succeeds through the field, at
-              confidence 0.95, so <code>get_callers</code> and <code>trace_path</code> mostly keep
-              working; what is lost is any query whose answer depends on the wiring edge itself,
-              such as which beans a controller depends on.
+              The template declares its dependencies once as module-level aliases —
+              <code>SessionDep = Annotated[Session, Depends(get_db)]</code> — and then names them in
+              each handler signature. A parameter typed only by such an alias yields nothing, and
+              neither does a dependency reached only through another dependency function. All 5
+              remaining injection misses are this one case; constructor injection in the two Spring
+              projects is now modelled and scores 1.000. Call resolution still succeeds from inside
+              the handler body, so <code>get_callers</code> and <code>trace_path</code> mostly keep
+              working; what is lost is any query whose answer depends on the wiring edge itself.
             </p>
           </div>
 
@@ -578,9 +578,10 @@
             <p>
               Both edge kinds are written without a confidence value, so a consumer cannot tell a
               proven mapping from a derived guess. The project rule is that no edge type exists
-              without a confidence model; these two are the standing exceptions, and they are
-              exactly the two with the worst recall. Adding confidence is a prerequisite for
-              trusting them.
+              without a confidence model; these two are the standing exceptions. Recall has improved
+              enough that this now matters more, not less: a Spring
+              <code>@GetMapping</code> on a bean and a Lombok-derived constructor parameter are
+              different strengths of evidence, and the graph reports both with no confidence at all.
             </p>
           </div>
 
@@ -644,8 +645,30 @@
               <code>@GetMapping({"/vets"})</code>, a named <code>path =</code> attribute, a bare
               annotation that inherits the class path, paths without a leading slash, and
               <code>method = RequestMethod.PUT</code> on the prefix-less form. <code>ROUTES</code>
-              recall went from 0.325 to 0.800 and Java recall from 0.250 to 0.778, with no invented
-              edge.
+              recall went from 0.325 to 0.800, with no invented edge.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <p>
+              Injection failed the same way: the parser only recorded a parameter when an annotation
+              asked for it. Spring has not needed one since 4.3 — the sole constructor of a bean is
+              autowired silently — and a Lombok <code>@AllArgsConstructor</code> leaves the
+              constructor out of the source entirely, so there was nothing to annotate in the first
+              place.
+            </p>
+            <p class="muted">
+              Bean stereotypes now mark a class as container-managed, and its dependencies follow
+              from that: the sole constructor's parameters when there is exactly one, the promoted
+              fields when a Lombok annotation generates the constructor. The rules stay conservative
+              in the ways that matter. Two unannotated constructors inject nothing, because Spring
+              cannot choose between them either. A field initialised at its declaration is skipped.
+              A class with no stereotype is skipped, since no container constructs it. A class that
+              writes its own constructor alongside a Lombok generator injects nothing, because that
+              is two constructors and the same ambiguity applies. Trusting a generator's field list
+              blindly would have produced 0.95-confidence edges to dependencies the code never
+              receives. <code>INJECTS</code> recall went from 0.133 to 0.667, Java recall from 0.778
+              to 1.000, and precision held at 1.000 with no invented edge.
             </p>
           </div>
         </div>

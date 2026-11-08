@@ -638,7 +638,8 @@ walkthrough.
   become `annotation` nodes with `ANNOTATED_WITH` edges.
 - **Reflection and run-time indirection** — `Class.forName`, `ServiceLoader`, `getattr`,
   `importlib`, `require`, dynamic `import()`, as `REFLECTS` edges.
-- **Dependency injection** — `@Autowired`, NestJS constructor injection, FastAPI `Depends`,
+- **Dependency injection** — `@Autowired`, Spring sole-constructor and Lombok-generated
+  constructor injection, NestJS constructor injection, FastAPI `Depends`,
   `dependency-injector`, as `INJECTS` edges.
 - **Framework entry points and routes** — Spring MVC, FastAPI, Flask, Quart, NestJS, Express.
 - **Control flow on edges** — conditional flags, control-flow kinds, and guard text.
@@ -654,7 +655,9 @@ walkthrough.
   `__reflect__:` marker instead. That is deliberate — inventing a target would be worse
   than the marker.
 - **DI containers configured outside code** (XML, `application.yml` bean wiring, NestJS
-  dynamic module factories). Only injection visible in source is reported.
+  dynamic module factories). Only injection traceable to a source annotation is reported.
+  Lombok is the one case where a dependency is derived from a generator rather than a written
+  constructor, and it is limited to the promoted-field rules of the annotation itself.
 - **Libraries outside the crawled tree.** Third-party code is summarised as `ext:`
   packages; it is never crawled, so you cannot trace into it.
 - **Runtime plugin loading beyond a literal prefix.** A prefix plus a variable

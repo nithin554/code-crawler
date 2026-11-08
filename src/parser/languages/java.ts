@@ -2,9 +2,11 @@ import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
 import {
   adviceIn,
   aspectIn,
+  constructorModeIn,
   entryPointIn,
   type FrameworkScope,
   frameworkScope,
+  injectableFrameworkIn,
   injectionIn,
 } from "../frameworks/index.js";
 import type {
@@ -337,12 +339,37 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     // A class-level mapping annotation supplies the prefix every handler path
     // hangs off, e.g. `@RequestMapping("/owners/{ownerId}")` on PetController.
     const controllerPath = controllerPrefixOf(annotations);
+    // A bean's dependencies reach it through the container, so only a bean can
+    // have an implicit injection point.
+    const beanFramework = annotations
+      .map((a) => injectableFrameworkIn(scope, a.name))
+      .find((name) => name !== undefined);
+    const declaredConstructors = body
+      ? body.namedChildren.filter(
+          (member) =>
+            member.type === "constructor_declaration" ||
+            member.type === "compact_constructor_declaration"
+        ).length
+      : 0;
+    // Lombok generates the constructor at compile time, so it is absent from
+    // the AST. Derive its parameters only when the class wrote none itself.
+    const lombokMode = annotations
+      .map((a) => constructorModeIn(scope, a.name))
+      .find((mode) => mode !== undefined);
+    const generatedConstructors = lombokMode ? 1 : 0;
+    // Spring autowires the sole constructor without an annotation; with more
+    // than one it needs `@Autowired` to choose, so an unannotated pair is not
+    // an injection point at all.
+    const implicitFramework =
+      beanFramework && declaredConstructors + generatedConstructors === 1
+        ? beanFramework
+        : undefined;
     if (body) {
       for (const member of body.namedChildren) {
         if (member.type === "method_declaration") {
           extractMethod(member, id, controllerPath);
         } else if (member.type === "constructor_declaration") {
-          extractConstructor(member, id);
+          extractConstructor(member, id, implicitFramework);
         } else if (member.type === "compact_constructor_declaration") {
           extractCompactConstructor(member, id, components);
         } else if (member.type === "field_declaration") {
@@ -354,6 +381,10 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     }
 
     extractRecordAccessors(id, components, node.startPosition.row);
+
+    if (body && lombokMode && beanFramework && declaredConstructors === 0) {
+      collectLombokInjections(body, id, lombokMode, beanFramework);
+    }
 
     nestingStack.pop();
   }
@@ -438,7 +469,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       ...advice,
       ...(entryPoint ? { entryPoint } : {}),
     });
-    collectParamInjections(node, id, annotations);
+    collectParamInjections(node, typeId, annotations);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }
@@ -478,33 +509,87 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     }
   }
 
-  /** Constructor parameter injections: Spring/Jakarta constructor injection. */
+  /**
+   * Dependency parameters of a constructor or a bean method.
+   *
+   * A parameter is injected when it, or the member carrying it, is annotated.
+   * `implicitFramework` covers the case Spring resolves silently: the sole
+   * constructor of a bean needs no annotation since Spring 4.3.
+   *
+   * The owner is the type, not the constructor: the dependency belongs to the
+   * bean, and field injection is recorded that way too.
+   */
   function collectParamInjections(
     node: TSNode,
-    typeId: string,
-    memberAnnotations: AnnotationInfo[]
+    ownerId: string,
+    memberAnnotations: AnnotationInfo[],
+    implicitFramework?: string
   ): void {
     const paramsNode = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
     if (!paramsNode) return;
     const memberFramework = injectionFrameworkOf(memberAnnotations, scope);
     for (const fp of childrenOfType(paramsNode, "formal_parameter")) {
-      const framework = injectionFrameworkOf(extractAnnotations(fp), scope);
+      const framework =
+        injectionFrameworkOf(extractAnnotations(fp), scope) ?? memberFramework ?? implicitFramework;
       if (!framework) continue;
       const name = childOfType(fp, "identifier")?.text ?? "";
       if (!name) continue;
       const typeNode = typeNodeOf(fp);
       injections.push({
         kind: "constructor-parameter",
-        ownerId: typeId,
+        ownerId,
         name,
         type: typeNode ? baseTypeName(typeNode.text) : "",
-        framework: framework ?? memberFramework ?? "unknown",
+        framework,
         line: fp.startPosition.row,
       });
     }
   }
 
-  function extractConstructor(node: TSNode, typeId: string): void {
+  /**
+   * Dependencies a Lombok-generated constructor takes.
+   *
+   * The constructor does not exist in the AST, so its parameters are derived
+   * from the fields the annotation promotes. Only used when the class declares
+   * no constructor of its own, so a hand-written constructor and a generated
+   * one can never both report the same edge. A field initialised at its
+   * declaration is skipped: the container may still set it, but the value in
+   * the source is what the code actually uses, and treating it as injected
+   * invents dependencies on things like `new HashMap<>()`.
+   */
+  function collectLombokInjections(
+    body: TSNode,
+    typeId: string,
+    mode: "all" | "required",
+    framework: string
+  ): void {
+    for (const member of body.namedChildren) {
+      if (member.type !== "field_declaration") continue;
+      const modifiers = extractModifiers(member);
+      if (modifiers.includes("static")) continue;
+      const required =
+        modifiers.includes("final") || extractAnnotations(member).some((a) => a.name === "NonNull");
+      if (mode === "required" && !required) continue;
+      const typeNode = typeNodeOf(member);
+      const type = typeNode ? baseTypeName(typeNode.text) : "";
+      for (const declarator of childrenOfType(member, "variable_declarator")) {
+        const name = childOfType(declarator, "identifier")?.text ?? "";
+        if (!name) continue;
+        // `Foo foo = …` has a second named child; `Foo foo` has only the name.
+        if (declarator.namedChildren.length > 1) continue;
+        injections.push({
+          kind: "constructor-parameter",
+          ownerId: typeId,
+          name,
+          type,
+          framework,
+          line: declarator.startPosition.row,
+        });
+      }
+    }
+  }
+
+  function extractConstructor(node: TSNode, typeId: string, implicitFramework?: string): void {
     const params = extractParams(node);
     const id = methodIdFor(typeId, "<init>", params, hasVarargs(node));
     const annotations = extractAnnotations(node);
@@ -521,7 +606,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       modifiers: extractModifiers(node),
       annotations,
     });
-    collectParamInjections(node, id, annotations);
+    collectParamInjections(node, typeId, annotations, implicitFramework);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }

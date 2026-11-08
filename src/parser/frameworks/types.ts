@@ -30,6 +30,8 @@ export interface FrameworkModule {
   injections?: Record<string, string | true>;
   /** Annotations that mark a class as container-managed. */
   injectables?: string[];
+  /** Annotations that make a compiler generate a constructor, and what it takes. */
+  constructors?: Record<string, "all" | "required">;
   /** Annotations that mark an aspect class. */
   aspects?: string[];
   /** Advice annotations: name -> advice kind (`before`, `around`, ...). */

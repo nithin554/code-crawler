@@ -590,7 +590,7 @@ Dependencies the framework supplies are `INJECTS` edges instead of missing calls
 
 | Framework | Detected from |
 | --- | --- |
-| Spring | `@Autowired` fields/methods/constructors |
+| Spring | `@Autowired` fields/methods/constructors; the sole constructor of a bean, annotated or not (Spring 4.3+); Lombok `@AllArgsConstructor`/`@RequiredArgsConstructor` promoted fields |
 | NestJS | constructor parameters with decorators; `@Injectable()` classes |
 | FastAPI | `Depends(...)` parameters |
 | dependency-injector | constructor parameters of `@injectable` classes |
@@ -598,6 +598,13 @@ Dependencies the framework supplies are `INJECTS` edges instead of missing calls
 
 Primitive and structural parameter types (`string`, `{ id: string }`, `list[str]`) are
 counted but produce no edge, so `@Body() body: { id: string }` does not pollute the graph.
+
+For Spring, the sole-constructor rule needs the class to carry a stereotype
+(`@Component`, `@Service`, `@Repository`, `@Controller`, `@RestController`, `@Configuration`,
+`@ControllerAdvice`, `@RestControllerAdvice`) — no container constructs anything else. A bean
+with two unannotated constructors injects nothing, because Spring cannot choose either, and
+neither does a class that declares a constructor next to a Lombok generator. Fields with an
+initialiser at their declaration are not treated as injected.
 
 ### Framework entry points and routes
 
@@ -666,7 +673,7 @@ Each resolved edge carries a `confidence` score and a human-readable `reason` tr
 
 | Language | Extensions | Extracted | Dynamic features |
 | --- | --- | --- | --- |
-| Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
+| Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired` and bean-constructor injection including Lombok-generated constructors, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
 | Python | `.py`, `.pyi` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask/Quart routes, `getattr`, `importlib`, `__main__`, tests |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
@@ -687,8 +694,8 @@ Adding a language requires:
    most languages work with the shared `module` resolver and only override
    language-specific builtins.
 5. Any framework it should recognise that is not registered yet — a module in
-   `src/parser/frameworks/` declaring its entry points, injections and markers. That is
-   a data change: no parser is edited.
+   `src/parser/frameworks/` declaring its entry points, injections, constructor-generating
+   annotations and markers. That is a data change: no parser is edited.
 
 Frameworks are resolved per file by import evidence, then by the descriptor's
 `frameworks` order, then by every registered module. A file that imports
@@ -756,7 +763,7 @@ src/
 │   ├── methodId.ts             method id scheme (overload signatures, constructor ids)
 │   ├── frameworks/
 │   │   ├── types.ts            FrameworkModule / FrameworkScope contracts
-│   │   ├── index.ts            registry + scope/entry-point/injection lookups
+│   │   ├── index.ts            registry + scope/entry-point/injection/constructor lookups
 │   │   └── <framework>.ts      one module per framework (spring, nestjs, fastapi, …)
 │   └── languages/
 │       ├── index.ts            descriptor table + per-file language detection

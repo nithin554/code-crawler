@@ -21,4 +21,17 @@ export const spring: FrameworkModule = {
     TransactionalEventListener: { kind: "event" },
   },
   injections: { Autowired: true, Value: true, Qualifier: true },
+  // Stereotypes that make a class a bean. Spring 4.3+ autowires the sole
+  // constructor of a bean with no annotation at all, so recognising the bean
+  // is what lets constructor injection be modelled instead of guessed.
+  injectables: [
+    "Component",
+    "Service",
+    "Repository",
+    "Controller",
+    "RestController",
+    "Configuration",
+    "ControllerAdvice",
+    "RestControllerAdvice",
+  ],
 };
