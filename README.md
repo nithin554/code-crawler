@@ -486,7 +486,7 @@ the same items as the non-compact one and costs less — it is a size win, not a
 
 The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`
 ships in the npm package and is plain Markdown — `SKILL.md` for discovery and the
-crawl-first workflow, `reference/tools.md` mapping all 28 tools to the questions they
+crawl-first workflow, `reference/tools.md` mapping every tool to the questions they
 answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
 nodes.
 

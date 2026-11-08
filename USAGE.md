@@ -242,8 +242,8 @@ The directory is self-contained — `SKILL.md` plus a `reference/` folder — so
 is the whole install.
 
 `SKILL.md` carries the discovery `description`, the client config above, the
-one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps all
-28 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
+one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps every
+tool to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
 `external`, and phantom nodes, which are the three things agents misread most.
 
 ### Installing the plugin
@@ -913,3 +913,44 @@ newer build of the crawler is rejected rather than misread; run `clear_index` to
 **The index is much larger than the source tree.**
 The SQLite file also holds the FTS5 index and the per-file manifest. It is a cache — delete
 it and re-crawl if disk matters more than the re-index time.
+
+### What the confidence number means
+
+Every `CALLS` edge carries `confidence` (0 to 1) and `resolved`. `DYNAMIC_DISPATCH` and
+`ADVISES` edges carry their own confidence, derived from the pointcut that produced them. The
+band tells you how the target was found, which is the only thing that varies:
+
+| Confidence | How the target was found |
+| --- | --- |
+| `1.00` | Receiver is a local variable or parameter, or the type is named at the call site |
+| `0.95` | Field receiver, bare call in the enclosing type, `this(...)`, `super(...)` |
+| `0.90` | Implicit default constructor, or pointcut `execution()` |
+| `0.85` | Receiver type inferred from an assignment, field or return type; `within()`, `@annotation()` |
+| `0.80` | External package call; `@within()`; a `DYNAMIC_DISPATCH` candidate |
+| `0.75` | Target found by searching base types or interface default methods |
+| `0.60` | Ambiguous overload; `args()` pointcut arity |
+| `0.55` | `target()` / `this()` pointcuts, a static approximation of a run-time type test |
+| `0.00` | Unresolved. Always paired with `resolved: false` and a `reason` |
+
+Treat `0.95` and above as fact. Verify anything at `0.85` whose type has overriding subclasses.
+When you see `0.60`, read `alternatives` instead of trusting the pick.
+
+### Reading unresolved reasons
+
+`find_unresolved` groups unresolved calls by reason with a count per reason, and accepts a
+`reason` filter. `get_node` reports them for a single symbol. The reason strings are written by
+the resolver, so match on a substring rather than the whole message:
+
+| Reason contains | Means | What to do |
+| --- | --- | --- |
+| `receiver type could not be inferred` | Receiver is a call result, a conditional, a map or array lookup, or a generic bound only at the call site | Name the type in a local, or trace from the type instead of the call |
+| `implicit this/module scope` | Bare name that no enclosing type, module or import declares | Usually a wildcard import; index the module that declares it |
+| `resolves outside the project` | Target lives in a package or module that was not crawled | Expected; crawl that module. Cross-repository linking is not modelled |
+
+A lambda or method reference leaves no target because the receiver is a function value, not an
+object: find the functional interface with `find_implementations` and read the method that
+creates it. A reflective target appears as a `REFLECTS` edge only when the name is a constant.
+
+The rule the resolver follows: a missing edge and a wrong edge are not the same failure. When it
+cannot be sure it returns a lower confidence, or an unresolved edge with a reason, never a
+confident guess.

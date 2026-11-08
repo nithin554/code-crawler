@@ -54,6 +54,7 @@
           <a href="examples.html">Examples</a>
           <a href="tools.html">Tools</a>
           <a href="accuracy.html">Accuracy</a>
+          <a href="compare.html">Compare</a>
           <a href="skill.html">Skill</a>
           <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
         </div>
@@ -65,42 +66,41 @@
         <div class="wrap">
           <div>
             <span class="eyebrow">MCP server · Java · Python · TypeScript · JavaScript · SQLite graph</span>
-            <h1>Give your AI a <span>real map</span> of the codebase.</h1>
+            <h1>Static call graphs stop <span>at the interface.</span></h1>
             <p class="lead">
-              Code-Crawler turns a project into a queryable property graph of modules,
-              types, methods, annotations, calls, virtual dispatch, and the wiring
-              frameworks add — routes, injected dependencies, and reflective lookups —
-              then exposes it to Claude, Cursor, Copilot, and any MCP client through 27
-              tools with typed arguments.
+              Code-Crawler traces what actually runs: interface dispatch, injected
+              dependencies, AOP advice, reflective lookups, and the endpoints, listeners and
+              scheduled jobs a framework invokes that no source line calls. Every edge carries
+              a confidence, so your assistant can tell a fact from a guess. One SQLite file,
+              <span data-tool-count>29</span> MCP tools, no external services.
             </p>
             <div class="hero-actions">
               <a class="btn btn-primary" href="usage.html">Get started →</a>
-              <a class="btn btn-secondary" href="tools.html">Browse 27 tools</a>
+              <a class="btn btn-secondary" href="accuracy.html">See the measured accuracy</a>
             </div>
             <div class="hero-badges">
-              <span class="badge"><b>27</b> MCP tools</span>
-              <span class="badge"><b>250</b> tests passing</span>
+              <span class="badge"><b data-tool-count>29</b> MCP tools</span>
+              <span class="badge"><b>14</b> edge kinds</span>
+              <span class="badge"><b>0</b> invented edges in the benchmark</span>
               <span class="badge"><b>0</b> external services</span>
-              <span class="badge">TypeScript · Node ≥ 22.12</span>
             </div>
           </div>
 
           <div class="code-card">
             <div class="code-title">
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span>one graph · python + typescript</span>
+              <span>spring-petclinic @ 500158f · what does this endpoint run?</span>
             </div>
-            <pre><code><span class="c-com">// routes found across two languages, one index</span>
-<span class="c-edge">GET</span>  <span class="c-fn">/orders/:id</span>   <span class="c-type">OrderController#read</span>   <span class="c-com">nestjs · controller.ts:7</span>
-<span class="c-edge">GET</span>  <span class="c-fn">/orders/{id}</span>  <span class="c-fn">read_order</span>             <span class="c-com">fastapi · api.py:13</span>
+            <pre><code><span class="c-com">// grep -rn processFindForm  ->  three files, and still no idea what reaches it</span>
+<span class="c-com">// get_callees + find_routes + find_injections  -></span>
 
-<span class="c-com">// trace_execution · OrderService#place</span>
-<span class="c-fn">OrderService#place</span>
-  <span class="c-edge">CALLS</span>      <span class="c-type">OrderRepository#create</span>   <span class="c-com">repository.py:19</span>
-  <span class="c-edge">CALLS</span>      <span class="c-type">OrderService#audit</span>        <span class="c-com">service.py:20</span>
-  <span class="c-edge">INJECTS</span>    <span class="c-type">OrderRepository</span>          <span class="c-com">fastapi · Depends()</span>
+<span class="c-edge">ROUTES</span>    <span class="c-fn">GET /owners/find</span>  →  <span class="c-type">OwnerController#processFindForm</span>   <span class="c-com">line 89</span>
+  <span class="c-edge">CALLS</span>     <span class="c-type">OwnerController#findPaginatedForOwnersLastName</span>  <span class="c-com">0.95 · line 107</span>
+  <span class="c-edge">CALLS</span>     <span class="c-type">OwnerRepository#findByLastNameStartingWith</span>      <span class="c-com">0.95 · line 145</span>
+  <span class="c-edge">INJECTS</span>   <span class="c-type">OwnerRepository</span> → <span class="c-fn">owners</span>                              <span class="c-com">constructor · line 55</span>
 
-<span class="c-good">2 languages</span> <span class="c-com">· 2 routes · 1 injection graph · 1 SQLite file</span></code></pre>
+<span class="c-com">// that last method has no body anywhere in the repo — Spring Data derives it</span>
+<span class="c-good">3 edges a static-only trace misses</span> <span class="c-com">· 1 route · 1 injection · 1 derived query</span></code></pre>
           </div>
         </div>
       </section>
@@ -292,7 +292,7 @@ node dist/index.js status</code></pre>
             </div>
             <div class="step">
               <h3>Ask graph questions</h3>
-              <p>The assistant can now call any of the 27 tools.</p>
+              <p>The assistant can now call any tool the server exposes.</p>
               <pre><code>Trace every runtime path from Checkout#checkout.
 Who transitively calls OrderRepository#create?
 List the aspects that intercept Payment#pay.</code></pre>
@@ -328,7 +328,7 @@ List the aspects that intercept Payment#pay.</code></pre>
         <div class="wrap">
           <div class="section-head">
             <span class="eyebrow">Tool surface</span>
-            <h2>Twenty-two tools, grouped by question.</h2>
+            <h2>Every tool, grouped by question.</h2>
             <p class="lead">
               Every tool returns structured JSON. Unknown symbols return fuzzy suggestions
               instead of a bare error.
@@ -345,50 +345,50 @@ List the aspects that intercept Payment#pay.</code></pre>
                 </tr>
               </thead>
               <tbody>
+                <!-- BEGIN GENERATED:homepage-tools -->
                 <tr>
-                  <td>Index</td>
+                  <td>Index &amp; schema</td>
                   <td>
-                    <code>crawl_project</code> <code>index_status</code> <code>clear_index</code>
-                    <code>get_schema</code>
+                    <code>crawl_project</code> <code>index_status</code> <code>get_schema</code> <code>clear_index</code> <code>export_graph</code>
                   </td>
                   <td>What is indexed, and what is the graph model?</td>
                 </tr>
                 <tr>
-                  <td>Search</td>
-                  <td><code>search_symbols</code> <code>get_node</code></td>
-                  <td>Where is this symbol and what is its id?</td>
-                </tr>
-                <tr>
-                  <td>Static tracing</td>
+                  <td>Symbol lookup</td>
                   <td>
-                    <code>get_callers</code> <code>get_callees</code>
-                    <code>trace_path</code> <code>get_subgraph</code>
+                    <code>search_symbols</code> <code>get_node</code> <code>explain_symbol</code>
                   </td>
-                  <td>What calls what, and how is it connected?</td>
+                  <td>Where is this symbol, what is its id, and what is it?</td>
                 </tr>
                 <tr>
-                  <td>Dynamic tracing</td>
+                  <td>Call graph</td>
                   <td>
-                    <code>trace_execution</code> <code>find_implementations</code>
-                    <code>find_aspects</code> <code>get_decorators</code>
-                    <code>find_annotated</code>
+                    <code>get_callers</code> <code>get_callees</code> <code>trace_path</code> <code>get_subgraph</code> <code>find_unresolved</code> <code>find_cycles</code>
+                  </td>
+                  <td>What calls what, how is it connected, and where does it not resolve?</td>
+                </tr>
+                <tr>
+                  <td>Dynamic behaviour</td>
+                  <td>
+                    <code>trace_execution</code> <code>find_implementations</code> <code>find_aspects</code> <code>get_decorators</code> <code>find_annotated</code>
                   </td>
                   <td>What actually executes, and what intercepts it?</td>
                 </tr>
                 <tr>
                   <td>Run-time wiring</td>
                   <td>
-                    <code>find_entry_points</code> <code>find_routes</code>
-                    <code>find_injections</code> <code>find_reflections</code>
-                    <code>find_external_dependencies</code>
+                    <code>find_entry_points</code> <code>find_injections</code> <code>find_reflections</code> <code>find_routes</code> <code>find_event_flows</code> <code>find_external_dependencies</code>
                   </td>
-                  <td>What does a framework invoke, inject, or reflect on?</td>
+                  <td>What does a framework invoke, inject, publish or reflect on?</td>
                 </tr>
                 <tr>
-                  <td>Analytics</td>
-                  <td><code>find_hotspots</code> <code>find_dead_code</code></td>
-                  <td>Where is the risk and the unused code?</td>
+                  <td>Analytics &amp; impact</td>
+                  <td>
+                    <code>find_hotspots</code> <code>find_dead_code</code> <code>impact_analysis</code> <code>change_impact</code>
+                  </td>
+                  <td>Where is the risk, what is unused, and what breaks if I change this?</td>
                 </tr>
+<!-- END GENERATED:homepage-tools -->
               </tbody>
             </table>
           </div>
