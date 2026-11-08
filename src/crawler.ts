@@ -325,6 +325,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): {
         startLine: t.startLine,
         endLine: t.endLine,
         annotations: t.annotations.map((a) => a.name),
+        ...(t.proxies && t.proxies.length > 0 ? { proxies: t.proxies } : {}),
         ...(t.isAspect ? { aspect: true } : {}),
         ...(t.isRecord ? { record: true } : {}),
         ...(t.exported === false ? { exported: false } : {}),
@@ -364,6 +365,8 @@ export function buildDeclarationGraph(parsed: ParsedFile): {
         startLine: m.startLine,
         endLine: m.endLine,
         annotations: m.annotations.map((a) => a.name),
+        ...(m.proxies && m.proxies.length > 0 ? { proxies: m.proxies } : {}),
+        ...(m.proxyBlocked ? { proxyBlocked: m.proxyBlocked } : {}),
         ...(m.adviceKind ? { adviceKind: m.adviceKind } : {}),
         ...(m.pointcut ? { pointcut: m.pointcut } : {}),
         ...(m.entryPoint

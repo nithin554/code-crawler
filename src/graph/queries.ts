@@ -1,3 +1,4 @@
+import { ownerTypeOfMethodId } from "../parser/methodId.js";
 import type { EdgeKind, GraphNode, NodeKind } from "./schema.js";
 import { annotationNodeId } from "./schema.js";
 import type { GraphStore } from "./store.js";
@@ -38,6 +39,51 @@ export interface FlowEdgeInfo {
   controlFlow?: string[];
   /** Compact source text of the enclosing conditions. */
   guards?: string[];
+}
+
+/**
+ * What a run-time proxy does around the symbol being traced.
+ *
+ * Present only on direct-caller rows, because the facts describe the callee and
+ * the call that reaches it, not the rest of the chain.
+ */
+export interface ProxyCallInfo {
+  /** Proxy kinds wrapping the callee: transactional, async, cacheable. */
+  proxy?: string[];
+  /**
+   * Why the annotation is inert: the container cannot override the method
+   * (`private`, `static`, `final`) or subclass the class (`final-type`).
+   */
+  proxyBlocked?: string;
+  /**
+   * True when the call never leaves the object, so Spring's proxy is bypassed
+   * and the annotation does not run. A self-invocation is the classic reason
+   * `@Transactional` and `@Async` silently do nothing.
+   */
+  inert?: true;
+}
+
+/**
+ * Proxy facts for a caller row, or nothing when they do not apply.
+ *
+ * Reported for direct callers only: a proxy wraps one invocation, so a fact
+ * about depth 3 would describe an edge that does not exist.
+ */
+function proxyCallInfo(target: GraphNode, callerId: string, depth: number): ProxyCallInfo {
+  if (depth !== 1) return {};
+  const raw = target.properties.proxies;
+  if (!Array.isArray(raw)) return {};
+  const proxies = raw.filter((value): value is string => typeof value === "string");
+  if (proxies.length === 0) return {};
+  const blocked = target.properties.proxyBlocked;
+  const out: ProxyCallInfo = { proxy: proxies };
+  if (typeof blocked === "string") out.proxyBlocked = blocked;
+  const sameObject =
+    callerId.includes("#") &&
+    target.id.includes("#") &&
+    ownerTypeOfMethodId(callerId) === ownerTypeOfMethodId(target.id);
+  if (sameObject) out.inert = true;
+  return out;
 }
 
 export function nodeToRef(node: GraphNode): SymbolRef {
@@ -115,7 +161,8 @@ export function getCallers(
     edgeKind: EdgeKind;
     confidence?: number;
     resolved?: boolean;
-  } & FlowEdgeInfo)[];
+  } & FlowEdgeInfo &
+    ProxyCallInfo)[];
   edgesFollowed: EdgeKind[];
   includeDynamic: boolean;
   includeAdvice: boolean;
@@ -154,6 +201,7 @@ export function getCallers(
         edgeKind: r.edge_kind,
         ...edgeFlow(r.edge_props),
         ...edgeFacts(r.edge_props),
+        ...proxyCallInfo(target, r.id, 1),
       })),
       ...policy,
     };
@@ -194,6 +242,7 @@ export function getCallers(
       edgeKind: r.edge_kind,
       ...edgeFlow(r.edge_props),
       ...edgeFacts(r.edge_props),
+      ...proxyCallInfo(target, r.id, r.depth),
     })),
     ...policy,
   };

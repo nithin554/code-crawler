@@ -280,6 +280,7 @@
                     <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callers. Default <code>true</code>.</td></tr>
                     <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow <code>DYNAMIC_DISPATCH</code> edges (virtual/interface targets). Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also follow <code>ADVISES</code> edges.</td></tr>
+                    <tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Follow <code>EMITS</code> edges to event listeners. Default <code>true</code>; pass <code>false</code> with <code>include_dynamic: false</code> for a static-only view.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers, 1–500.</td></tr>
                   </tbody>
@@ -289,7 +290,12 @@
                 Returns <code>target</code>, <code>edgesFollowed</code>, <code>includeDynamic</code> and
                 <code>callers[]</code> with <code>caller</code>, <code>depth</code>,
                 <code>callSiteLine</code>, <code>edgeKind</code>, and <code>confidence</code>
-                when the edge carries one.
+                when the edge carries one. Direct callers of a proxied method also report
+                <code>proxy</code> (<code>transactional</code>, <code>async</code>,
+                <code>cacheable</code>), <code>proxyBlocked</code> when the container cannot
+                honour the annotation (<code>private</code>, <code>static</code>,
+                <code>final</code>, <code>final-type</code>), and <code>inert: true</code>
+                when the call stays inside the same object and never reaches the proxy.
               </p>
               <pre><code>get_callers({
   symbol: "com.acme.OrderRepository#create",
@@ -314,6 +320,7 @@
                     <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callees. Default <code>true</code>.</td></tr>
                     <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow virtual/interface dispatch targets. Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Follow advice edges.</td></tr>
+<tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Follow <code>EMITS</code> edges to event listeners. Default <code>true</code>.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callees, 1–500.</td></tr>
                   </tbody>
@@ -344,6 +351,7 @@
                     <tr><td><code>target</code></td><td>string</td><td>yes</td><td>Destination symbol id or qualified name.</td></tr>
                     <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Traverse <code>DYNAMIC_DISPATCH</code> edges. Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also traverse <code>ADVISES</code> edges.</td></tr>
+<tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Also traverse <code>EMITS</code> edges. Default <code>true</code>.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Maximum path length, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max paths, 1–100. Default 10.</td></tr>
                   </tbody>

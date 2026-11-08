@@ -8,6 +8,7 @@ import {
   frameworkScope,
   injectableFrameworkIn,
   injectionIn,
+  proxyKindIn,
 } from "../frameworks/index.js";
 import type {
   AnnotationInfo,
@@ -318,6 +319,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
 
     const annotations = extractAnnotations(node);
     const isRecord = node.type === "record_declaration";
+    const typeModifiers = extractModifiers(node);
+    // A class-level annotation puts every interceptable method behind the proxy.
+    const typeProxies = proxyKindsOf(annotations, scope);
     types.push({
       id,
       kind: typeKind(node),
@@ -328,6 +332,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       annotations,
       isAspect: annotations.some((a) => aspectIn(scope, a.name)),
+      ...(typeProxies.length > 0 ? { proxies: typeProxies } : {}),
       ...(isRecord ? { isRecord: true } : {}),
     });
     nestingStack.push(id);
@@ -367,7 +372,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     if (body) {
       for (const member of body.namedChildren) {
         if (member.type === "method_declaration") {
-          extractMethod(member, id, controllerPath);
+          extractMethod(member, id, controllerPath, typeProxies, typeModifiers.includes("final"));
         } else if (member.type === "constructor_declaration") {
           extractConstructor(member, id, implicitFramework);
         } else if (member.type === "compact_constructor_declaration") {
@@ -445,13 +450,20 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     }
   }
 
-  function extractMethod(node: TSNode, typeId: string, controllerPath: string): void {
+  function extractMethod(
+    node: TSNode,
+    typeId: string,
+    controllerPath: string,
+    typeProxies: string[],
+    typeFinal: boolean
+  ): void {
     const name = childOfType(node, "identifier")?.text ?? "";
     const params = extractParams(node);
     const id = methodIdFor(typeId, name, params, hasVarargs(node));
     const annotations = extractAnnotations(node);
     const advice = adviceOf(annotations, scope);
     const modifiers = extractModifiers(node);
+    const proxy = methodProxiesOf(annotations, modifiers, typeProxies, typeFinal, scope);
     const entryPoint = javaEntryPointOf(annotations, name, modifiers, scope, controllerPath);
     collectRoutes(annotations, name, typeId, controllerPath);
     methods.push({
@@ -466,6 +478,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       returnType: extractReturnType(node),
       modifiers,
       annotations,
+      ...proxy,
       ...advice,
       ...(entryPoint ? { entryPoint } : {}),
     });
@@ -817,6 +830,46 @@ function firstIdentifier(node: TSNode): TSNode | null {
 function hasVarargs(node: TSNode): boolean {
   const params = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
   return params ? params.namedChildren.some((p) => p.type === "spread_parameter") : false;
+}
+
+/** Proxy kinds carried by annotations, deduplicated and in declaration order. */
+function proxyKindsOf(annotations: AnnotationInfo[], scope: FrameworkScope): string[] {
+  const kinds: string[] = [];
+  for (const annotation of annotations) {
+    const kind = proxyKindIn(scope, annotation.name);
+    if (kind !== undefined && !kinds.includes(kind)) kinds.push(kind);
+  }
+  return kinds;
+}
+
+/**
+ * The proxy around a method, and why it is absent when Spring cannot wrap it.
+ *
+ * A class-level annotation applies to every method the container can override,
+ * so the method inherits it. A `private`, `static` or `final` method cannot be
+ * overridden by the generated subclass, and a `final` class cannot be
+ * subclassed at all, so the annotation is silently inert - the case where the
+ * source reads as transactional or asynchronous and the run time does neither.
+ */
+function methodProxiesOf(
+  annotations: AnnotationInfo[],
+  modifiers: string[],
+  typeProxies: string[],
+  typeFinal: boolean,
+  scope: FrameworkScope
+): { proxies?: string[]; proxyBlocked?: string } {
+  const own = proxyKindsOf(annotations, scope);
+  const proxies = own.length > 0 ? own : typeProxies;
+  if (proxies.length === 0) return {};
+  const blocked = modifierBlockerOf(modifiers) ?? (typeFinal ? "final-type" : undefined);
+  return { proxies, ...(blocked ? { proxyBlocked: blocked } : {}) };
+}
+
+function modifierBlockerOf(modifiers: string[]): string | undefined {
+  if (modifiers.includes("private")) return "private";
+  if (modifiers.includes("static")) return "static";
+  if (modifiers.includes("final")) return "final";
+  return undefined;
 }
 
 function extractReturnType(node: TSNode): string {

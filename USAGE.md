@@ -409,6 +409,29 @@ different broker. A channel computed at run time, or a published plain parameter
 no edge at all rather than a guess. Event edges are followed by `get_callers`,
 `get_callees`, and `trace_path` by default; pass `include_events: false` to ignore them.
 
+### "Is this @Transactional method actually transactional?"
+
+```text
+get_callers(symbol: "com.acme.OrderService#place")
+```
+
+`@Transactional`, `@Async` and `@Cacheable` are delivered by a run-time proxy, so the
+behaviour depends on *how* the method is reached, not on the annotation alone. Direct
+callers report the proxy around the callee and whether the call actually crosses it:
+
+| Caller | proxy | proxyBlocked | inert | Meaning |
+| --- | --- | --- | --- | --- |
+| `ReportService#publish` | `["transactional"]` | â€” | â€” | crosses the proxy: a transaction opens |
+| `OrderService#retry` | `["transactional"]` | â€” | `true` | self-invocation: the proxy is bypassed |
+| `OrderService#audit` (`@Async`, private) | `["async"]` | `private` | â€” | the container cannot override it |
+| `OrderService#seal` (final, class-level `@Transactional`) | `["transactional"]` | `final` | â€” | no proxy can wrap it |
+| `SealedService#run` (final class) | `["transactional"]` | `final-type` | â€” | the class cannot be subclassed |
+
+A proxy annotation the container cannot honour is worse than a missing one: the source
+reads as transactional and the run time does nothing. `proxyBlocked` names the reason,
+and `inert` marks a call that never leaves the object. Proxy facts appear on direct
+callers only â€” at depth 2 the call that would be proxied no longer exists.
+
 ### "What breaks if I change this method?"
 
 ```text
@@ -664,6 +687,11 @@ walkthrough.
   module-level `Annotated[...]` aliases and decorator-level `dependencies=[...]`,
   `dependency-injector`, as `INJECTS` edges.
 - **Framework entry points and routes** — Spring MVC, FastAPI, Flask, Quart, NestJS, Express.
+- **Event and message flows** — Spring `@EventListener` / `@TransactionalEventListener`,
+  Kafka and JMS listeners, NestJS `@OnEvent`, as `EMITS` edges from publisher to listener.
+- **Run-time proxy boundaries** — `@Transactional`, `@Async` and `@Cacheable` recorded on the
+  declaration, including why the container cannot honour one (`private`, `static`, `final`,
+  `final-type`) and whether a call is a self-invocation that bypasses the proxy.
 - **Control flow on edges** — conditional flags, control-flow kinds, and guard text.
 - **External dependencies** — package-level `external_symbol` nodes with a summary query.
 - **Analytics** — hotspots and dead-code candidates.
@@ -690,6 +718,9 @@ walkthrough.
 - **Runtime plugin loading beyond a literal prefix.** A prefix plus a variable
   (`"app.plugins." + name`) resolves as far as the prefix; the concrete module is unknown.
 - **Branch-level dead code.** `find_dead_code` is whole-method, not per-branch.
+- **Proxies configured outside annotations.** XML `<tx:advice>`, `ProxyFactoryBean`, and a
+  custom annotation meta-annotated with `@Transactional` are not followed; only the three
+  annotations in the framework table produce proxy facts, and only for Java.
 - **Cross-language edges.** Python does not call into Java even when they share a process
   boundary (e.g. via gRPC); the languages share a graph, not a call edge.
 - **Types changed at runtime** — monkey-patching, `__getattr__`-based proxies, and
@@ -778,6 +809,12 @@ as external.
 It is probably invoked by a framework. Confirm with `find_entry_points` and `find_routes`;
 if the annotation is a bespoke one, the crawler does not know it is an entry point. It
 will still be excluded from dead code if it has an incoming `DYNAMIC_DISPATCH` edge.
+
+**A `@Transactional` method is reported but evidently never ran in a transaction.**
+Read `proxyBlocked` and `inert` on `get_callers`. A `private`, `static` or `final` method, a
+method of a `final` class, or a call from inside the same bean never crosses the proxy, so the
+annotation is decoration. This is an annotation-aware answer, not a tracing one: it does not
+prove the transaction committed, only that the proxy could not have wrapped the call.
 
 **An unknown symbol has suggestions instead of an error.**
 That is `CODECRAWLER_HELPFUL_ERRORS` working as intended. Set it to `false` for strict

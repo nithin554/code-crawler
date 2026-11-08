@@ -575,6 +575,16 @@
               <code>@GetMapping</code> on a bean and a Lombok-derived constructor parameter are
               different strengths of evidence, and the graph reports both with no confidence at all.
             </p>
+            <p>
+              Proxy boundaries took the other route. <code>@Transactional</code>,
+              <code>@Async</code> and <code>@Cacheable</code> facts are categorical rather than
+              scored, because <code>proxyBlocked</code> can name the exact reason a container could
+              never honour an annotation (<code>private</code>, <code>static</code>,
+              <code>final</code>, <code>final-type</code>) and <code>inert</code> marks a
+              self-invocation that bypassed the proxy. That precision is not measured here either:
+              none of the four projects below contains a proxied self-invocation, so proxy facts are
+              fixture-verified only.
+            </p>
           </div>
 
           <div class="card" style="margin-top: 16px">

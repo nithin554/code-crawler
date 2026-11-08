@@ -212,6 +212,15 @@ export function routeGroupIn(scope: FrameworkScope, name: string): string | unde
   return undefined;
 }
 
+/** Proxy kind an annotation is delivered through (`transactional`, `async`, ...). */
+export function proxyKindIn(scope: FrameworkScope, name: string): string | undefined {
+  for (const module of ordered(scope)) {
+    const kind = matchKey(module.proxies, name, scope.caseInsensitive);
+    if (kind !== undefined) return kind;
+  }
+  return undefined;
+}
+
 /** Whether an annotation marks an aspect class. */
 export function aspectIn(scope: FrameworkScope, name: string): boolean {
   return ordered(scope).some((module) =>

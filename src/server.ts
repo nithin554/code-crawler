@@ -371,7 +371,7 @@ export function createServer(
 
   tool(
     "get_callers",
-    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch and framework event edges by default, because a method reached only through either one is still called; pass include_dynamic: false and include_events: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence.",
+    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch and framework event edges by default, because a method reached only through either one is still called; pass include_dynamic: false and include_events: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence. When the callee sits behind a run-time proxy, direct callers also report the proxy kind, whether the container can honour the annotation at all, and whether the call is a self-invocation that never reaches the proxy.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callers (default true)."),

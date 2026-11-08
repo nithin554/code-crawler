@@ -83,6 +83,10 @@ Entry-point kinds include HTTP routes, listeners, schedulers, CLI mains, and tes
 method looks dead but is plausibly framework-invoked, check `find_entry_points` and
 `find_reflections` before concluding it is unreachable.
 
+Proxy annotations (`@Transactional`, `@Async`, `@Cacheable`) have no dedicated tool: they
+are node properties, so ask `get_callers` about the method and read `proxy`,
+`proxyBlocked` and `inert` on the direct callers.
+
 ## Coverage and dependencies
 
 | Tool | Use it when | Key argument |

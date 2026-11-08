@@ -650,6 +650,25 @@ channel: a run-time-computed destination, or a published plain parameter, produc
 instead of a guess. A `@TransactionalEventListener`'s `phase` says *when* the listener runs,
 not whether the edge exists; an `AFTER_ROLLBACK` listener does not run on the happy path.
 
+### Run-time proxy boundaries
+
+`@Transactional`, `@Async` and `@Cacheable` put a proxy in front of a method, so what runs
+depends on how it is reached. `get_callers` reports that on direct callers:
+
+| Caller | proxy | proxyBlocked | inert |
+| --- | --- | --- | --- |
+| another bean | `["transactional"]` | — | — |
+| the same bean (`this.place(...)`) | `["transactional"]` | — | `true` |
+| `@Async private void audit()` | `["async"]` | `private` | — |
+| `final void seal()` in a `@Transactional` class | `["transactional"]` | `final` | — |
+| any method of a `final` class | `["transactional"]` | `final-type` | — |
+
+`inert` is self-invocation: the call never leaves the object, so the proxy is bypassed and
+the annotation does nothing. `proxyBlocked` is the same problem at declaration time — the
+container cannot override a `private`, `static` or `final` method, or subclass a `final`
+class. Both are the case a reader of the source assumes works; reporting the annotation
+without them would be a confident wrong answer.
+
 ### Control flow on call edges
 
 Each `CALLS` edge records whether it is guarded:

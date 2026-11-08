@@ -55,6 +55,12 @@ export interface TypeInfo {
   endLine: number;
   /** Annotations/decorators applied to the type. */
   annotations: AnnotationInfo[];
+  /**
+   * Proxy kinds an annotation puts around this type's methods
+   * (`transactional`, `async`, `cacheable`). Recorded because the interception
+   * leaves no trace in the source.
+   */
+  proxies?: string[];
   /** True when the type is an aspect (`@Aspect`). */
   isAspect?: boolean;
   /** Java `record` declaration: indexed as a `class` with component accessors. */
@@ -186,6 +192,14 @@ export interface MethodInfo {
   adviceKind?: string;
   /** AspectJ pointcut expression carried by advice/pointcut methods. */
   pointcut?: string;
+  /** Proxy kinds around this method, from its own or its type's annotations. */
+  proxies?: string[];
+  /**
+   * Why a proxy annotation on this method does nothing at run time. Spring can
+   * only intercept a method it can override, so `private`, `static` and `final`
+   * methods (and anything on a `final` class) silently lose the annotation.
+   */
+  proxyBlocked?: string;
   /** Why this method is an entry point (framework-invoked root). */
   entryPoint?: EntryPointInfo;
 }

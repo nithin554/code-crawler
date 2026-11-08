@@ -28,6 +28,14 @@ export interface FrameworkModule {
   qualifiedPrefixes?: Record<string, EntryPointSpec>;
   /** Annotations that request injection: name -> label (defaults to `name`). */
   injections?: Record<string, string | true>;
+  /**
+   * Annotations whose behaviour is delivered by a run-time proxy rather than by
+   * the method body: name -> proxy kind (`transactional`, `async`, `cacheable`).
+   *
+   * The annotation does not appear in any call the resolver can see, so the only
+   * evidence the interception happens is the declaration itself.
+   */
+  proxies?: Record<string, string>;
   /** Annotations that mark a class as container-managed. */
   injectables?: string[];
   /** Annotations that make a compiler generate a constructor, and what it takes. */

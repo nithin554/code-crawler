@@ -77,6 +77,32 @@ you *what kind of evidence* produced the edge.
 Practical rule: `>= 0.75` is safe to report as fact, `0.5`-`0.7` deserves a hedge, and `0`
 carries no information about the target at all.
 
+## Proxy boundaries are node properties, not edges
+
+`@Transactional`, `@Async` and `@Cacheable` do not add an edge. The proxy intercepts the
+*same* invocation the `CALLS` edge already describes, so a separate edge kind would duplicate
+the call graph and double-count every influenced call. The facts live on nodes and caller rows
+instead:
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `proxies` | type and method node | proxy kinds declared on the declaration or inherited from the class |
+| `proxy` | `get_callers` row | the proxy kinds in front of the callee for this call |
+| `proxyBlocked` | method node, `get_callers` row | `private`, `static`, `final`, `final-type` — the container cannot honour the annotation |
+| `inert` | `get_callers` row | self-invocation: the call never crosses the proxy |
+
+These are categorical, not scored. A `proxyBlocked` value names the exact reason, which is
+more useful than any confidence number: the annotation is present in source and provably does
+nothing at run time. Report `inert: true` and `proxyBlocked` alongside the annotation, never
+instead of it.
+
+`inert` appears only on direct callers. A proxy wraps one invocation, so at depth 2 the
+proxied call no longer exists and flagging it would describe a phantom.
+
+Only annotations listed in the framework table are recognised, and only for Java: a custom
+annotation meta-annotated with `@Transactional` is not followed, and neither is a proxy
+declared in XML (`<tx:advice>`).
+
 ## `external` means outside the project
 
 An edge with `external: true` points at a node like `ext:axios` or `ext:fastapi`, and its

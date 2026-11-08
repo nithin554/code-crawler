@@ -171,6 +171,11 @@ Short version:
 - Call-graph tools follow `DYNAMIC_DISPATCH` by default, so a method reached only through
   an interface or virtual call still shows callers. Pass `include_dynamic: false` for a
   static-`CALLS`-only view; the response then reports `edgesFollowed: ["CALLS"]`.
+- Callers of a `@Transactional`, `@Async` or `@Cacheable` method report `proxy`, and the
+  call is not what the annotation promises when either is set: `inert: true` means
+  self-invocation bypassed the proxy, `proxyBlocked` (`private`, `static`, `final`,
+  `final-type`) means the container could never have honoured it. Do not report an
+  annotated method as transactional or asynchronous without checking these.
 - `external: true` means the target is outside the project. It is *not* dead code and
   *not* unresolved.
 - `__phantom__:` / `__reflect__:` / `__inject__:` targets mark something the resolver
