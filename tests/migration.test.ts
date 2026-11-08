@@ -53,7 +53,8 @@ describe("schema migration", () => {
       filePath: "/tmp/OrderService.java",
       properties: { name: "place", startLine: 3 },
     });
-    expect(original.schemaVersion).toBe(2);
+    const latestVersion = original.schemaVersion;
+    expect(latestVersion).toBeGreaterThanOrEqual(2);
     original.close();
 
     downgradeToV1(file);
@@ -75,7 +76,7 @@ describe("schema migration", () => {
 
     const upgraded = new GraphStore(file, { maxDepth: 10 });
     try {
-      expect(upgraded.schemaVersion).toBe(2);
+      expect(upgraded.schemaVersion).toBe(latestVersion);
       // The display name is backfilled from the qualified name.
       const row = upgraded.raw(
         "SELECT name FROM nodes WHERE id = ?",

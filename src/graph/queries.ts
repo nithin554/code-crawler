@@ -24,6 +24,8 @@ export interface CallerInfo {
   /** Properties of the call edge (call site line, resolution, confidence). */
   callSiteLine?: number;
   resolved?: boolean;
+  /** Resolver confidence for the edge, 0..1. Absent when the edge carries none. */
+  confidence?: number;
   /** Which edge kind connected the caller: CALLS | DYNAMIC_DISPATCH | ADVISES. */
   edgeKind?: EdgeKind;
 }
@@ -85,6 +87,10 @@ export interface CallerQueryOptions extends DynamicEdgeOptions {
 /**
  * Find every symbol that calls the given symbol, directly or transitively.
  * Each row includes the edge chain depth so clients can render a call tree.
+ *
+ * DYNAMIC_DISPATCH edges are followed by default: a method reached only through
+ * virtual dispatch is still called, so omitting those edges produces confident
+ * false negatives. Every response echoes the edges that were followed.
  */
 export function getCallers(
   store: GraphStore,
@@ -97,7 +103,12 @@ export function getCallers(
     depth: number;
     callSiteLine?: number;
     edgeKind: EdgeKind;
+    confidence?: number;
+    resolved?: boolean;
   } & FlowEdgeInfo)[];
+  edgesFollowed: EdgeKind[];
+  includeDynamic: boolean;
+  includeAdvice: boolean;
 } | null {
   const target = resolveNode(store, symbol);
   if (!target) return null;
@@ -105,7 +116,10 @@ export function getCallers(
   const transitive = opts.transitive ?? true;
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
-  const kinds = traversalEdgeKinds(opts);
+  const includeDynamic = opts.includeDynamic ?? true;
+  const includeAdvice = opts.includeAdvice ?? false;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -127,7 +141,9 @@ export function getCallers(
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
         ...edgeFlow(r.edge_props),
+        ...edgeFacts(r.edge_props),
       })),
+      ...policy,
     };
   }
 
@@ -165,7 +181,9 @@ export function getCallers(
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
       ...edgeFlow(r.edge_props),
+      ...edgeFacts(r.edge_props),
     })),
+    ...policy,
   };
 }
 
@@ -178,6 +196,9 @@ export interface CalleeQueryOptions extends DynamicEdgeOptions {
 
 /**
  * Find every symbol the given symbol calls, directly or transitively.
+ *
+ * DYNAMIC_DISPATCH edges are followed by default for the same reason as
+ * `getCallers`: the virtual target is what actually runs.
  */
 export function getCallees(
   store: GraphStore,
@@ -190,7 +211,12 @@ export function getCallees(
     depth: number;
     callSiteLine?: number;
     edgeKind: EdgeKind;
+    confidence?: number;
+    resolved?: boolean;
   } & FlowEdgeInfo)[];
+  edgesFollowed: EdgeKind[];
+  includeDynamic: boolean;
+  includeAdvice: boolean;
 } | null {
   const source = resolveNode(store, symbol);
   if (!source) return null;
@@ -198,7 +224,10 @@ export function getCallees(
   const transitive = opts.transitive ?? true;
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
-  const kinds = traversalEdgeKinds(opts);
+  const includeDynamic = opts.includeDynamic ?? true;
+  const includeAdvice = opts.includeAdvice ?? false;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -220,7 +249,9 @@ export function getCallees(
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
         ...edgeFlow(r.edge_props),
+        ...edgeFacts(r.edge_props),
       })),
+      ...policy,
     };
   }
 
@@ -258,7 +289,9 @@ export function getCallees(
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
       ...edgeFlow(r.edge_props),
+      ...edgeFacts(r.edge_props),
     })),
+    ...policy,
   };
 }
 
@@ -272,6 +305,7 @@ export interface PathEntry {
     kind?: EdgeKind;
     callSiteLine?: number;
     resolved?: boolean;
+    confidence?: number;
   }[];
 }
 
@@ -296,7 +330,12 @@ export function tracePath(
 
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 10;
-  const kinds = sqlKinds(traversalEdgeKinds(opts));
+  const kinds = sqlKinds(
+    traversalEdgeKinds({
+      includeDynamic: opts.includeDynamic ?? true,
+      includeAdvice: opts.includeAdvice ?? false,
+    })
+  );
 
   // BFS in SQL via recursive CTE that accumulates the path taken.
   const rows = store.raw<{ path: string; edge_path: string; depth: number }>(
@@ -337,6 +376,7 @@ export function tracePath(
         kind: (kind as EdgeKind | undefined) ?? undefined,
         callSiteLine: undefined as number | undefined,
         resolved: undefined as boolean | undefined,
+        confidence: undefined as number | undefined,
       };
       const props = store.raw<{ properties: string }>(
         "SELECT properties FROM edges WHERE source = ? AND target = ? AND kind = ? LIMIT 1",
@@ -345,10 +385,15 @@ export function tracePath(
         edge.kind
       );
       const parsed = props[0]
-        ? (JSON.parse(props[0].properties) as { line?: number; resolved?: boolean })
+        ? (JSON.parse(props[0].properties) as {
+            line?: number;
+            resolved?: boolean;
+            confidence?: number;
+          })
         : undefined;
       edge.callSiteLine = parsed?.line;
       edge.resolved = parsed?.resolved;
+      edge.confidence = parsed?.confidence;
       return edge;
     });
     return { path: ids, length: r.depth, edges };
@@ -1283,5 +1328,19 @@ function edgeFlow(props: string | undefined): FlowEdgeInfo {
     out.controlFlow = parsed.controlFlow;
   }
   if (Array.isArray(parsed.guards) && parsed.guards.length > 0) out.guards = parsed.guards;
+  return out;
+}
+
+/**
+ * Extract the resolution facts recorded on an edge. Confidence is only written
+ * for kinds that have a confidence model, so it is omitted rather than defaulted
+ * — an absent value must not be read as certainty.
+ */
+function edgeFacts(props: string | undefined): { confidence?: number; resolved?: boolean } {
+  if (!props) return {};
+  const parsed = JSON.parse(props) as { confidence?: number; resolved?: boolean };
+  const out: { confidence?: number; resolved?: boolean } = {};
+  if (typeof parsed.confidence === "number") out.confidence = parsed.confidence;
+  if (typeof parsed.resolved === "boolean") out.resolved = parsed.resolved;
   return out;
 }

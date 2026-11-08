@@ -116,11 +116,14 @@ CREATE INDEX IF NOT EXISTS idx_nodes_entry_point
 `;
 
 /**
- * Bumped whenever a migration below changes the on-disk shape. Databases
- * created before versioning was introduced are stamped at this version when
- * first opened, because the schema is already idempotent.
+ * Bumped whenever a migration below changes the on-disk shape, and also when the
+ * tool output shape changes in a way clients may depend on. A bump with no
+ * matching migration is therefore meaningful: the on-disk shape is unchanged,
+ * only the JSON contract moved. Databases created before versioning was
+ * introduced are stamped at this version when first opened, because the schema
+ * is already idempotent.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 interface Migration {
   version: number;

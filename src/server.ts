@@ -370,14 +370,16 @@ export function createServer(
 
   tool(
     "get_callers",
-    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Optionally follow virtual-dispatch and aspect-advice edges for dynamic callers.",
+    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch edges by default, because a method reached only through dispatch is still called; pass include_dynamic: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callers (default true)."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
@@ -409,26 +411,42 @@ export function createServer(
         depth: c.depth,
         callSiteLine: line(c.callSiteLine),
         edgeKind: c.edgeKind,
+        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+        ...(c.resolved !== undefined ? { resolved: c.resolved } : {}),
+        ...(c.conditional !== undefined ? { conditional: c.conditional } : {}),
+        ...(c.controlFlow ? { controlFlow: c.controlFlow } : {}),
+        ...(c.guards ? { guards: c.guards } : {}),
       }));
       return text(
-        paged({ target: ref(result.target), count: callers.length, callers }, "callers", callers, {
-          max_tokens,
-          cursor,
-        })
+        paged(
+          {
+            target: ref(result.target),
+            count: callers.length,
+            callers,
+            edgesFollowed: result.edgesFollowed,
+            includeDynamic: result.includeDynamic,
+            includeAdvice: result.includeAdvice,
+          },
+          "callers",
+          callers,
+          { max_tokens, cursor }
+        )
       );
     }
   );
 
   tool(
     "get_callees",
-    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Set include_dynamic to also follow virtual/interface dispatch targets.",
+    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Follows virtual/interface dispatch targets by default; pass include_dynamic: false for a static-only view. Each callee reports the edge kind and, when the edge has one, its confidence.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callees (default true)."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
@@ -460,26 +478,42 @@ export function createServer(
         depth: c.depth,
         callSiteLine: line(c.callSiteLine),
         edgeKind: c.edgeKind,
+        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+        ...(c.resolved !== undefined ? { resolved: c.resolved } : {}),
+        ...(c.conditional !== undefined ? { conditional: c.conditional } : {}),
+        ...(c.controlFlow ? { controlFlow: c.controlFlow } : {}),
+        ...(c.guards ? { guards: c.guards } : {}),
       }));
       return text(
-        paged({ source: ref(result.source), count: callees.length, callees }, "callees", callees, {
-          max_tokens,
-          cursor,
-        })
+        paged(
+          {
+            source: ref(result.source),
+            count: callees.length,
+            callees,
+            edgesFollowed: result.edgesFollowed,
+            includeDynamic: result.includeDynamic,
+            includeAdvice: result.includeAdvice,
+          },
+          "callees",
+          callees,
+          { max_tokens, cursor }
+        )
       );
     }
   );
 
   tool(
     "trace_path",
-    "Find call paths between two symbols. Follows static CALLS edges by default; set include_dynamic/include_advice to also route through virtual dispatch and aspect advice.",
+    "Find call paths between two symbols. Follows static CALLS and virtual/interface dispatch edges by default, so the path reflects what can actually run; pass include_dynamic: false for static edges only. Each hop reports its edge kind and confidence.",
     {
       source: z.string().describe("Starting symbol id or qualified name."),
       target: z.string().describe("Destination symbol id or qualified name."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
@@ -519,6 +553,8 @@ export function createServer(
           target: e.target,
           kind: e.kind,
           callSiteLine: line(e.callSiteLine),
+          ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
+          ...(e.resolved !== undefined ? { resolved: e.resolved } : {}),
         })),
       }));
       return text(

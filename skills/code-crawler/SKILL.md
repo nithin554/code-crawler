@@ -165,6 +165,12 @@ Short version:
 - `confidence` is not a probability. It is a band: `1.0` resolved by construction,
   `0.9`/`0.85` strong static evidence, `0.8` inherited or external, `0.5` heuristics,
   `0` phantom.
+- `confidence` is reported per edge on `get_callers`, `get_callees` and `trace_path` rows
+  whenever the edge kind has a confidence model. An absent `confidence` means the edge
+  kind carries none — it does not mean high confidence.
+- Call-graph tools follow `DYNAMIC_DISPATCH` by default, so a method reached only through
+  an interface or virtual call still shows callers. Pass `include_dynamic: false` for a
+  static-`CALLS`-only view; the response then reports `edgesFollowed: ["CALLS"]`.
 - `external: true` means the target is outside the project. It is *not* dead code and
   *not* unresolved.
 - `__phantom__:` / `__reflect__:` / `__inject__:` targets mark something the resolver
@@ -191,8 +197,9 @@ specific list.
 ## Do not
 
 - Crawl a monorepo to answer a question about one file.
-- Report "no callers" or "dead code" without checking `confidence` and `external` on the
-  edges you did get.
+- Report "no callers" or "dead code" without checking `confidence` (where present) and
+  `external` on the edges you did get, and without noting whether dispatch edges were
+  followed.
 - Treat `find_unresolved` as a bug list. It is a coverage report; some entries are
   dynamic dispatch that cannot be resolved statically.
 - Page through an entire result set to count things. Use `totalCount` from the first page.

@@ -154,4 +154,55 @@ describe("dynamic tracing tools", () => {
     const impl = r.callees.find((c) => c.callee.qualifiedName === "com.acme.CardPayment#pay");
     expect(impl?.edgeKind).toBe("DYNAMIC_DISPATCH");
   });
+
+  it("get_callers follows dispatch by default and reports confidence", async () => {
+    const r = await callTool<{
+      count: number;
+      callers: {
+        caller: { qualifiedName: string };
+        edgeKind: string;
+        confidence?: number;
+      }[];
+      edgesFollowed: string[];
+      includeDynamic: boolean;
+    }>("get_callers", { symbol: "com.acme.UpiPayment#pay" });
+
+    // A method reached only through virtual dispatch is still called, so the
+    // default must not report an empty caller list.
+    expect(r.count).toBeGreaterThan(0);
+    expect(r.includeDynamic).toBe(true);
+    expect(r.edgesFollowed).toContain("DYNAMIC_DISPATCH");
+
+    const viaDispatch = r.callers.find((c) => c.caller.qualifiedName === "com.acme.Payment#pay");
+    expect(viaDispatch?.edgeKind).toBe("DYNAMIC_DISPATCH");
+    expect(viaDispatch?.confidence).toBe(0.8);
+
+    const transitive = r.callers.find(
+      (c) => c.caller.qualifiedName === "com.acme.Checkout#checkout"
+    );
+    expect(transitive?.edgeKind).toBe("CALLS");
+  });
+
+  it("get_callers still supports a static-only view", async () => {
+    const r = await callTool<{
+      callers: { caller: { qualifiedName: string } }[];
+      edgesFollowed: string[];
+      includeDynamic: boolean;
+    }>("get_callers", { symbol: "com.acme.UpiPayment#pay", include_dynamic: false });
+
+    expect(r.includeDynamic).toBe(false);
+    expect(r.edgesFollowed).toEqual(["CALLS"]);
+    expect(r.callers.map((c) => c.caller.qualifiedName)).not.toContain("com.acme.Payment#pay");
+  });
+
+  it("get_callers agrees with find_dead_code on a dispatched target", async () => {
+    const symbol = "com.acme.UpiPayment#pay";
+    const callers = await callTool<{ count: number }>("get_callers", { symbol });
+    const dead = await callTool<{ unused: { symbol: { qualifiedName: string } }[] }>(
+      "find_dead_code",
+      { limit: 200 }
+    );
+    const reportedDead = dead.unused.some((x) => x.symbol.qualifiedName === symbol);
+    if (callers.count > 0) expect(reportedDead).toBe(false);
+  });
 });
