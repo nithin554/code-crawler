@@ -525,7 +525,7 @@ different surface.
 
 ### Python — FastAPI routes and `Depends()`
 
-`tests/fixtures/python/sample` (6 files · 49 nodes · 65 edges):
+`tests/fixtures/python/sample` (6 files · 49 nodes · 66 edges):
 
 ```jsonc
 // find_routes()
@@ -538,9 +538,9 @@ different surface.
 { "source": { "id": "app.service.OrderService" },
   "target": { "id": "app.repository.OrderRepository" },
   "framework": "dependency-injector", "injectedName": "repo", "line": 15 }
-{ "source": { "id": "module:app.api" },
-  "target": { "id": "app.service.OrderService" },
-  "framework": "fastapi", "injectedName": "service", "line": 19 }
+{ "source": { "id": "module:app.api#read_order" },
+  "target": { "id": "module:app.api#get_service" },
+  "framework": "fastapi", "injectedName": "service", "line": 15 }
 
 // find_reflections()
 { "source": { "id": "module:app.dynamic#load_plugin" },
@@ -639,7 +639,8 @@ walkthrough.
 - **Reflection and run-time indirection** — `Class.forName`, `ServiceLoader`, `getattr`,
   `importlib`, `require`, dynamic `import()`, as `REFLECTS` edges.
 - **Dependency injection** — `@Autowired`, Spring sole-constructor and Lombok-generated
-  constructor injection, NestJS constructor injection, FastAPI `Depends`,
+  constructor injection, NestJS constructor injection, FastAPI `Depends` including
+  module-level `Annotated[...]` aliases and decorator-level `dependencies=[...]`,
   `dependency-injector`, as `INJECTS` edges.
 - **Framework entry points and routes** — Spring MVC, FastAPI, Flask, Quart, NestJS, Express.
 - **Control flow on edges** — conditional flags, control-flow kinds, and guard text.
@@ -655,9 +656,14 @@ walkthrough.
   `__reflect__:` marker instead. That is deliberate — inventing a target would be worse
   than the marker.
 - **DI containers configured outside code** (XML, `application.yml` bean wiring, NestJS
-  dynamic module factories). Only injection traceable to a source annotation is reported.
-  Lombok is the one case where a dependency is derived from a generator rather than a written
-  constructor, and it is limited to the promoted-field rules of the annotation itself.
+  dynamic module factories). Only injection visible in source is reported — an annotation,
+  a Spring sole constructor, or a FastAPI `Depends(...)` alias. Lombok is the one case where a
+  dependency is derived from a generator rather than a written constructor, and it is limited
+  to the promoted-field rules of the annotation itself.
+- **Which candidate a container would actually choose.** A `@Qualifier` marks the site as an
+  injection, but its bean name is not used to pick a target, and `@Primary` and conditional
+  beans are ignored. When several beans satisfy one injection, the edge names the declared
+  type, which may not be the instance that runs.
 - **Libraries outside the crawled tree.** Third-party code is summarised as `ext:`
   packages; it is never crawled, so you cannot trace into it.
 - **Runtime plugin loading beyond a literal prefix.** A prefix plus a variable

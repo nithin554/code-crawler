@@ -1,4 +1,4 @@
-# Roadmap
+﻿# Roadmap
 
 > **Status:** planning document. Nothing here is committed work; ordering and scope will
 > change as the crawler is used on real repositories.
@@ -18,7 +18,7 @@
 | Resolution | One `Resolver` contract, two implementations: `java` (declared types + hierarchy) and `module` (imports and barrels) |
 | Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
 | Tools | 27 MCP tools |
-| Tests | 35 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
+| Tests | 36 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is the **per-language entry cost**: a new language needs a

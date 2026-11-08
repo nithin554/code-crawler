@@ -71,9 +71,9 @@
           <div class="section-head">
             <h2>Headline</h2>
             <p>
-              Across 82 labelled edges on four pinned projects: <strong>0 edges invented</strong>.
-              Every edge the graph claimed was correct. The failures are all edges it never
-              produced.
+              Across 83 labelled cases on four pinned projects: <strong>0 edges invented</strong>.
+              Every edge the graph claimed was correct. All 69 expected edges were produced, and
+              all 14 negative controls stayed absent.
             </p>
           </div>
           <div class="grid">
@@ -81,15 +81,15 @@
               <div class="badge">Precision</div>
               <h3>1.000</h3>
               <p class="muted">
-                0 false positives. No confidently wrong edge was observed in 82 labelled cases.
+                0 false positives. No confidently wrong edge was observed in 83 labelled cases.
               </p>
             </div>
             <div class="card">
               <div class="badge">Recall</div>
-              <h3>0.812</h3>
+              <h3>1.000</h3>
               <p class="muted">
-                56 of 69 expected edges were produced. Every remaining miss is in one project: the
-                FastAPI template.
+                All 69 expected edges were produced, across all four edge kinds and all three
+                languages.
               </p>
             </div>
             <div class="card">
@@ -105,8 +105,8 @@
             <strong>Read this before quoting the number.</strong> Precision here is
             <em>sample-level</em>: of the edges the benchmark asked about, how many the graph
             answered correctly. It is not a claim that every one of the ~12,000 edges in these
-            four graphs is correct. Recall is low on purpose — the labelled cases were chosen to
-            probe known-hard idioms, not to flatter the tool.
+            four graphs is correct. The labelled cases were chosen to probe known-hard idioms, not
+            to flatter the tool, and 69 positive cases is a sample, not a proof of the whole graph.
           </div>
         </div>
       </section>
@@ -138,7 +138,7 @@
                   <td>50</td>
                   <td>1,244</td>
                   <td>2,660</td>
-                  <td>671 ms</td>
+                  <td>652 ms</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
@@ -147,7 +147,7 @@
                   <td>116</td>
                   <td>1,978</td>
                   <td>5,057</td>
-                  <td>956 ms</td>
+                  <td>978 ms</td>
                 </tr>
                 <tr>
                   <td>fastapi-template</td>
@@ -155,8 +155,8 @@
                   <td><code>e4022a9502a6</code></td>
                   <td>138</td>
                   <td>1,798</td>
-                  <td>3,475</td>
-                  <td>1,040 ms</td>
+                  <td>3,514</td>
+                  <td>1,019 ms</td>
                 </tr>
                 <tr>
                   <td>nestjs-realworld</td>
@@ -165,7 +165,7 @@
                   <td>36</td>
                   <td>466</td>
                   <td>865</td>
-                  <td>161 ms</td>
+                  <td>162 ms</td>
                 </tr>
               </tbody>
             </table>
@@ -241,20 +241,20 @@
                   <td><code>INJECTS</code></td>
                   <td>20</td>
                   <td>1.000</td>
-                  <td>0.667</td>
-                  <td>10</td>
+                  <td>1.000</td>
+                  <td>15</td>
                   <td>0</td>
-                  <td>5</td>
+                  <td>0</td>
                   <td>5</td>
                 </tr>
                 <tr>
                   <td><code>ROUTES</code></td>
                   <td>40</td>
                   <td>1.000</td>
-                  <td>0.800</td>
-                  <td>32</td>
+                  <td>1.000</td>
+                  <td>40</td>
                   <td>0</td>
-                  <td>8</td>
+                  <td>0</td>
                   <td>0</td>
                 </tr>
               </tbody>
@@ -274,7 +274,7 @@
         <div class="wrap">
           <div class="section-head">
             <h2>By language and project</h2>
-            <p>TypeScript is the positive control; Java and Python carry the known gaps.</p>
+            <p>All three languages now score 1.000 on the sampled labels.</p>
           </div>
           <div class="table-wrap">
             <table>
@@ -305,10 +305,10 @@
                   <td>python</td>
                   <td>20</td>
                   <td>1.000</td>
-                  <td>0.235</td>
-                  <td>4</td>
+                  <td>1.000</td>
+                  <td>17</td>
                   <td>0</td>
-                  <td>13</td>
+                  <td>0</td>
                   <td>3</td>
                 </tr>
                 <tr>
@@ -363,10 +363,10 @@
                   <td>fastapi-template</td>
                   <td>20</td>
                   <td>1.000</td>
-                  <td>0.235</td>
-                  <td>4</td>
+                  <td>1.000</td>
+                  <td>17</td>
                   <td>0</td>
-                  <td>13</td>
+                  <td>0</td>
                   <td>3</td>
                 </tr>
                 <tr>
@@ -409,7 +409,7 @@
                 <tr>
                   <td>spring-petclinic</td>
                   <td><code>INJECTS</code></td>
-                  <td>no confidence recorded: 17</td>
+                  <td>no confidence recorded: 23</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
@@ -546,35 +546,22 @@
           </div>
 
           <div class="card">
-            <h3>1. FastAPI router prefixes are dropped</h3>
+            <h3>1. Framework wiring outside routes and injection is not modelled</h3>
             <p>
-              <code>APIRouter(prefix="/items")</code> is ignored, so <code>@router.get("/")</code>
-              is reported as <code>/</code> instead of <code>/items/</code>. Every route from a
-              prefixed router is wrong in its path while still being emitted, which is the most
-              dangerous shape of error: present, plausible and incorrect. All 8 route misses left in
-              this benchmark are this one defect, and it is the only reason Python recalls worse
-              than Java. The <code>login</code> router, whose decorators spell out full paths, is
-              correct, which isolates the cause. Routes derived from a router prefix must be
-              joined, and the trailing slash is significant in FastAPI.
+              The benchmark covers four edge kinds. The wiring that breaks static-only graphs most
+              badly — event publication to listeners, Kafka/Pub-Sub/JMS producers to consumers,
+              proxy boundaries from <code>@Transactional</code>, <code>@Async</code> and
+              <code>@Cacheable</code>, Spring Data repository derivation, <code>@Bean</code> factory
+              methods, <code>@Qualifier</code>/<code>@Primary</code> disambiguation — produces no
+              edge at all. None of it is in the 69 labelled cases either, which is why this table
+              can be perfect and the graph still not answer "what runs when this message is
+              published". Modelling it is the next phase of work, one edge kind at a time with a
+              fixture, positive and negative tests, a confidence rule and a doc entry each.
             </p>
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>2. FastAPI dependency aliases produce no INJECTS edge</h3>
-            <p>
-              The template declares its dependencies once as module-level aliases —
-              <code>SessionDep = Annotated[Session, Depends(get_db)]</code> — and then names them in
-              each handler signature. A parameter typed only by such an alias yields nothing, and
-              neither does a dependency reached only through another dependency function. All 5
-              remaining injection misses are this one case; constructor injection in the two Spring
-              projects is now modelled and scores 1.000. Call resolution still succeeds from inside
-              the handler body, so <code>get_callers</code> and <code>trace_path</code> mostly keep
-              working; what is lost is any query whose answer depends on the wiring edge itself.
-            </p>
-          </div>
-
-          <div class="card" style="margin-top: 16px">
-            <h3>3. <code>INJECTS</code> and <code>ROUTES</code> have no confidence model</h3>
+            <h3>2. <code>INJECTS</code> and <code>ROUTES</code> have no confidence model</h3>
             <p>
               Both edge kinds are written without a confidence value, so a consumer cannot tell a
               proven mapping from a derived guess. The project rule is that no edge type exists
@@ -586,7 +573,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>4. Dispatch is matched by name and arity, not by proof</h3>
+            <h3>3. Dispatch is matched by name and arity, not by proof</h3>
             <p>
               A virtual dispatch edge carries a flat 0.80 and is emitted to every in-project
               subtype with a same-named, same-arity method. It is correct on the sampled labels,
@@ -598,7 +585,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>5. Foreign calls are unresolved by design</h3>
+            <h3>4. Foreign calls are unresolved by design</h3>
             <p>
               Calls into framework or library types resolve to an <code>ext:</code> node or to an
               <code>__unknown__</code> marker, for example
@@ -606,6 +593,19 @@
               correct trade — the tool does not have TypeORM's bytecode — but it means the graph
               stops at the framework boundary. Event, messaging and proxy wiring that crosses that
               boundary is not modelled at all.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>5. A perfect table on 69 edges is not a proof of the graph</h3>
+            <p>
+              Precision and recall of 1.000 here mean the graph answered all 69 sampled questions
+              correctly. The four graphs contain roughly 12,000 edges, and the labelled cases were
+              chosen to probe specific idioms rather than to sample uniformly: routes, injections,
+              calls and dispatch on four projects. Whole categories — reflection chains,
+              <code>REFERENCES</code>, <code>EXTENDS</code>/<code>IMPLEMENTS</code> hierarchies —
+              carry no labelled cases, so a regression in them would not fail the benchmark. The
+              floors in the manifest are a floor on the sample, not a certificate for the tool.
             </p>
           </div>
         </div>
@@ -644,8 +644,9 @@
               is joined with each verb annotation, covering the array form
               <code>@GetMapping({"/vets"})</code>, a named <code>path =</code> attribute, a bare
               annotation that inherits the class path, paths without a leading slash, and
-              <code>method = RequestMethod.PUT</code> on the prefix-less form. <code>ROUTES</code>
-              recall went from 0.325 to 0.800, with no invented edge.
+              <code>method = RequestMethod.PUT</code> on the prefix-less form. Spring route recall
+              went from 0.250 to 0.778 on its own; with the FastAPI router prefixes below,
+              <code>ROUTES</code> recall reached 1.000, with no invented edge.
             </p>
           </div>
 
@@ -667,8 +668,45 @@
               writes its own constructor alongside a Lombok generator injects nothing, because that
               is two constructors and the same ambiguity applies. Trusting a generator's field list
               blindly would have produced 0.95-confidence edges to dependencies the code never
-              receives. <code>INJECTS</code> recall went from 0.133 to 0.667, Java recall from 0.778
-              to 1.000, and precision held at 1.000 with no invented edge.
+              receives. Spring constructor injection alone took <code>INJECTS</code> recall from
+              0.133 to 0.667 and Java recall from 0.778 to 1.000, with precision held at 1.000 and
+              no invented edge. Every remaining miss was FastAPI.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <p>
+              FastAPI failed for two independent reasons, and the benchmark had to be read carefully
+              to separate them. First, <code>APIRouter(prefix=...)</code> was ignored, so every route
+              from a prefixed router was emitted with the wrong path. Second, dependencies declared
+              once as a module-level alias
+              (<code>SessionDep = Annotated[Session, Depends(get_db)]</code>) produced no edge when a
+              handler named the alias in its signature — and neither did a dependency reached only
+              through another dependency function.
+            </p>
+            <p class="muted">
+              Both are now extracted, and writing the cases forced two corrections that were not
+              obvious from the code. An injection belongs to the <em>callable</em> the framework
+              populates, not to the module that declares it, so the edge now starts at
+              <code>read_items</code> rather than at <code>module:...items</code>. And the dependency
+              is the <em>provider the framework calls</em>, not the type it returns:
+              <code>Depends(get_service)</code> is an edge to <code>get_service</code>, not to
+              <code>OrderService</code>. Retargeting to the provider is strictly more accurate — the
+              returned object is produced by that callable at run time — and it changed no property
+              name or edge kind. <code>INJECTS</code> recall went from 0.667 to 1.000 and Python
+              recall from 0.588 to 1.000, with precision held at 1.000.
+            </p>
+            <p class="muted">
+              The work also exposed an incremental-crawl bug in the same area: dependency aliases
+              live in a <code>Map</code>, the parse cache round-trips through JSON, and
+              <code>JSON.stringify</code> turns a <code>Map</code> into <code>{}</code>. Replayed
+              files therefore carried no aliases, and — because an unchanged file's edges were never
+              rebuilt when a different file changed — an edited alias left a stale, confidently wrong
+              injection edge pointing at the previous provider. Alias maps are now packed explicitly,
+              injection edges are rebuilt project-wide whenever anything changes (as
+              <code>DYNAMIC_DISPATCH</code> and <code>ADVISES</code> already were), and both
+              behaviours are covered by tests that crawl twice and then edit a <code>Depends(...)</code>
+              target.
             </p>
           </div>
         </div>
@@ -701,8 +739,9 @@ npm run bench:runtime</code></pre>
           </p>
           <div class="note" style="margin-top: 20px">
             Thresholds in the manifest are ratchets, not targets: they sit at the value last
-            measured. Raise them when a measurement improves. Precision floors are 1.000, because
-            a confidently wrong edge is worse than a missing one.
+            measured, so a drop fails CI. Every floor is now 1.000 — precision because a
+            confidently wrong edge is worse than a missing one, and recall because these four edge
+            kinds are now extracted from the declarations rather than guessed from a name.
           </div>
         </div>
       </section>

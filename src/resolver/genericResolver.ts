@@ -16,7 +16,13 @@ import {
   resolveTypeCandidates,
   starImportedModules,
 } from "./common.js";
-import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
+import {
+  type IndexedDependencyAlias,
+  phantomNodeId,
+  type ResolvedCall,
+  type Resolver,
+  type TypeIndex,
+} from "./types.js";
 
 /**
  * Call-target resolution for module-based languages (Python, TypeScript).
@@ -329,6 +335,90 @@ export function resolveReflectiveTarget(
   return { targetId: `__reflect__:${target}`, reason: `method ${target} not found` };
 }
 
+/** Resolve a name to a function declared in this file's module or in an imported one. */
+function resolveModuleFunction(file: ParsedFile, index: TypeIndex, name: string): string | null {
+  const simple = name.slice(name.lastIndexOf(".") + 1);
+  if (!simple) return null;
+  const scoped = file.scopeTypes?.get(simple);
+  const moduleText = scoped?.includes(".") ? scoped.slice(0, scoped.lastIndexOf(".")) : "";
+  if (moduleText) {
+    const moduleId = index.resolveModuleId(moduleText);
+    const member = moduleId ? resolveModuleMember(index, moduleId, simple) : null;
+    if (member) return member;
+  }
+  return file.moduleId ? resolveModuleMember(index, file.moduleId, simple) : null;
+}
+
+/**
+ * The dependency alias a name refers to, if it is one.
+ *
+ * Aliases are imported by name, so the lookup goes through the file's own
+ * import scope first and falls back to the declaring module of the same file.
+ */
+export function dependencyAliasOf(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): IndexedDependencyAlias | null {
+  const qualified = file.scopeTypes?.get(name) ?? name;
+  const direct = index.dependencyAliases.get(qualified);
+  if (direct) return direct;
+
+  // An import records the path as written (`from app.api.deps import
+  // SessionDep`), which usually omits the crawl root (`backend.`). Match the
+  // module suffix and require a single alias-bearing module, so a shared tail
+  // (`*.api.deps`) never produces a guess.
+  const parts = qualified.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    const symbol = parts[i] ?? "";
+    const modulePath = parts.slice(0, i).join(".");
+    const hits = index
+      .matchModuleSuffix(modulePath)
+      .map((moduleId) => index.dependencyAliases.get(`${moduleId}.${symbol}`))
+      .filter((alias): alias is IndexedDependencyAlias => alias !== undefined);
+    if (hits.length === 1) return hits[0] ?? null;
+    if (hits.length > 1) return null;
+  }
+
+  if (!file.moduleId) return null;
+  return index.dependencyAliases.get(`${file.moduleId}.${qualified}`) ?? null;
+}
+
+/**
+ * The provider a dependency *alias* stands for: `SessionDep` -> `get_db`.
+ *
+ * Alias-only on purpose. A candidate parameter is identified by its type name
+ * alone, and a type name is not evidence of a dependency — falling through to
+ * "any function with the same name" would invent edges like `user: User` ->
+ * `def User()`.
+ */
+export function resolveDependencyAliasProvider(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): string | null {
+  const alias = dependencyAliasOf(file, index, name);
+  if (!alias) return null;
+  return resolveModuleMember(index, alias.moduleId, alias.provider);
+}
+
+/**
+ * Resolve a callable named as a dependency provider.
+ *
+ * Accepts either form the framework supports: a name that is itself the
+ * callable (`dependencies=[Depends(guard)]`) or an alias that stands for one
+ * (`session: SessionDep`).
+ */
+export function resolveDependencyProvider(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): string | null {
+  const alias = dependencyAliasOf(file, index, name);
+  if (alias) return resolveModuleMember(index, alias.moduleId, alias.provider);
+  return resolveModuleFunction(file, index, name);
+}
+
 /** Resolve an injection's declared type to a type id or external package. */
 export function resolveInjectionTarget(
   file: ParsedFile,
@@ -339,6 +429,11 @@ export function resolveInjectionTarget(
   if (!text) return null;
   const first = resolveTypeCandidates(file, index, typeText)[0];
   if (first) return { targetId: first };
+  // A provider named directly: `Depends(get_current_active_superuser)`. The
+  // framework runs the callable, so the dependency is the function — pointing at
+  // a library the annotation merely mentions would be the wrong edge.
+  const provider = resolveModuleFunction(file, index, text);
+  if (provider) return { targetId: provider };
   // Attribute through the import binding: `from fastapi import Depends` must
   // reach `ext:fastapi`, not a fabricated package named after the symbol.
   const external = externalPackageOf(file, index, file.scopeTypes?.get(text) ?? text);

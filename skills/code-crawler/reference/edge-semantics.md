@@ -28,6 +28,17 @@ Spring wiring is usually not annotated. The sole constructor of a `@Service` is 
 without `@Autowired`, and a Lombok `@AllArgsConstructor` writes no constructor into the
 source at all. `find_injections` reports these; grepping for `@Autowired` will not.
 
+FastAPI wiring is named indirectly. `SessionDep = Annotated[Session, Depends(get_db)]` is
+declared once and then used as a bare parameter type, and the handler may also take
+`dependencies=[Depends(require_superuser)]` at the decorator. Both produce an `INJECTS`
+edge; grepping a handler for `Depends` finds neither.
+
+Read the two ends of an `INJECTS` edge carefully: the **source is what the framework
+populates** - a constructor's type, or the function whose parameters are filled - and the
+**target is the provider the framework calls**. So `service: OrderService =
+Depends(get_service)` is an edge to `get_service`, not to `OrderService`: the container
+invokes `get_service` and passes back whatever it returns.
+
 ## `confidence` is a band, not a probability
 
 Do not average it, threshold it, or present it as certainty. It is a coarse label telling

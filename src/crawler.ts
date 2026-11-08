@@ -13,6 +13,8 @@ import { aliasSignature, readTsconfigAliases } from "./parser/tsPaths.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
+  resolveDependencyAliasProvider,
+  resolveDependencyProvider,
   resolveInjectionTarget,
   resolveReflectiveTarget,
   resolveRouteHandler,
@@ -642,11 +644,37 @@ export function buildDependencyGraph(
     const owner = inj.ownerId;
     if (!owner) continue;
     injections++;
-    // Primitive/structural types carry no dependency identity, so they get a
-    // count but no target edge (`@Body() body: { id: string }`).
-    if (isBuiltinTypeText(inj.type)) continue;
-    const scoped = resolveTypeCandidates(parsed, index, inj.type);
-    let target: string | undefined = scoped.length === 1 ? scoped[0] : undefined;
+    // A candidate is an unannotated parameter that only *might* be a dependency
+    // alias. It is kept only when the alias really resolves to a provider —
+    // a guess would point the edge at whatever the type name happens to match.
+    if (inj.candidate) {
+      const provider = resolveDependencyAliasProvider(parsed, index, inj.type);
+      if (!provider) continue;
+      edges.push({
+        source: owner,
+        target: provider,
+        kind: "INJECTS",
+        properties: {
+          line: inj.line,
+          injectedName: inj.name,
+          framework: inj.framework,
+          inferred: true,
+        },
+      });
+      continue;
+    }
+    // The framework calls the provider to build the value, so when one is named
+    // the dependency is that callable — not the type it happens to return.
+    let target: string | undefined = inj.provider
+      ? (resolveDependencyProvider(parsed, index, inj.provider) ?? undefined)
+      : undefined;
+    if (!target) {
+      // Primitive/structural types carry no dependency identity, so they get a
+      // count but no target edge (`@Body() body: { id: string }`).
+      if (isBuiltinTypeText(inj.type)) continue;
+      const scoped = resolveTypeCandidates(parsed, index, inj.type);
+      target = scoped.length === 1 ? scoped[0] : undefined;
+    }
     let isExternal = false;
     if (!target && parsed.language !== "java") {
       const resolved = resolveInjectionTarget(parsed, index, inj.type);
@@ -1150,11 +1178,15 @@ export async function crawlProject(
         for (const p of calls.phantomNodes) store.ensureNode(p);
 
         // Drop edges whose endpoints aren't part of the indexed project
-        // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
+        // (external EXTENDS/IMPLEMENTS/IMPORTS targets). INJECTS is excluded:
+        // its target resolves through project-wide dependency aliases and
+        // provider callables, so it is rebuilt globally below.
         const edges = decl.edges
           .map((edge) => normalizeHierarchyTarget(edge, parsed.filePath))
           .concat(calls.edges, deps.edges)
-          .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
+          .filter(
+            (e) => e.kind !== "INJECTS" && allNodeIds.has(e.source) && allNodeIds.has(e.target)
+          );
         const nodes = decl.nodes.concat(calls.phantomNodes, deps.nodes);
         store.replaceFile(parsed.filePath, nodes, edges);
       }
@@ -1200,12 +1232,25 @@ export async function crawlProject(
       store.markEntryPoint(id, mark.kind, mark.detail ?? mark.kind);
     }
 
-    // Rebuild project-wide derived edges: virtual dispatch and AOP advice.
-    // Nothing changed, so the existing derived edges are still correct.
+    // Rebuild project-wide derived edges: virtual dispatch, AOP advice and
+    // injection. Nothing changed, so the existing derived edges are still
+    // correct. Injection is rebuilt here because a dependency alias declared in
+    // one module retargets an edge owned by another, unchanged module.
     if (changedPaths.size > 0 || filesRemoved > 0) {
-      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES"]);
+      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES", "INJECTS"]);
       const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
       store.upsertEdges(dynamic.edges);
+
+      const injectionEdges: GraphEdge[] = [];
+      for (const deps of dependencyGraphs.values()) {
+        for (const edge of deps.edges) {
+          if (edge.kind !== "INJECTS") continue;
+          if (!allNodeIds.has(edge.source) || !allNodeIds.has(edge.target)) continue;
+          injectionEdges.push(edge);
+        }
+      }
+      store.upsertEdges(injectionEdges);
+
       dynamicDispatchCount = dynamic.dispatchCount;
       adviceCount = dynamic.adviceCount;
       aspectCount = dynamic.aspects;

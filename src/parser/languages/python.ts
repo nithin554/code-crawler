@@ -10,6 +10,7 @@ import {
 import type {
   AnnotationInfo,
   CallSite,
+  DependencyAlias,
   EntryPointInfo,
   FieldInfo,
   ImportInfo,
@@ -206,6 +207,8 @@ export const pythonConfig: LanguageDescriptor = {
     const routes: RouteRegistration[] = [];
     /** Route-group variable -> its path prefix (`router` -> `/items`). */
     const routeGroupPrefixes = new Map<string, string>();
+    /** Named dependency aliases declared by this module (`SessionDep`). */
+    const dependencyAliases = new Map<string, DependencyAlias>();
 
     /**
      * Conventions this file is judged against. Imports are collected as the tree
@@ -300,6 +303,49 @@ export const pythonConfig: LanguageDescriptor = {
     function servedPathOf(annotation: AnnotationInfo): string {
       const prefix = routeGroupPrefixes.get(receiverOf(annotation)) ?? "";
       return joinPath(prefix, stringArgument(annotation));
+    }
+
+    /** Provider callables named inside `Depends(...)`, in source order. */
+    function dependencyProvidersIn(text: string): string[] {
+      const found: string[] = [];
+      for (const match of text.matchAll(/Depends\(\s*([A-Za-z_][\w.]*)\s*[,)]/g)) {
+        const name = match[1];
+        if (name && !found.includes(name)) found.push(name);
+      }
+      return found;
+    }
+
+    /**
+     * `SessionDep = Annotated[Session, Depends(get_db)]` — collected before the
+     * module walk because an alias is routinely declared *after* the function
+     * that uses it, and other modules reach it by name through an import.
+     */
+    function collectDependencyAliases(): void {
+      for (const statement of root.namedChildren) {
+        if (statement.type !== "expression_statement") continue;
+        const assignment = statement.namedChildren.find((c) => c.type === "assignment");
+        if (!assignment) continue;
+        const left = fieldChild(assignment, "left");
+        const right = fieldChild(assignment, "right");
+        if (left?.type !== "identifier" || right?.type !== "subscript") continue;
+        const text = right.text;
+        if (!text.startsWith("Annotated[")) continue;
+        const provider = dependencyProvidersIn(text)[0];
+        if (!provider) continue;
+        // Base type ends where the first `Depends(` starts; going to the first
+        // comma instead would truncate `Annotated[dict[str, int], ...]`.
+        const base = text
+          .slice(0, text.indexOf("Depends("))
+          .replace(/^Annotated\[/, "")
+          .replace(/,\s*$/, "")
+          .trim();
+        dependencyAliases.set(left.text, { provider, base });
+      }
+    }
+
+    /** True when the file imports from a framework that resolves parameters by alias. */
+    function usesDependencyAliases(): boolean {
+      return scope().evidenced.some((m) => m.name === "fastapi");
     }
 
     /** Literal value of a keyword argument, or `""` when absent or not a string. */
@@ -670,7 +716,30 @@ export const pythonConfig: LanguageDescriptor = {
       });
 
       const isHandler = annotations.some((a) => HTTP_VERBS.has(a.name.toLowerCase()));
-      if (isHandler) routes.push(...decoratorRoutesOf(annotations, rawName, owner));
+      if (isHandler) {
+        routes.push(...decoratorRoutesOf(annotations, rawName, owner));
+        // `@router.post(..., dependencies=[Depends(guard)])` runs the guard before
+        // the handler with no parameter to hang the dependency on.
+        for (const annotation of annotations) {
+          if (!HTTP_VERBS.has(annotation.name.toLowerCase())) continue;
+          for (const arg of annotation.arguments) {
+            if (!arg.trim().startsWith("dependencies=")) continue;
+            const marker = paramMarkerIn(scope(), arg);
+            if (!marker) continue;
+            for (const provider of dependencyProvidersIn(arg)) {
+              injections.push({
+                kind: "parameter",
+                ownerId: id,
+                name: "dependencies",
+                type: provider,
+                provider,
+                framework: marker,
+                line: annotation.line,
+              });
+            }
+          }
+        }
+      }
 
       const locals = new Map<string, string>();
       for (const param of params) {
@@ -680,6 +749,10 @@ export const pythonConfig: LanguageDescriptor = {
       // Parameters supplied by the framework rather than by the caller.
       if (paramsNode) {
         const methodInjects = annotations.some((a) => injectionIn(scope(), a.name) !== undefined);
+        // An injection belongs to the callable the framework populates. A
+        // constructor is the exception: the container injects into the bean, so
+        // the edge starts at the type.
+        const injectionOwner = isCtor && ownerTypeId ? owner : id;
         for (const param of paramsNode.namedChildren) {
           const named = paramName(param);
           if (!named) continue;
@@ -692,9 +765,10 @@ export const pythonConfig: LanguageDescriptor = {
           if (depends || injectDecorator) {
             injections.push({
               kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared || (depends ? "Depends" : "Inject"),
+              provider: depends ? dependencyProvidersIn(raw)[0] : undefined,
               framework: depends ? "fastapi" : "dependency-injector",
               line: param.startPosition.row,
               optional: /Optional\s*\[/.test(declared) || /=\s*None/.test(raw),
@@ -702,7 +776,7 @@ export const pythonConfig: LanguageDescriptor = {
           } else if (methodInjects && declared) {
             injections.push({
               kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared,
               framework: "dependency-injector",
@@ -711,11 +785,29 @@ export const pythonConfig: LanguageDescriptor = {
           } else if (ownerInjectable && isCtor && declared) {
             injections.push({
               kind: "constructor-parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared,
               framework: "dependency-injector",
               line: param.startPosition.row,
+            });
+          } else if (
+            declared &&
+            /^[A-Za-z_][\w.]*$/.test(declared) &&
+            !BUILTIN_TYPES.has(declared) &&
+            usesDependencyAliases()
+          ) {
+            // `session: SessionDep` — an alias declared in this module or imported
+            // from one, which a single-file parse cannot confirm. The crawler
+            // keeps it only when the name really is a dependency alias.
+            injections.push({
+              kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
+              ownerId: injectionOwner,
+              name: named.name,
+              type: declared,
+              framework: "fastapi",
+              line: param.startPosition.row,
+              candidate: true,
             });
           }
         }
@@ -952,6 +1044,7 @@ export const pythonConfig: LanguageDescriptor = {
     // Route prefixes must be known before decorators are visited: a handler's
     // recorded path is relative to the group it hangs off.
     collectRouteGroupPrefixes();
+    collectDependencyAliases();
 
     for (const entry of definitionsIn(root)) {
       const annotations = annotationsOf(entry.decorators);
@@ -1150,6 +1243,7 @@ export const pythonConfig: LanguageDescriptor = {
       scopeModules,
       reflectiveRefs,
       injections,
+      dependencyAliases,
       routes,
       entryPoint,
     };

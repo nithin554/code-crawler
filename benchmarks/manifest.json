@@ -37,13 +37,13 @@
       "note": "NestJS + TypeORM implementation of the RealWorld spec. Included as the positive control: controller prefixes, path parameters and constructor injection are all modelled correctly here, so a regression in any of them is unambiguous."
     }
   ],
-  "_comment": "Floors were set from the first full run of this suite, rounded down to two decimals for recall and held at 1.000 for precision. They are deliberately floors and not targets: INJECTS recall of 0.66 is the measured size of the one known defect that remains (FastAPI dependency aliases resolve to nothing), recorded here so that fixing it shows up as a recall increase while breaking it shows up as a failure. ROUTES reached 1.000 once APIRouter prefixes were applied, so its floor is the measurement, not the target. Raise a floor whenever a measurement improves.",
+  "_comment": "Floors were set from the first full run of this suite, rounded down to two decimals for recall and held at 1.000 for precision. They are deliberately floors and not targets. CALLS, DYNAMIC_DISPATCH and ROUTES reached 1.000 once Spring routes and APIRouter prefixes were applied; INJECTS reached 1.000 once constructor/Lombok injection and FastAPI dependency aliases were modelled. Every floor is now a measurement, not an aspiration, so any drop is a real regression. Raise a floor whenever a measurement improves.",
   "thresholds": {
     "default": { "precision": 1.0, "recall": 0.0 },
     "perEdgeKind": {
       "CALLS": { "precision": 1.0, "recall": 1.0 },
       "DYNAMIC_DISPATCH": { "precision": 1.0, "recall": 1.0 },
-      "INJECTS": { "precision": 1.0, "recall": 0.66 },
+      "INJECTS": { "precision": 1.0, "recall": 1.0 },
       "ROUTES": { "precision": 1.0, "recall": 1.0 }
     }
   }

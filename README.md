@@ -592,7 +592,7 @@ Dependencies the framework supplies are `INJECTS` edges instead of missing calls
 | --- | --- |
 | Spring | `@Autowired` fields/methods/constructors; the sole constructor of a bean, annotated or not (Spring 4.3+); Lombok `@AllArgsConstructor`/`@RequiredArgsConstructor` promoted fields |
 | NestJS | constructor parameters with decorators; `@Injectable()` classes |
-| FastAPI | `Depends(...)` parameters |
+| FastAPI | `Depends(...)` parameters, `Annotated[T, Depends(fn)]` aliases declared once and reused across modules, and decorator-level `dependencies=[Depends(fn)]` |
 | dependency-injector | constructor parameters of `@injectable` classes |
 | plain TS/JS | constructor parameters typed with a project class |
 
@@ -605,6 +605,11 @@ For Spring, the sole-constructor rule needs the class to carry a stereotype
 with two unannotated constructors injects nothing, because Spring cannot choose either, and
 neither does a class that declares a constructor next to a Lombok generator. Fields with an
 initialiser at their declaration are not treated as injected.
+
+An `INJECTS` edge points from what the container **populates** to the provider it **calls**:
+a constructor belongs to its type, a FastAPI parameter belongs to the function whose signature
+declares it, and `service: OrderService = Depends(get_service)` targets `get_service` rather
+than `OrderService` — the container invokes `get_service` and hands back what it returns.
 
 ### Framework entry points and routes
 

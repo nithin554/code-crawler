@@ -33,9 +33,7 @@ describe("FastAPI route groups", () => {
   });
 
   it("reads the prefix regardless of keyword argument order", async () => {
-    expect(await routesOf("private.py")).toEqual([
-      "POST /private/users/ -> create_private_user",
-    ]);
+    expect(await routesOf("private.py")).toEqual(["POST /private/users/ -> create_private_user"]);
   });
 
   it("leaves decorator paths untouched when the group has no prefix", async () => {
@@ -43,10 +41,7 @@ describe("FastAPI route groups", () => {
   });
 
   it("applies only the prefix of the group the handler hangs off", async () => {
-    expect(await routesOf("grouped.py")).toEqual([
-      "GET /ping -> ping",
-      "GET /users/me -> read_me",
-    ]);
+    expect(await routesOf("grouped.py")).toEqual(["GET /ping -> ping", "GET /users/me -> read_me"]);
   });
 
   it("ignores a prefix keyword on something that is not a route group", async () => {

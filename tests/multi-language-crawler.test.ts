@@ -73,7 +73,10 @@ describe("multi-language crawler", () => {
     const injections = findInjections(store);
     expect(injections.map((i) => `${i.source.id}:${i.injectedName} -> ${i.target.id}`)).toEqual([
       "app.service.OrderService:repo -> app.repository.OrderRepository",
-      "module:app.api:service -> app.service.OrderService",
+      // `service: OrderService = Depends(get_service)` — the framework runs the
+      // provider, so the dependency is `get_service`, not the type it returns.
+      "module:app.api#create_order:service -> module:app.api#get_service",
+      "module:app.api#read_order:service -> module:app.api#get_service",
     ]);
 
     const reflections = findReflections(store);
