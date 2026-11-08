@@ -115,6 +115,32 @@
                 <code>export_graph</code>, <code>get_node</code>, <code>index_status</code>,
                 <code>get_schema</code>) take no budget.
               </p>
+              <p>
+                When a budget cuts the list, <code>page.truncated</code> is true and
+                <code>page.hint</code> states the exact <code>cursor</code> to pass next, the
+                page range, and the total — so a client that only reads the payload can always
+                continue without guessing.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Compact responses</h3>
+              <p>
+                All 29 tools accept <code>compact: true</code>, which returns every symbol
+                reference as its fully-qualified name (<code>com.acme.Payment#pay</code>) instead
+                of an <code>{id, name, kind, filePath}</code> object. A qualified name already
+                says whether it is a type (<code>pkg.Type</code>) or a member
+                (<code>pkg.Type#member</code>), and call <code>get_node</code> with that name when
+                you need the metadata back.
+              </p>
+              <p>
+                The projection is structural rather than per-tool, so one implementation covers
+                every response and cannot drift as tools are added. Measured on the
+                dynamic-dispatch fixture it removes 61% of a <code>get_callers</code> payload and
+                83% of a <code>search_symbols</code> payload; the more a response repeats
+                references and absolute paths, the more it saves. The budget is computed before
+                the projection runs, so <code>compact</code> keeps the same items and makes them
+                cheaper to read — raise <code>max_tokens</code> when you want more items.
+              </p>
             </div>
             <div class="card">
               <h3>Unknown symbols</h3>

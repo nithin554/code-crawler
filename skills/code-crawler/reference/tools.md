@@ -121,7 +121,28 @@ Every list-returning tool accepts `max_tokens` and `cursor`; passing either adds
 block with `totalCount`, `returnedCount`, `truncated`, `estimatedTokens`, and `nextCursor`.
 Omit both and the response shape is unchanged.
 
+When the budget cuts the list, `page.truncated` is true and `page.hint` names the exact
+`cursor` value to pass next. Read the hint instead of reconstructing the page arithmetic.
+
 Aggregate tools (`impact_analysis`, `explain_symbol`, `export_graph`) and single-object
 tools (`get_node`, `index_status`, `get_schema`) return one object and take no budget.
 
 Use `totalCount` from the first page instead of paging to count.
+
+## Compact responses
+
+Every tool accepts `compact: true`, which returns each symbol reference as its
+fully-qualified name (`com.acme.Payment#pay`) instead of an `{id, name, kind, filePath}`
+object. Measured on the dispatch fixture it removes 61% (`get_callers`) to 83%
+(`search_symbols`) of the response.
+
+Reach for it when you are scanning a wide trace, comparing which symbols appear on both
+sides of a call, or reading a ranking and only need the names. Do not use it when you need
+`kind` (to tell a class from a method you cannot tell, though the `Type` / `Type#member`
+form usually settles it), `filePath` (to jump to a file), or when you are going to pass the
+value somewhere that needs a node id. `get_node` accepts a qualified name, so `compact` then
+`get_node` is a cheap way to expand exactly the symbols you decided to care about.
+
+The budget is computed before the projection runs, so `compact` keeps the same items and
+makes them cheaper to read rather than fitting more into one page. Raise `max_tokens` for
+more items.

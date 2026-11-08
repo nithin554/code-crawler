@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
 import { applyBudget, pageMeta } from "./graph/budget.js";
 import { changeImpact } from "./graph/changeImpact.js";
+import { compactify } from "./graph/compact.js";
 import {
   explainSymbol,
   exportGraph,
@@ -171,6 +172,41 @@ export function createServer(
   };
 
   /**
+   * Added to every tool's schema by `tool` below. Kept here so the description
+   * matches the projection in `compactify` rather than being reworded per tool.
+   */
+  const compactParam = z
+    .boolean()
+    .optional()
+    .describe(
+      'Return every symbol reference as its fully-qualified name ("pkg.Type#method") instead of an {id, name, kind, filePath} object. Typically removes 60-80% of a response, and more on deep traces. A class is "pkg.Type" and a member is "pkg.Type#member", so the name still says what it is; call get_node with the name when you need the metadata back.'
+    );
+
+  /**
+   * Apply the compact projection to a tool result. Only JSON text parts are
+   * touched; a non-JSON payload (export_graph) passes through unchanged.
+   */
+  const compactResult = (result: unknown): unknown => {
+    if (typeof result !== "object" || result === null) return result;
+    const content = (result as { content?: unknown }).content;
+    if (!Array.isArray(content)) return result;
+    let projected = false;
+    const next = content.map((part) => {
+      const entry = part as { type?: string; text?: unknown };
+      if (entry?.type !== "text" || typeof entry.text !== "string") return part;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(entry.text);
+      } catch {
+        return part;
+      }
+      projected = true;
+      return { ...entry, text: JSON.stringify(compactify(parsed), null, 2) };
+    });
+    return projected ? { ...(result as Record<string, unknown>), content: next } : result;
+  };
+
+  /**
    * Attach a `page` block and cut the list when the caller asked for a budget.
    * Counting keys keep reporting the full window size so clients can decide
    * whether to ask for the next page. Each tool keeps its own counting key name,
@@ -200,6 +236,10 @@ export function createServer(
   /**
    * Every handler shares one error boundary so MCP clients always receive the
    * same `{ ok, error, hint }` shape instead of a mix of throws and payloads.
+   *
+   * `compact` is added to every tool here rather than to each schema, because
+   * the projection is structural (see `compactify`) and a per-tool copy would
+   * drift the moment a new tool is added.
    */
   const tool = <Args extends unknown[]>(
     name: string,
@@ -213,15 +253,21 @@ export function createServer(
       s: unknown,
       h: (...args: unknown[]) => unknown
     ) => void;
-    register(name, description, paramsSchema, async (...args: unknown[]) => {
+    const schema = {
+      ...(paramsSchema as Record<string, unknown>),
+      compact: compactParam,
+    };
+    register(name, description, schema, async (...args: unknown[]) => {
       try {
         // `crawl_project` names the project it wants; every other tool inherits
         // the client's roots or the project the previous call selected.
         const requested =
           name === "crawl_project" ? (args[0] as { path?: unknown } | undefined)?.path : undefined;
-        return await scoped(typeof requested === "string" ? requested : undefined, () =>
+        const result = await scoped(typeof requested === "string" ? requested : undefined, () =>
           handler(...(args as Args))
         );
+        const compact = (args[0] as { compact?: unknown } | undefined)?.compact === true;
+        return compact ? compactResult(result) : result;
       } catch (err) {
         return errorResult(err);
       }

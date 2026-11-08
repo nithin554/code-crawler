@@ -119,6 +119,8 @@ Picking the wrong one wastes the most time of anything in this skill.
 | Who calls this method? | `get_callers` |
 | What does this method call? | `get_callees` |
 | What breaks if I change this? | `impact_analysis` |
+| What breaks if I change this diff? | `change_impact` |
+| Who reacts when this publishes an event? | `find_event_flows` |
 | Where does a request enter this system? | `find_entry_points`, `find_routes` |
 | Which implementation handles this interface? | `find_implementations` |
 | Is this method reachable at all? | `find_dead_code`, `find_hotspots` |
@@ -195,13 +197,21 @@ Short version:
 ## Budget discipline
 
 Every list-returning tool accepts `max_tokens` (100-200000) and `cursor`. The response
-then carries a `page` block with `totalCount`, `truncated`, and `nextCursor`.
+then carries a `page` block with `totalCount`, `truncated`, and `nextCursor`. When the
+budget cuts the list, `page.hint` states the exact `cursor` to pass next.
 
 Start with a small `max_tokens` and widen only if the answer is genuinely incomplete.
 Reading one page of `get_callers` and reporting the shape is almost always better than
 paging through all of them. Prefer `explain_symbol` over chaining `get_node` +
 `get_callers` + `get_callees` + `get_decorators` when you want a digest rather than a
 specific list.
+
+Every tool also accepts `compact: true`, which returns symbol references as qualified
+names instead of objects with `id`, `name`, `kind` and `filePath`. It removes 61-83% of a
+response depending on how reference-heavy it is. Use it when you are scanning a wide
+trace or comparing name sets; skip it when you need `filePath` to open a file or a node
+id to pass on. `get_node` accepts a qualified name, so expand only the names you care
+about.
 
 ## Do not
 

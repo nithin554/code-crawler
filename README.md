@@ -458,6 +458,15 @@ so cutting one list would leave edges pointing at omitted nodes. It is bounded b
 single-object tools (`get_node`, `index_status`, `get_schema`) return one object and take no
 budget.
 
+**Compact responses.** Every tool accepts `compact: true`, which returns each symbol
+reference as its fully-qualified name (`com.acme.Payment#pay`) instead of an
+`{id, name, kind, filePath}` object. It is a structural projection applied in one place, so it
+works the same on all 29 tools, and it measured 61% smaller (`get_callers`) to 83%
+(`search_symbols`) on the dynamic-dispatch fixture. A qualified name already says whether it
+is a type (`pkg.Type`) or a member (`pkg.Type#member`); call `get_node` with that name to get
+the metadata back. The budget is computed before the projection runs, so a compact page holds
+the same items as the non-compact one and costs less — it is a size win, not a packing win.
+
 ### Agent skill
 
 The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`

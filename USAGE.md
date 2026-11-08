@@ -588,6 +588,33 @@ before it, overloads collapsed into one node and the last one indexed won.
   with the guard text as it appears in source.
 - `external` on `REFERENCES` edges names the package a symbol belongs to.
 
+### Compact responses and truncation hints
+
+Every tool accepts `compact: true`. Symbol references then come back as fully-qualified
+names, so `{"caller": {"id": "app.Svc#run", "qualifiedName": "app.Svc#run", "name": "run",
+"kind": "method", "filePath": "/abs/path/svc.py"}}` becomes `{"caller": "app.Svc#run"}`.
+Everything that is not a reference — `count`, `page`, `path`, `line`, `confidence`,
+`edgeKind` — is unchanged, so the payload still says the same thing with less framing.
+Measured on the dispatch fixture it removes 61% of a `get_callers` response and 83% of a
+`search_symbols` response. Expand just the names you decided to care about with `get_node`,
+which accepts a qualified name.
+
+The list tools also accept `max_tokens` and `cursor`. When a budget cuts the list, the
+`page` block carries `truncated: true` and a `hint` naming the exact `cursor` to pass next:
+
+```json
+"page": {
+  "totalCount": 25, "returnedCount": 2, "cursor": 0, "nextCursor": 2,
+  "truncated": true, "estimatedTokens": 86,
+  "hint": "Truncated: items 0-1 of 25. Pass cursor=2 for the next page, raise max_tokens, or narrow the query with this tool's filter arguments."
+}
+```
+
+Read that hint rather than recomputing the arithmetic, and read `totalCount` instead of
+paging to count. Note that the budget is measured before `compact` is applied, so a compact
+page holds the same items as the non-compact one and costs less to read; it does not fit
+more items.
+
 ---
 
 ## 6. Per-language examples
