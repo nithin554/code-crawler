@@ -669,6 +669,21 @@ container cannot override a `private`, `static` or `final` method, or subclass a
 class. Both are the case a reader of the source assumes works; reporting the annotation
 without them would be a confident wrong answer.
 
+### Ambiguous overloads
+
+When a call site matches several overloads equally, the graph ranks them instead of
+guessing silently. The edge keeps the first declaration as its target and lists the rivals:
+
+| Caller | target | confidence | alternatives |
+| --- | --- | --- | --- |
+| `render(7)` | `Formatter#render(int)` | `0.95` | — |
+| `render("seven")` | `Formatter#render(String)` | `1` | — |
+| `render(input)` where `input` is `Object` | `Formatter#render` | `0.6` | `["Formatter#render(String)"]` |
+
+The last row is the honest answer: the call provably happens, only the choice among
+overloads is unknown. The edge stays `resolved: true` and confidence drops into the hedge
+band, so nothing downstream can mistake the leading candidate for a proven target.
+
 ### Control flow on call edges
 
 Each `CALLS` edge records whether it is guarded:

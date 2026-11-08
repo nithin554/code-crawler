@@ -23,6 +23,12 @@ export interface ResolvedCall {
   external?: boolean;
   /** Package/specifier of the external target (also used as node id suffix). */
   externalModule?: string;
+  /**
+   * Other in-project methods this call could equally target — the overloads a
+   * tie left in play. Present only when the call is ambiguous; `targetId` is
+   * then the best-ranked candidate, not a proven one.
+   */
+  alternatives?: string[];
 }
 
 /**

@@ -43,6 +43,11 @@ payload. Reach for it first when exploring an unfamiliar symbol; drop to `get_ca
 `get_callers`/`get_callees` take `depth` - keep it at 1 unless the question is explicitly
 transitive, because depth 3 on a hub method returns most of the repository.
 
+All three call-graph tools report `alternatives` when an overloaded call site could not be
+narrowed to one declaration. The edge is still resolved - only the choice among overloads is
+uncertain - and its confidence is capped at `0.6`. Read the call site before reporting a single
+callee.
+
 `get_subgraph` is bounded by `radius`/`limit` rather than `max_tokens`, because its `nodes`
 and `edges` are two views of one slice and cutting one list leaves dangling references.
 

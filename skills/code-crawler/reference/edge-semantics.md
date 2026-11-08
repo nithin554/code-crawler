@@ -69,13 +69,36 @@ you *what kind of evidence* produced the edge.
 | `0.85` | Imported from a named module, or a literal topic/queue name |
 | `0.8` | Inherited from a supertype, or an external target |
 | `0.75` | Call to an imported class resolved through its import |
-| `0.6` | Pointcut `args(...)` matched on arity only |
+| `0.6` | Pointcut `args(...)` matched on arity only, or an ambiguous overload tie |
 | `0.55` | Pointcut primitive matched by static approximation |
 | `0.3` | Empty pointcut - the advice matches everything |
 | `0` | Phantom - nothing was resolved |
 
 Practical rule: `>= 0.75` is safe to report as fact, `0.5`-`0.7` deserves a hedge, and `0`
 carries no information about the target at all.
+
+## Ambiguous calls carry ranked candidates
+
+Overload resolution is where a static graph most often reports a confidence it has not earned.
+When a call site matches several overloads equally, the resolver keeps the first declaration as
+the edge target and lists the rival ones on the edge instead of discarding them:
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `alternatives` | `CALLS` edge, `get_callers` / `get_callees` row, `trace_path` edge | other overloads the same call site could equally target |
+
+An edge with `alternatives` is still `resolved: true`: the call site is proven, only the choice
+among rivals is uncertain. Confidence is capped at `0.6` whenever alternatives exist, so it
+always lands in the hedge band and never in the "safe to report as fact" band.
+
+Report the ambiguity instead of picking one. Say "calls `Formatter#render`, could equally be
+`Formatter#render(String)`", not "calls `Formatter#render`". Reading the argument's declared type
+at the call site usually settles it.
+
+Rivals are only detected within one declaration list. Once resolution reaches an inherited
+method the pool has already been narrowed to a single candidate, so an inherited overload tie is
+not reported. A missed rival never invents a wrong target - it only leaves the edge looking more
+certain than it is.
 
 ## Proxy boundaries are node properties, not edges
 

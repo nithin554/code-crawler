@@ -555,6 +555,9 @@ before it, overloads collapsed into one node and the last one indexed won.
 - `resolved: false` means the target is an `unknown_symbol` phantom node — the graph stays
   traversable, but do not trust it as a real dependency.
 - `confidence` is a heuristic score; `reason` explains how the receiver type was inferred.
+- `alternatives` lists the rival overloads when the call site could not be narrowed to one
+  declaration. The edge is still `resolved` — only the target among rivals is uncertain — and
+  confidence is capped at `0.6`. Report the ambiguity with the call instead of picking one.
 - `conditional` / `controlFlow` / `guards` tell you the call is not on the happy path,
   with the guard text as it appears in source.
 - `external` on `REFERENCES` edges names the package a symbol belongs to.
@@ -815,6 +818,12 @@ Read `proxyBlocked` and `inert` on `get_callers`. A `private`, `static` or `fina
 method of a `final` class, or a call from inside the same bean never crosses the proxy, so the
 annotation is decoration. This is an annotation-aware answer, not a tracing one: it does not
 prove the transaction committed, only that the proxy could not have wrapped the call.
+
+**The callee looks like the wrong overload.**
+Check `alternatives` on the edge. An overloaded call site whose argument type cannot be
+narrowed keeps the first declaration as the target and lists the rivals, at confidence `0.6`
+or below. Read the call site's argument type to settle it; if you assert one callee, say which
+rivals were ruled out and how.
 
 **An unknown symbol has suggestions instead of an error.**
 That is `CODECRAWLER_HELPFUL_ERRORS` working as intended. Set it to `false` for strict

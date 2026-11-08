@@ -600,7 +600,20 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>4. Foreign calls are unresolved by design</h3>
+            <h3>4. An ambiguous overload is flagged, not resolved</h3>
+            <p>
+              When a call site matches several overloads equally, the edge keeps the first
+              declaration as its target and lists the rivals in <code>alternatives</code> at
+              confidence 0.6. That is a rank, not a resolution: the graph still does not know
+              which overload ran, and a reader who ignores the field gets the same confident
+              wrong answer as before. Rivals are only detected inside one declaration list, so
+              an inherited overload tie goes unreported, and none of the four benchmark projects
+              contains an ambiguous overload - the behaviour is covered by fixtures only.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <h3>5. Foreign calls are unresolved by design</h3>
             <p>
               Calls into framework or library types resolve to an <code>ext:</code> node or to an
               <code>__unknown__</code> marker, for example
@@ -613,7 +626,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>5. A perfect table on 69 edges is not a proof of the graph</h3>
+            <h3>6. A perfect table on 69 edges is not a proof of the graph</h3>
             <p>
               Precision and recall of 1.000 here mean the graph answered all 69 sampled questions
               correctly. The four graphs contain roughly 12,000 edges, and the labelled cases were

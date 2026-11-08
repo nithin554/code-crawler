@@ -100,6 +100,8 @@ export interface EdgeProperties {
   resolved?: boolean;
   /** For CALLS edges: heuristic confidence 0..1 when resolved. */
   confidence?: number;
+  /** For CALLS: rival overloads an ambiguous call site could equally target. */
+  alternatives?: string[];
   /** For DYNAMIC_DISPATCH: why the runtime target was inferred. */
   via?: string;
   /** For ADVISES: the advice kind that intercepts the call. */

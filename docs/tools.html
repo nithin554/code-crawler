@@ -289,8 +289,10 @@
               <p class="small muted" style="margin-top: 14px">
                 Returns <code>target</code>, <code>edgesFollowed</code>, <code>includeDynamic</code> and
                 <code>callers[]</code> with <code>caller</code>, <code>depth</code>,
-                <code>callSiteLine</code>, <code>edgeKind</code>, and <code>confidence</code>
-                when the edge carries one. Direct callers of a proxied method also report
+                <code>callSiteLine</code>, <code>edgeKind</code>, <code>confidence</code> and
+                <code>alternatives</code> - the rival overloads an ambiguous call site could
+                equally target, with confidence capped at <code>0.6</code>.
+                Direct callers of a proxied method also report
                 <code>proxy</code> (<code>transactional</code>, <code>async</code>,
                 <code>cacheable</code>), <code>proxyBlocked</code> when the container cannot
                 honour the annotation (<code>private</code>, <code>static</code>,
@@ -329,8 +331,9 @@
               <p class="small muted" style="margin-top: 14px">
                 Returns <code>source</code>, <code>edgesFollowed</code>, <code>includeDynamic</code> and
                 <code>callees[]</code> with <code>callee</code>, <code>depth</code>,
-                <code>callSiteLine</code>, <code>edgeKind</code>, and <code>confidence</code>
-                when the edge carries one.
+                <code>callSiteLine</code>, <code>edgeKind</code>, <code>confidence</code> and
+                <code>alternatives</code> - the rival overloads an ambiguous call site could
+                equally target, with confidence capped at <code>0.6</code>.
               </p>
               <pre><code>get_callees({ symbol: "com.acme.Checkout#checkout", max_depth: 4 })</code></pre>
             </div>
@@ -360,8 +363,8 @@
               <p class="small muted" style="margin-top: 14px">
                 Returns <code>pathCount</code> and <code>paths[]</code>, each with
                 <code>length</code>, a symbol-id <code>path</code> array, and
-                <code>edges[]</code> carrying <code>kind</code>, <code>callSiteLine</code>
-                and <code>confidence</code> when the edge has one.
+                <code>edges[]</code> carrying <code>kind</code>, <code>callSiteLine</code>,
+                <code>confidence</code> and, for an ambiguous overload, <code>alternatives</code>.
               </p>
               <pre><code>trace_path({
   source: "com.acme.Main#main",

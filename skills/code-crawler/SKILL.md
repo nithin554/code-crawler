@@ -176,6 +176,10 @@ Short version:
   self-invocation bypassed the proxy, `proxyBlocked` (`private`, `static`, `final`,
   `final-type`) means the container could never have honoured it. Do not report an
   annotated method as transactional or asynchronous without checking these.
+- An edge with `alternatives` is an unresolved *choice*, not an unresolved call: the call site
+  is proven but several overloads matched equally, and the target is the first declaration with
+  the rivals listed. Confidence is capped at `0.6`. Report both rather than asserting the one
+  that happens to be listed first.
 - `external: true` means the target is outside the project. It is *not* dead code and
   *not* unresolved.
 - `__phantom__:` / `__reflect__:` / `__inject__:` targets mark something the resolver

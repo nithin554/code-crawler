@@ -1,6 +1,7 @@
 import type { CallSite, ParsedFile } from "../parser/language.js";
 import { moduleNodeId } from "../parser/moduleId.js";
 import {
+  AMBIGUOUS_OVERLOAD_CONFIDENCE,
   externalPackageOf,
   findInherited,
   findMethodsNamed,
@@ -9,7 +10,7 @@ import {
   isPythonBuiltin,
   moduleIdOf,
   normalizeTypeText,
-  pickOverload,
+  pickOverloadCandidates,
   resolveModuleMember,
   resolveReceiver,
   resolveScopeValue,
@@ -96,14 +97,20 @@ function resolveCall(
     const types = resolveTypeCandidates(file, index, call.name);
     if (types.length > 0) {
       for (const typeId of types) {
-        const ctor = pickOverload(findMethodsNamed(index, typeId, "<init>"), argCount, argTypes);
-        if (ctor) {
+        const pick = pickOverloadCandidates(
+          findMethodsNamed(index, typeId, "<init>"),
+          argCount,
+          argTypes
+        );
+        if (pick.method) {
+          const alternatives = pick.alternatives.map((m) => m.id);
           return {
             callSite: call,
-            targetId: ctor.id,
+            targetId: pick.method.id,
             resolved: true,
-            confidence: 1.0,
+            confidence: alternatives.length > 0 ? AMBIGUOUS_OVERLOAD_CONFIDENCE : 1.0,
             reason: `constructor of ${typeId}`,
+            ...(alternatives.length > 0 ? { alternatives } : {}),
           };
         }
       }
@@ -149,17 +156,24 @@ function resolveCall(
     const methods = searchInheritance
       ? findInherited(index, typeId, name)
       : findMethodsNamed(index, typeId, name);
-    const method = pickOverload(methods, argCount, argTypes);
+    const pick = pickOverloadCandidates(methods, argCount, argTypes);
+    const method = pick.method;
     if (method) {
       const inherited = method.typeId !== typeId;
+      const alternatives = pick.alternatives.map((m) => m.id);
+      const confidence = inherited ? 0.8 : 0.9;
       return {
         callSite: call,
         targetId: method.id,
         resolved: true,
-        confidence: inherited ? 0.8 : 0.9,
+        confidence:
+          alternatives.length > 0
+            ? Math.min(confidence, AMBIGUOUS_OVERLOAD_CONFIDENCE)
+            : confidence,
         reason: inherited
           ? `${name} inherited from ${method.typeId} (via ${receiver.reason})`
           : `${name} declared on ${method.typeId} (${receiver.reason})`,
+        ...(alternatives.length > 0 ? { alternatives } : {}),
       };
     }
   }

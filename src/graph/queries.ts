@@ -161,6 +161,7 @@ export function getCallers(
     edgeKind: EdgeKind;
     confidence?: number;
     resolved?: boolean;
+    alternatives?: string[];
   } & FlowEdgeInfo &
     ProxyCallInfo)[];
   edgesFollowed: EdgeKind[];
@@ -274,6 +275,7 @@ export function getCallees(
     edgeKind: EdgeKind;
     confidence?: number;
     resolved?: boolean;
+    alternatives?: string[];
   } & FlowEdgeInfo)[];
   edgesFollowed: EdgeKind[];
   includeDynamic: boolean;
@@ -369,6 +371,7 @@ export interface PathEntry {
     callSiteLine?: number;
     resolved?: boolean;
     confidence?: number;
+    alternatives?: string[];
   }[];
 }
 
@@ -402,20 +405,26 @@ export function tracePath(
   );
 
   // BFS in SQL via recursive CTE that accumulates the path taken.
+  //
+  // Node ids contain both '>' (`Type#<init>`) and '/' (module ids), so the
+  // accumulated path is joined with the ASCII unit separator, which cannot
+  // appear in an id or in an edge kind. Splitting on those characters instead
+  // truncated constructor ids and every edge fact looked up from them.
+  const SEG = "\u001f";
   const rows = store.raw<{ path: string; edge_path: string; depth: number }>(
     `WITH RECURSIVE paths(id, depth, path, edge_path) AS (
-       SELECT e.target, 1, e.source || '/' || e.target,
-              e.source || '>' || e.target || '>' || e.kind
+       SELECT e.target, 1, e.source || '${SEG}' || e.target,
+              e.source || '${SEG}' || e.target || '${SEG}' || e.kind
        FROM edges e
        WHERE e.source = ? AND e.kind IN (${kinds})
        UNION ALL
-       SELECT e.target, p.depth + 1, p.path || '/' || e.target,
-              p.edge_path || '|' || e.source || '>' || e.target || '>' || e.kind
+       SELECT e.target, p.depth + 1, p.path || '${SEG}' || e.target,
+              p.edge_path || '|' || e.source || '${SEG}' || e.target || '${SEG}' || e.kind
        FROM edges e
        JOIN paths p ON e.source = p.id
        WHERE e.kind IN (${kinds})
          AND p.depth < ?
-         AND instr('|' || p.path || '|', '|' || e.target || '|') = 0
+         AND instr('${SEG}' || p.path || '${SEG}', '${SEG}' || e.target || '${SEG}') = 0
      )
      SELECT path, edge_path, depth
      FROM paths
@@ -429,11 +438,9 @@ export function tracePath(
   );
 
   return rows.map((r) => {
-    const ids = r.path.split("/");
+    const ids = r.path.split(SEG);
     const edges = r.edge_path.split("|").map((triple) => {
-      const [src, tgt, kind, ...rest] = triple.split(">");
-      // Method ids may contain '>'? No, node ids use type#method and $field.
-      void rest;
+      const [src, tgt, kind] = triple.split(SEG);
       const edge = {
         source: src ?? "",
         target: tgt ?? "",
@@ -441,6 +448,7 @@ export function tracePath(
         callSiteLine: undefined as number | undefined,
         resolved: undefined as boolean | undefined,
         confidence: undefined as number | undefined,
+        alternatives: undefined as string[] | undefined,
       };
       const props = store.raw<{ properties: string }>(
         "SELECT properties FROM edges WHERE source = ? AND target = ? AND kind = ? LIMIT 1",
@@ -453,11 +461,15 @@ export function tracePath(
             line?: number;
             resolved?: boolean;
             confidence?: number;
+            alternatives?: string[];
           })
         : undefined;
       edge.callSiteLine = parsed?.line;
       edge.resolved = parsed?.resolved;
       edge.confidence = parsed?.confidence;
+      if (parsed?.alternatives && parsed.alternatives.length > 0) {
+        edge.alternatives = parsed.alternatives.filter((id) => typeof id === "string");
+      }
       return edge;
     });
     return { path: ids, length: r.depth, edges };
@@ -1428,13 +1440,22 @@ function edgeFlow(props: string | undefined): FlowEdgeInfo {
 /**
  * Extract the resolution facts recorded on an edge. Confidence is only written
  * for kinds that have a confidence model, so it is omitted rather than defaulted
- * — an absent value must not be read as certainty.
+ * — an absent value must not be read as certainty. `alternatives` appears only
+ * on an ambiguous call, where the target is the best-ranked candidate.
  */
-function edgeFacts(props: string | undefined): { confidence?: number; resolved?: boolean } {
+function edgeFacts(props: string | undefined): {
+  confidence?: number;
+  resolved?: boolean;
+  alternatives?: string[];
+} {
   if (!props) return {};
   const parsed = JSON.parse(props) as { confidence?: number; resolved?: boolean };
-  const out: { confidence?: number; resolved?: boolean } = {};
+  const out: { confidence?: number; resolved?: boolean; alternatives?: string[] } = {};
   if (typeof parsed.confidence === "number") out.confidence = parsed.confidence;
   if (typeof parsed.resolved === "boolean") out.resolved = parsed.resolved;
+  const alternatives = (parsed as { alternatives?: unknown }).alternatives;
+  if (Array.isArray(alternatives) && alternatives.length > 0) {
+    out.alternatives = alternatives.filter((id): id is string => typeof id === "string");
+  }
   return out;
 }

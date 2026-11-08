@@ -532,6 +532,9 @@ export function buildCallEdges(
           resolved: true,
           confidence: Math.round(rc.confidence * 100) / 100,
           reason: rc.reason,
+          ...(rc.alternatives && rc.alternatives.length > 0
+            ? { alternatives: rc.alternatives }
+            : {}),
           ...flowProps,
           ...flowKind,
         },
