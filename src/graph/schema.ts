@@ -43,6 +43,7 @@ export const EDGE_KINDS = [
   "REFLECTS",
   "INJECTS",
   "ROUTES",
+  "EMITS",
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
@@ -115,7 +116,7 @@ export interface EdgeProperties {
   guards?: string[];
   /** For CALLS/IMPORTS: the target is outside the crawled source tree. */
   external?: boolean;
-  /** For INJECTS: framework that performs the injection. */
+  /** For INJECTS/EMITS: framework that performs the injection or delivers the event. */
   framework?: string;
   /** For REFLECTS: the run-time lookup mechanism (`Class.forName`, `getattr`). */
   mechanism?: string;
@@ -125,6 +126,12 @@ export interface EdgeProperties {
   entryPointDetail?: string;
   /** For INJECTS: injected field/parameter name. */
   injectedName?: string;
+  /** For EMITS: the event class or topic that joins publisher to listener. */
+  channel?: string;
+  /** For EMITS: whether `channel` is an event type or a message topic. */
+  channelKind?: string;
+  /** For EMITS: transaction phase a listener only runs in (`AFTER_COMMIT`, ...). */
+  phase?: string;
   /** For IMPORTS/REFERENCES: imported member name. */
   member?: string;
   /** Free-form language-specific metadata. */

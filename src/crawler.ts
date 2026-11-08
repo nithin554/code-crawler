@@ -10,6 +10,7 @@ import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/langua
 import { getLanguageConfig, languageForFile } from "./parser/languages/index.js";
 import { isConstructorMethodId, ownerTypeOfMethodId } from "./parser/methodId.js";
 import { aliasSignature, readTsconfigAliases } from "./parser/tsPaths.js";
+import { buildChannelEdges } from "./resolver/channels.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
@@ -105,6 +106,8 @@ export interface CrawlResult {
   externalDependencies: number;
   /** Route registrations mapped to handler methods. */
   routes: number;
+  /** Publication-to-listener edges (events, topics, queues). */
+  eventFlows: number;
   languages: string[];
   durationMs: number;
 }
@@ -1062,6 +1065,7 @@ export async function crawlProject(
   let dynamicDispatchCount = 0;
   let adviceCount = 0;
   let aspectCount = 0;
+  let eventFlows = 0;
 
   // Every resolved call edge across the project, used to derive virtual
   // dispatch edges once the whole type hierarchy is known.
@@ -1232,12 +1236,13 @@ export async function crawlProject(
       store.markEntryPoint(id, mark.kind, mark.detail ?? mark.kind);
     }
 
-    // Rebuild project-wide derived edges: virtual dispatch, AOP advice and
-    // injection. Nothing changed, so the existing derived edges are still
-    // correct. Injection is rebuilt here because a dependency alias declared in
-    // one module retargets an edge owned by another, unchanged module.
+    // Rebuild project-wide derived edges: virtual dispatch, AOP advice,
+    // injection and event wiring. Nothing changed, so the existing derived
+    // edges are still correct. Injection and events are rebuilt here because a
+    // dependency alias in one module retargets an edge owned by another, and a
+    // listener anywhere in the project changes a publisher's outbound set.
     if (changedPaths.size > 0 || filesRemoved > 0) {
-      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES", "INJECTS"]);
+      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES", "INJECTS", "EMITS"]);
       const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
       store.upsertEdges(dynamic.edges);
 
@@ -1250,6 +1255,10 @@ export async function crawlProject(
         }
       }
       store.upsertEdges(injectionEdges);
+
+      const channels = buildChannelEdges(parsedFiles, allNodeIds);
+      store.upsertEdges(channels.edges);
+      eventFlows = channels.count;
 
       dynamicDispatchCount = dynamic.dispatchCount;
       adviceCount = dynamic.adviceCount;
@@ -1292,6 +1301,7 @@ export async function crawlProject(
     reflections: totalReflections,
     externalDependencies: externalDeps.size,
     routes: totalRoutes,
+    eventFlows,
     languages: [...new Set(parsedFiles.map((p) => p.language))],
     durationMs: Date.now() - started,
   };

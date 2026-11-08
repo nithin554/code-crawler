@@ -188,11 +188,27 @@ describe("dynamic tracing tools", () => {
       callers: { caller: { qualifiedName: string } }[];
       edgesFollowed: string[];
       includeDynamic: boolean;
-    }>("get_callers", { symbol: "com.acme.UpiPayment#pay", include_dynamic: false });
+    }>("get_callers", {
+      symbol: "com.acme.UpiPayment#pay",
+      include_dynamic: false,
+      include_events: false,
+    });
 
     expect(r.includeDynamic).toBe(false);
     expect(r.edgesFollowed).toEqual(["CALLS"]);
     expect(r.callers.map((c) => c.caller.qualifiedName)).not.toContain("com.acme.Payment#pay");
+  });
+
+  it("get_callers follows framework events unless they are excluded", async () => {
+    const symbol = "com.acme.UpiPayment#pay";
+    const byDefault = await callTool<{ edgesFollowed: string[] }>("get_callers", { symbol });
+    const excluded = await callTool<{ edgesFollowed: string[] }>("get_callers", {
+      symbol,
+      include_events: false,
+    });
+
+    expect(byDefault.edgesFollowed).toContain("EMITS");
+    expect(excluded.edgesFollowed).not.toContain("EMITS");
   });
 
   it("get_callers agrees with find_dead_code on a dispatched target", async () => {

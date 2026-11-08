@@ -19,6 +19,7 @@ import {
   externalDependencies,
   findAnnotated,
   findEntryPoints,
+  findEventFlows,
   findImplementations,
   findInjections,
   findReflections,
@@ -370,7 +371,7 @@ export function createServer(
 
   tool(
     "get_callers",
-    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch edges by default, because a method reached only through dispatch is still called; pass include_dynamic: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence.",
+    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch and framework event edges by default, because a method reached only through either one is still called; pass include_dynamic: false and include_events: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callers (default true)."),
@@ -384,6 +385,12 @@ export function createServer(
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callers returned."),
       ...budgetParams,
@@ -393,6 +400,7 @@ export function createServer(
       transitive,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -402,6 +410,7 @@ export function createServer(
         transitive,
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -437,7 +446,7 @@ export function createServer(
 
   tool(
     "get_callees",
-    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Follows virtual/interface dispatch targets by default; pass include_dynamic: false for a static-only view. Each callee reports the edge kind and, when the edge has one, its confidence.",
+    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Follows virtual/interface dispatch and framework event edges by default; pass include_dynamic: false and include_events: false for a static-only view. Each callee reports the edge kind and, when the edge has one, its confidence.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callees (default true)."),
@@ -451,6 +460,12 @@ export function createServer(
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callees returned."),
       ...budgetParams,
@@ -460,6 +475,7 @@ export function createServer(
       transitive,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -469,6 +485,7 @@ export function createServer(
         transitive,
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -504,7 +521,7 @@ export function createServer(
 
   tool(
     "trace_path",
-    "Find call paths between two symbols. Follows static CALLS and virtual/interface dispatch edges by default, so the path reflects what can actually run; pass include_dynamic: false for static edges only. Each hop reports its edge kind and confidence.",
+    "Find call paths between two symbols. Follows static CALLS, virtual/interface dispatch and framework event edges by default, so the path reflects what can actually run; pass include_dynamic: false and include_events: false for static edges only. Each hop reports its edge kind and confidence.",
     {
       source: z.string().describe("Starting symbol id or qualified name."),
       target: z.string().describe("Destination symbol id or qualified name."),
@@ -518,6 +535,12 @@ export function createServer(
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Maximum path length."),
       limit: z
         .number()
@@ -533,6 +556,7 @@ export function createServer(
       target,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -541,6 +565,7 @@ export function createServer(
       const paths = tracePath(store, source, target, {
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -934,6 +959,33 @@ export function createServer(
   );
 
   tool(
+    "find_event_flows",
+    "Join event and message publications to the listeners that receive them (`publishEvent` -> `@EventListener`, `KafkaTemplate.send` -> `@KafkaListener`, `emit` -> `@OnEvent`). This is the edge static call graphs miss: the publisher never names the listener. `confidence` is 1 for a fully-qualified event match and 0.85 for a literal topic, where the same name can belong to another broker. A `phase` means the listener only runs at that transaction phase.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Restrict to a single publishing or listening symbol id/qualified name."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
+    },
+    async ({ symbol, limit, max_tokens, cursor }) => {
+      const results = findEventFlows(store, { symbol, limit });
+      const flows = results.map((e) => ({
+        source: ref(e.source),
+        listener: ref(e.target),
+        ...(e.channel ? { channel: e.channel } : {}),
+        ...(e.channelKind ? { channelKind: e.channelKind } : {}),
+        ...(e.framework ? { framework: e.framework } : {}),
+        ...(e.phase ? { phase: e.phase } : {}),
+        ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
+        ...(e.line !== undefined ? { line: line(e.line) } : {}),
+      }));
+      return text(paged({ count: flows.length, flows }, "flows", flows, { max_tokens, cursor }));
+    }
+  );
+
+  tool(
     "find_external_dependencies",
     "Summarize third-party packages the crawled source imports, with reference and file counts. External libraries are modelled as package-level nodes: the crawler records the dependency, not the library's internals.",
     {
@@ -1057,7 +1109,7 @@ export function createServer(
 
   tool(
     "impact_analysis",
-    "One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol, HTTP routes that serve it, and overriding implementations. Analysing a type aggregates the callers of all its methods. Returns a heuristic risk band: high when a framework entry point reaches the symbol, medium when it has direct callers, low otherwise.",
+    "One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol, HTTP routes that serve it, events it publishes or listens to, and overriding implementations. Analysing a type aggregates the callers of all its methods. Returns a heuristic risk band: high when a framework entry point reaches the symbol, medium when it has direct callers, low otherwise.",
     {
       symbol: z.string().describe("Symbol id or qualified name."),
       max_depth: z
@@ -1102,6 +1154,7 @@ export function createServer(
           viaDepth: e.viaDepth,
         })),
         routes: result.routes.map(wiring),
+        eventFlows: result.eventFlows.map(wiring),
         implementations: result.implementations.map((i) => ({
           type: ref(i.type),
           ...(i.method ? { method: ref(i.method) } : {}),
@@ -1313,6 +1366,8 @@ export function createServer(
                 INJECTS: "injecting symbol -> injected type, from DI/framework wiring.",
                 REFLECTS: "looking-up symbol -> resolved target, from reflection/dynamic import.",
                 ROUTES: "registering symbol -> handler symbol, with HTTP verb and path.",
+                EMITS:
+                  "publisher symbol -> listener symbol, joined on event class or message topic.",
                 ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
               },
             },

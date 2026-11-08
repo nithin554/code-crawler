@@ -427,6 +427,7 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 | `find_dead_code` | Methods with no incoming call/dispatch/advice edges |
 | `find_entry_points` | Framework-invoked roots: HTTP routes, listeners, schedulers, CLI mains, tests |
 | `find_routes` | HTTP route → handler mappings (`@GetMapping`, NestJS, FastAPI, Express) |
+| `find_event_flows` | Publisher → listener wiring: Spring events, Kafka/JMS, `@OnEvent` |
 | `find_injections` | DI-supplied dependencies (`@Autowired`, NestJS, FastAPI `Depends`) |
 | `find_reflections` | Run-time lookups: `Class.forName`, `getattr`, `importlib`, dynamic `import()` |
 | `find_external_dependencies` | Third-party packages with reference and file counts |
@@ -442,7 +443,7 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 **Resources**: `codecrawler://schema`, `codecrawler://status`
 **Prompt**: `trace-call-path(from, to)`
 
-**Token budgeting.** The 18 list-returning query tools — every tool whose payload is a
+**Token budgeting.** The 19 list-returning query tools — every tool whose payload is a
 single result list — accept `max_tokens` (100–200000) and `cursor`. Passing either adds a
 `page` block with `totalCount`, `returnedCount`, `truncated`, `estimatedTokens`, and
 `nextCursor`; omit both and the response shape is unchanged, so existing clients keep
@@ -460,7 +461,7 @@ budget.
 
 The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`
 ships in the npm package and is plain Markdown — `SKILL.md` for discovery and the
-crawl-first workflow, `reference/tools.md` mapping all 27 tools to the questions they
+crawl-first workflow, `reference/tools.md` mapping all 28 tools to the questions they
 answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
 nodes.
 
@@ -486,10 +487,11 @@ blob (signature, modifiers, lines, annotations, ...).
 
 **Edges** — `kind` is one of `CALLS | DECLARED_IN | CONTAINS | IMPLEMENTS | EXTENDS |
 IMPORTS | REFERENCES | DYNAMIC_DISPATCH | ADVISES | ANNOTATED_WITH | REFLECTS | INJECTS |
-ROUTES`. `CALLS` edges carry `line`, `resolved`, `confidence`, and — when the call sits
+ROUTES | EMITS`. `CALLS` edges carry `line`, `resolved`, `confidence`, and — when the call sits
 behind control flow — `conditional`, `controlFlow`, and `guards`; `ANNOTATED_WITH` edges
 carry `line` and `arguments`; `ADVISES` edges carry `adviceKind` and the resolved
-`pointcut`; `INJECTS` carries `injectedName` and `framework`; `REFLECTS` carries
+`pointcut`; `INJECTS` carries `injectedName` and `framework`; `EMITS` carries `channel`,
+`channelKind`, `framework`, and for transactional listeners `phase`; `REFLECTS` carries
 `mechanism`; `REFERENCES` carries `external`.
 
 Id scheme:
@@ -625,6 +627,28 @@ analysis honest and gives `trace_execution` a root (`find_entry_points`, `find_r
 Express handlers written inline get a synthetic method node
 (`module:src.routes#<anonymous@7>`) so their body still gets call edges, containment, and
 a route edge.
+
+### Event and message flows
+
+A listener is called by the framework, not by the publisher, so no `CALLS` edge joins
+them. `EMITS` joins them by the channel they share (`find_event_flows`, and by default in
+`get_callers`, `get_callees`, `trace_path`):
+
+| Framework | Publication | Listener | Channel |
+| --- | --- | --- | --- |
+| Spring events | `applicationEventPublisher.publishEvent(new OrderPlaced(...))` | `@EventListener` | the event class |
+| Spring transactional events | as above | `@TransactionalEventListener` | the event class, plus `phase` |
+| Kafka | `kafkaTemplate.send("orders", ...)` | `@KafkaListener(topics = "orders")` | `"orders"` |
+| JMS | `jmsTemplate.convertAndSend("queue.billing", ...)` | `@JmsListener(destination = "queue.billing")` | `"queue.billing"` |
+| NestJS | `this.eventEmitter.emit("order.placed", ...)` | `@OnEvent("order.placed")` | `"order.placed"` |
+
+`confidence` is `1` when both sides resolved a fully-qualified event type — the same class by
+identity, which is why `InvoiceService` publishing `billing.InvoicePaid` does not reach a
+listener for `legacy.InvoicePaid` — and `0.85` for a literal topic or queue, where the same
+name can belong to a different broker. Only a constructed event or a literal topic names a
+channel: a run-time-computed destination, or a published plain parameter, produces no edge
+instead of a guess. A `@TransactionalEventListener`'s `phase` says *when* the listener runs,
+not whether the edge exists; an `AFTER_ROLLBACK` listener does not run on the happy path.
 
 ### Control flow on call edges
 

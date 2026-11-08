@@ -61,13 +61,23 @@ export interface DynamicEdgeOptions {
   includeDynamic?: boolean;
   /** Follow ADVISES edges (aspect advice -> advised method). */
   includeAdvice?: boolean;
+  /** Follow EMITS edges (publication -> listener). Default true. */
+  includeEvents?: boolean;
 }
 
-/** Edge kinds a traversal should follow, ordered from most to least certain. */
+/**
+ * Edge kinds a traversal should follow, ordered from most to least certain.
+ *
+ * EMITS is followed by default: a listener reached only through an event is
+ * still called, so omitting the edge turns "what runs on this endpoint" into a
+ * confident false negative. Advice is opt-in because callers of a method do not
+ * usually want the aspects wrapped around it.
+ */
 export function traversalEdgeKinds(opts: DynamicEdgeOptions = {}): EdgeKind[] {
   const kinds: EdgeKind[] = ["CALLS"];
   if (opts.includeDynamic) kinds.push("DYNAMIC_DISPATCH");
   if (opts.includeAdvice) kinds.push("ADVISES");
+  if (opts.includeEvents ?? true) kinds.push("EMITS");
   return kinds;
 }
 
@@ -109,6 +119,7 @@ export function getCallers(
   edgesFollowed: EdgeKind[];
   includeDynamic: boolean;
   includeAdvice: boolean;
+  includeEvents: boolean;
 } | null {
   const target = resolveNode(store, symbol);
   if (!target) return null;
@@ -118,8 +129,9 @@ export function getCallers(
   const limit = opts.limit ?? 100;
   const includeDynamic = opts.includeDynamic ?? true;
   const includeAdvice = opts.includeAdvice ?? false;
-  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice });
-  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice };
+  const includeEvents = opts.includeEvents ?? true;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice, includeEvents });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice, includeEvents };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -217,6 +229,7 @@ export function getCallees(
   edgesFollowed: EdgeKind[];
   includeDynamic: boolean;
   includeAdvice: boolean;
+  includeEvents: boolean;
 } | null {
   const source = resolveNode(store, symbol);
   if (!source) return null;
@@ -226,8 +239,9 @@ export function getCallees(
   const limit = opts.limit ?? 100;
   const includeDynamic = opts.includeDynamic ?? true;
   const includeAdvice = opts.includeAdvice ?? false;
-  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice });
-  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice };
+  const includeEvents = opts.includeEvents ?? true;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice, includeEvents });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice, includeEvents };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -334,6 +348,7 @@ export function tracePath(
     traversalEdgeKinds({
       includeDynamic: opts.includeDynamic ?? true,
       includeAdvice: opts.includeAdvice ?? false,
+      includeEvents: opts.includeEvents ?? true,
     })
   );
 
@@ -1148,6 +1163,14 @@ export interface WiringEdge {
   /** ROUTES: HTTP verb and path. */
   httpMethod?: string;
   path?: string;
+  /** EMITS: the event class or topic joining publisher to listener. */
+  channel?: string;
+  /** EMITS: `event-class` or `topic`. */
+  channelKind?: string;
+  /** EMITS: transaction phase that gates the listener. */
+  phase?: string;
+  /** EMITS: confidence in the target identity. */
+  confidence?: number;
 }
 
 function wiringEdges(
@@ -1181,6 +1204,10 @@ function wiringEdges(
       mechanism?: string;
       httpMethod?: string;
       path?: string;
+      channel?: string;
+      channelKind?: string;
+      phase?: string;
+      confidence?: number;
     };
     return {
       source: rowToRef({
@@ -1204,6 +1231,10 @@ function wiringEdges(
       ...(props.mechanism ? { mechanism: props.mechanism } : {}),
       ...(props.httpMethod ? { httpMethod: props.httpMethod } : {}),
       ...(props.path ? { path: props.path } : {}),
+      ...(props.channel ? { channel: props.channel } : {}),
+      ...(props.channelKind ? { channelKind: props.channelKind } : {}),
+      ...(props.phase ? { phase: props.phase } : {}),
+      ...(typeof props.confidence === "number" ? { confidence: props.confidence } : {}),
     };
   });
 }
@@ -1230,6 +1261,20 @@ export function findRoutes(
   opts: { symbol?: string; limit?: number } = {}
 ): WiringEdge[] {
   return wiringEdges(store, "ROUTES", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
+}
+
+/**
+ * Publications joined to the listeners that receive them.
+ *
+ * An EMITS edge asserts that a listener is a candidate consumer of a
+ * publication, not that it always runs: a transaction-gated listener only fires
+ * inside a committed transaction, and the `phase` property says which.
+ */
+export function findEventFlows(
+  store: GraphStore,
+  opts: { symbol?: string; limit?: number } = {}
+): WiringEdge[] {
+  return wiringEdges(store, "EMITS", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
 }
 
 export interface ExternalDependency {

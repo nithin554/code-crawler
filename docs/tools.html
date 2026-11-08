@@ -8,14 +8,14 @@
     <title>Tool reference — Code-Crawler</title>
     <meta
       name="description"
-      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 28 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Tool reference — Code-Crawler" />
     <meta
       property="og:description"
-      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for all 28 Code-Crawler MCP tools: arguments, response shape, and usage examples."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/tools.html" />
     <meta name="twitter:card" content="summary" />
@@ -50,7 +50,7 @@
           <span class="eyebrow">Reference</span>
           <h1>Tool reference</h1>
           <p class="lead">
-            All 27 MCP tools with their arguments, response shape, and a working call. Every
+            All 28 MCP tools with their arguments, response shape, and a working call. Every
             tool returns structured JSON.
           </p>
           <div class="toc">
@@ -100,7 +100,7 @@
             <div class="card">
               <h3>Token budgets</h3>
               <p>
-                The 18 list-returning query tools accept <code>max_tokens</code> (100–200000) and
+                The 19 list-returning query tools accept <code>max_tokens</code> (100–200000) and
                 <code>cursor</code>. Passing either adds a <code>page</code> block with
                 <code>totalCount</code>, <code>returnedCount</code>, <code>truncated</code>,
                 <code>estimatedTokens</code> and <code>nextCursor</code>; omit both and the
@@ -605,6 +605,39 @@
                 traceable.
               </p>
               <pre><code>find_routes({ method: "POST", framework: "nestjs" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>find_event_flows</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Publisher → listener wiring, as <code>EMITS</code> edges.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>no</td><td>Restrict to one publishing or listening symbol.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max flows, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Joins <code>publishEvent</code> to <code>@EventListener</code>,
+                <code>KafkaTemplate.send</code> to <code>@KafkaListener</code>,
+                <code>JmsTemplate</code> to <code>@JmsListener</code>, and <code>emit</code> to
+                <code>@OnEvent</code>. The publisher never names the listener, so no
+                <code>CALLS</code> edge exists between them. Each flow carries
+                <code>channel</code>, <code>channelKind</code> (<code>event-class</code> or
+                <code>topic</code>), <code>framework</code>, and <code>confidence</code>:
+                <code>1</code> for a fully-qualified event type, <code>0.85</code> for a
+                literal topic, where the same name can belong to another broker. A
+                <code>phase</code> means the listener only runs at that transaction phase.
+                Channels known only at run time produce no edge.
+              </p>
+              <pre><code>find_event_flows({ symbol: "com.acme.events.OrderPublisher#place" })</code></pre>
             </div>
           </div>
 

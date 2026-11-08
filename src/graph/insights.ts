@@ -10,6 +10,7 @@ import {
   type DecoratorInfo,
   edgeLine,
   findEntryPoints,
+  findEventFlows,
   findImplementations,
   findInjections,
   findReflections,
@@ -254,6 +255,7 @@ export interface ImpactSummary {
   directCallers: number;
   entryPoints: number;
   routes: number;
+  eventFlows: number;
   implementations: number;
   affectedFiles: number;
   /**
@@ -269,6 +271,7 @@ export interface ImpactAnalysis {
   callers: ImpactCaller[];
   entryPoints: { symbol: SymbolRef; entryPointKind: string; detail?: string; viaDepth?: number }[];
   routes: WiringEdge[];
+  eventFlows: WiringEdge[];
   implementations: ImpactImplementation[];
   affectedFiles: string[];
 }
@@ -389,6 +392,10 @@ export function impactAnalysis(
   const targetSet = new Set(targets);
   const routeRows = findRoutes(store, { limit: 10000 });
   const routes = routeRows.filter((r) => targetSet.has(r.target.id) || targetSet.has(r.source.id));
+  const flowRows = findEventFlows(store, { limit: 10000 });
+  const eventFlows = flowRows.filter(
+    (f) => targetSet.has(f.source.id) || targetSet.has(f.target.id)
+  );
 
   const files = new Set<string>();
   if (node.filePath) files.add(node.filePath);
@@ -406,6 +413,7 @@ export function impactAnalysis(
       directCallers,
       entryPoints: entryPoints.length,
       routes: routes.length,
+      eventFlows: eventFlows.length,
       implementations: implementations.length,
       affectedFiles: files.size,
       risk,
@@ -413,6 +421,7 @@ export function impactAnalysis(
     callers,
     entryPoints,
     routes,
+    eventFlows,
     implementations,
     affectedFiles: [...files].sort(),
   };

@@ -1,6 +1,6 @@
 # Tool reference
 
-All 27 tools, grouped by the question they answer. Run `index_status` before trusting any
+All 28 tools, grouped by the question they answer. Run `index_status` before trusting any
 result, and `crawl_project` before that if the index is empty.
 
 ## Orientation
@@ -72,6 +72,7 @@ These tools exist because the call graph alone cannot see how a framework invoke
 | --- | --- | --- |
 | `find_entry_points` | "Where does this system begin?" | `kind` |
 | `find_routes` | You want HTTP route to handler mappings | `framework` |
+| `find_event_flows` | You want publisher to listener (events, Kafka/JMS topics, `@OnEvent`) | `symbol` |
 | `find_injections` | You want DI-supplied dependencies | `framework` |
 | `find_annotated` | You want every symbol carrying one annotation | `annotation` |
 | `get_decorators` | You want the decorators on one symbol | `id`, `includeMembers` |

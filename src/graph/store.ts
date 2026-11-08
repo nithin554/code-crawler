@@ -123,7 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_entry_point
  * introduced are stamped at this version when first opened, because the schema
  * is already idempotent.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 interface Migration {
   version: number;
@@ -152,6 +152,20 @@ const MIGRATIONS: Migration[] = [
       db.exec(QUERY_INDEXES);
       db.exec(FTS_SCHEMA);
       // Populate the FTS index from existing content (no-op on a fresh DB).
+      db.exec("INSERT INTO nodes_fts (nodes_fts) VALUES ('rebuild')");
+    },
+  },
+  {
+    version: 4,
+    up(db) {
+      // `EMITS` edges join a publication to every listener on its channel, and
+      // that join only exists once the whole project is parsed. A crawl that
+      // finds nothing changed legitimately keeps existing derived edges, so an
+      // index written before this version would never gain them. Emptying the
+      // graph forces the next crawl to rebuild everything from source, which is
+      // also the only way to be sure no node outlives a file deleted before the
+      // upgrade (nodes carry no foreign key to files).
+      db.exec("DELETE FROM edges; DELETE FROM nodes; DELETE FROM files;");
       db.exec("INSERT INTO nodes_fts (nodes_fts) VALUES ('rebuild')");
     },
   },

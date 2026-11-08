@@ -243,7 +243,7 @@ is the whole install.
 
 `SKILL.md` carries the discovery `description`, the client config above, the
 one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps all
-27 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
+28 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
 `external`, and phantom nodes, which are the three things agents misread most.
 
 ### Installing the plugin
@@ -363,7 +363,7 @@ flowchart TD
    include `resolved`, `confidence`, and `reason` on each edge.
 5. **`trace_execution`** — follow *runtime* order from a root: virtual dispatch fans out to
    overrides, and aspect advice is woven in at the right position.
-6. **`find_routes`, `find_injections`, `find_reflections`,
+6. **`find_routes`, `find_injections`, `find_event_flows`, `find_reflections`,
    `find_external_dependencies`** — map the wiring that no call graph can see.
 7. **`find_hotspots` / `find_dead_code`** — prioritise and prune.
 
@@ -387,6 +387,27 @@ trace_execution(symbol: "src.controller.OrderController#create", depth: 4)
 
 The route tells you the entry point; `trace_execution` tells you the reachable set with
 dispatch and advice applied.
+
+### "Who reacts when this publishes an event?"
+
+```text
+find_event_flows(symbol: "com.acme.events.OrderPublisher#place")
+```
+
+The publisher never names the listener, so no `CALLS` edge joins them — the framework
+makes that call. Each flow names the shared `channel` and its `confidence`:
+
+| Source | Listener | channel | channelKind | confidence |
+| --- | --- | --- | --- | --- |
+| `OrderPublisher#place` | `OrderListeners#onPlaced` | `OrderPlaced` | `event-class` | `1` |
+| `OrderPublisher#place` | `AuditListener#onPlaced` | `OrderPlaced` | `event-class` | `1` (phase `AFTER_COMMIT`) |
+| `OrderMessaging#publishOrder` | `OrderConsumers#consumeOrder` | `orders` | `topic` | `0.85` |
+
+`confidence` is `1` when both sides resolved a fully-qualified event type (the same class,
+by identity) and `0.85` for a literal topic or queue, where the same name could belong to a
+different broker. A channel computed at run time, or a published plain parameter, produces
+no edge at all rather than a guess. Event edges are followed by `get_callers`,
+`get_callees`, and `trace_path` by default; pass `include_events: false` to ignore them.
 
 ### "What breaks if I change this method?"
 
@@ -487,7 +508,7 @@ before it, overloads collapsed into one node and the last one indexed won.
 ### Edge kinds
 
 `CALLS`, `DECLARED_IN`, `CONTAINS`, `IMPLEMENTS`, `EXTENDS`, `IMPORTS`, `REFERENCES`,
-`DYNAMIC_DISPATCH`, `ADVISES`, `ANNOTATED_WITH`, `REFLECTS`, `INJECTS`, `ROUTES`.
+`DYNAMIC_DISPATCH`, `ADVISES`, `ANNOTATED_WITH`, `REFLECTS`, `INJECTS`, `ROUTES`, `EMITS`.
 
 `CALLS` edges are enriched:
 

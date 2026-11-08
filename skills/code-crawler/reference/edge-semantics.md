@@ -20,8 +20,9 @@ nodes. Read this before reporting "no callers", "dead code", or "unresolved".
 | `REFLECTS` | A runtime lookup that may reach a symbol |
 | `INJECTS` | A DI-supplied dependency: a field or parameter the container fills |
 | `ROUTES` | An HTTP route to its handler |
+| `EMITS` | A published event or message to the listener it feeds |
 
-A method reached only by `DYNAMIC_DISPATCH`, `ADVISES`, or `ROUTES` **is still called**.
+A method reached only by `DYNAMIC_DISPATCH`, `ADVISES`, `ROUTES`, or `EMITS` **is still called**.
 When asking "who calls this", look at all inbound edge kinds, not just `CALLS`.
 
 Spring wiring is usually not annotated. The sole constructor of a `@Service` is autowired
@@ -39,6 +40,23 @@ populates** - a constructor's type, or the function whose parameters are filled 
 Depends(get_service)` is an edge to `get_service`, not to `OrderService`: the container
 invokes `get_service` and passes back whatever it returns.
 
+Spring's event bus and messaging brokers are the same shape, with `EMITS`: the **source is
+the publisher method** (the one that hands a message to the framework) and the **target is
+the listener the framework then calls**. `OrderPublisher#place` publishing `OrderPlaced`
+emits to every `@EventListener` for `OrderPlaced`; a Kafka `send("orders")` emits to every
+`@KafkaListener(topics = "orders")`. This edge is the only link between the two - no
+`CALLS` edge ever joins them, because the framework, not the code, makes the call. Turn it
+off with `include_events: false` on `get_callers`, `get_callees`, and `trace_path`.
+
+Only two things name a channel: a constructed event object (`new OrderPlaced(...)`, or a
+local whose declared type is the event) and a literal topic/queue/destination string. A
+channel computed at run time, or a published plain parameter, produces no edge - it is
+reported as absent rather than guessed. An `EMITS` edge carries `channel`, `channelKind`
+(`event-class` or `topic`), and `framework`. A `@TransactionalEventListener` additionally
+carries `phase` (`BEFORE_COMMIT`, `AFTER_COMMIT`, `AFTER_ROLLBACK`, `AFTER_COMPLETION`):
+that says *when* the listener runs, not whether the edge exists, so it does not lower
+confidence - but an `AFTER_ROLLBACK` listener will not run on the happy path.
+
 ## `confidence` is a band, not a probability
 
 Do not average it, threshold it, or present it as certainty. It is a coarse label telling
@@ -46,9 +64,9 @@ you *what kind of evidence* produced the edge.
 
 | Value | Evidence |
 | --- | --- |
-| `1.0` | Resolved by construction - a constructor or overload matched exactly |
+| `1.0` | Resolved by construction - a constructor, overload, or event type matched exactly |
 | `0.9` | Same-module declaration, typed local, or default constructor |
-| `0.85` | Imported from a named module |
+| `0.85` | Imported from a named module, or a literal topic/queue name |
 | `0.8` | Inherited from a supertype, or an external target |
 | `0.75` | Call to an imported class resolved through its import |
 | `0.6` | Pointcut `args(...)` matched on arity only |
@@ -94,7 +112,9 @@ Five ways a real caller produces no inbound `CALLS` edge:
 2. **Dynamic dispatch.** The call goes through an interface; look for
    `DYNAMIC_DISPATCH` inbound edges and use `find_implementations`.
 3. **Framework invocation.** Routes, listeners, schedulers, and tests are entry points,
-   not calls. Check `find_entry_points` and `find_routes`.
+   not calls. Check `find_entry_points` and `find_routes`. A listener is reached from its
+   publisher by `EMITS` - if the publisher is outside the index, the only inbound edge is
+   missing, so check `find_event_flows` for the inbound side of a channel.
 4. **Reflection.** `Class.forName`, `getattr`, `importlib`, and dynamic `import()` produce
    `REFLECTS` edges, not `CALLS`. Check `find_reflections`.
 5. **The caller is external.** Only in-project call edges are recorded. Check

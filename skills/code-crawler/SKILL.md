@@ -15,7 +15,7 @@ metadata:
 
 # Code Crawler
 
-A SQLite property graph of a codebase, exposed as 27 MCP tools. The graph is built
+A SQLite property graph of a codebase, exposed as 28 MCP tools. The graph is built
 once by a crawl, then queried cheaply many times.
 
 ## Getting the tools
@@ -178,7 +178,7 @@ Short version:
 
 ## Reference
 
-- [reference/tools.md](reference/tools.md) - all 27 tools, grouped by the question they
+- [reference/tools.md](reference/tools.md) - all 28 tools, grouped by the question they
   answer, with the argument that matters most for each.
 - [reference/edge-semantics.md](reference/edge-semantics.md) - `confidence`, `external`,
   phantom nodes, and the ways a "missing" edge is legitimate.

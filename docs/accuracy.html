@@ -546,17 +546,22 @@
           </div>
 
           <div class="card">
-            <h3>1. Framework wiring outside routes and injection is not modelled</h3>
+            <h3>1. Framework wiring is modelled one edge kind at a time, and most of it is left</h3>
             <p>
-              The benchmark covers four edge kinds. The wiring that breaks static-only graphs most
-              badly — event publication to listeners, Kafka/Pub-Sub/JMS producers to consumers,
-              proxy boundaries from <code>@Transactional</code>, <code>@Async</code> and
+              The benchmark covers four edge kinds. Of the wiring that breaks static-only graphs
+              most badly, only event and messaging publication is modelled so far
+              (<code>EMITS</code>: Spring <code>@EventListener</code> and
+              <code>@TransactionalEventListener</code>, Kafka, JMS, NestJS <code>@OnEvent</code>,
+              with a confidence rule per channel kind). Still producing no edge at all: Pub/Sub and
+              RabbitMQ, proxy boundaries from <code>@Transactional</code>, <code>@Async</code> and
               <code>@Cacheable</code>, Spring Data repository derivation, <code>@Bean</code> factory
-              methods, <code>@Qualifier</code>/<code>@Primary</code> disambiguation — produces no
-              edge at all. None of it is in the 69 labelled cases either, which is why this table
-              can be perfect and the graph still not answer "what runs when this message is
-              published". Modelling it is the next phase of work, one edge kind at a time with a
-              fixture, positive and negative tests, a confidence rule and a doc entry each.
+              methods, <code>@Qualifier</code>/<code>@Primary</code> disambiguation, and
+              <code>@Scheduled</code>/<code>@Async</code> re-entry. <code>EMITS</code> is also not
+              among the 69 labelled cases, and the four benchmark projects turn out to contain no
+              event or messaging wiring at all (0 <code>EMITS</code> edges across all four), so it is
+              verified by fixture tests only rather than measured. Adding a fifth project with
+              published events, and the remaining wiring, is the next step: one edge kind at a time,
+              with a fixture, positive and negative tests, a confidence rule and a doc entry each.
             </p>
           </div>
 
@@ -591,8 +596,9 @@
               <code>__unknown__</code> marker, for example
               <code>Repository&lt;ArticleEntity&gt;.save</code> in the NestJS project. This is the
               correct trade — the tool does not have TypeORM's bytecode — but it means the graph
-              stops at the framework boundary. Event, messaging and proxy wiring that crosses that
-              boundary is not modelled at all.
+              stops at the framework boundary. Event and messaging wiring that crosses that
+              boundary is only modelled when both the publisher's call and the listener's
+              annotation are in index; proxy wiring still is not.
             </p>
           </div>
 
