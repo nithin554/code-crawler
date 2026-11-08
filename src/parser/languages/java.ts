@@ -759,7 +759,12 @@ function reflectionOf(
     const target = unquote(info.args[0] ?? "");
     return target ? { ...base, mechanism: "ServiceLoader.load", targetKind: "type", target } : null;
   }
-  const spec = REFLECTIVE_METHODS[info.name];
+  // `REFLECTIVE_METHODS` is a plain object, so an unguarded index finds
+  // `Object.prototype.toString`/`valueOf`/`constructor` for ordinary calls like
+  // `id.toString()`. Only own keys are reflective mechanisms.
+  const spec = Object.hasOwn(REFLECTIVE_METHODS, info.name)
+    ? REFLECTIVE_METHODS[info.name]
+    : undefined;
   if (!spec || info.receiver === null) return null;
   if (
     spec.mechanism.startsWith("Class.getConstructor") ||
