@@ -88,7 +88,11 @@ function readJson<T>(file: string): T {
 }
 
 function git(args: string[], cwd?: string): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 /** Clone `spec` at its pinned commit into the cache, or verify the cached copy. */
@@ -106,7 +110,8 @@ function ensureProject(spec: ProjectSpec): string {
   git(["fetch", "--quiet", "--depth", "1", "origin", spec.commit], dir);
   git(["checkout", "--quiet", "FETCH_HEAD"], dir);
   const head = git(["rev-parse", "HEAD"], dir);
-  if (head !== spec.commit) throw new Error(`${spec.name}: checked out ${head}, expected ${spec.commit}`);
+  if (head !== spec.commit)
+    throw new Error(`${spec.name}: checked out ${head}, expected ${spec.commit}`);
   return dir;
 }
 
@@ -172,7 +177,10 @@ function findEdge(
 }
 
 function nodeExists(store: GraphStore, qualifiedName: string): boolean {
-  return store.raw("SELECT 1 AS ok FROM nodes WHERE qualified_name = ? LIMIT 1", qualifiedName).length > 0;
+  return (
+    store.raw("SELECT 1 AS ok FROM nodes WHERE qualified_name = ? LIMIT 1", qualifiedName).length >
+    0
+  );
 }
 
 function evaluate(store: GraphStore, project: string, language: string, c: BenchCase): Outcome {
@@ -208,7 +216,8 @@ function evaluate(store: GraphStore, project: string, language: string, c: Bench
       wrong.push(`httpMethod ${String(props.httpMethod)} != ${c.route.httpMethod}`);
     if (c.route.path && props.path !== c.route.path)
       wrong.push(`path ${String(props.path)} != ${c.route.path}`);
-    if (wrong.length > 0) return { ...base, outcome: "FN", reason: `wrong route: ${wrong.join("; ")}` };
+    if (wrong.length > 0)
+      return { ...base, outcome: "FN", reason: `wrong route: ${wrong.join("; ")}` };
   }
 
   return { ...base, outcome: "TP" };
@@ -223,6 +232,14 @@ interface Tally {
 
 function emptyTally(): Tally {
   return { tp: 0, fp: 0, fn: 0, tn: 0 };
+}
+
+function tallyFor(map: Record<string, Tally>, key: string): Tally {
+  const existing = map[key];
+  if (existing) return existing;
+  const fresh = emptyTally();
+  map[key] = fresh;
+  return fresh;
 }
 
 function add(t: Tally, o: Outcome): void {
@@ -244,10 +261,16 @@ function fmt(value: number | null): string {
 
 /** Confidence histogram over every edge of a kind in the crawled graph. */
 function globalConfidence(store: GraphStore): Record<string, Record<string, number>> {
-  const rows = store.raw<{ kind: string; properties: string }>("SELECT kind, properties FROM edges");
+  const rows = store.raw<{ kind: string; properties: string }>(
+    "SELECT kind, properties FROM edges"
+  );
   const out: Record<string, Record<string, number>> = {};
   for (const row of rows) {
-    const bucket = out[row.kind] ?? (out[row.kind] = {});
+    let bucket = out[row.kind];
+    if (!bucket) {
+      bucket = {};
+      out[row.kind] = bucket;
+    }
     let key = "none";
     try {
       const props = JSON.parse(row.properties) as { confidence?: number };
@@ -272,7 +295,9 @@ async function main(): Promise<void> {
   const byLanguage: Record<string, Tally> = {};
   const byProject: Record<string, Tally> = {};
   const outcomes: Outcome[] = [];
-  const projects: Array<ProjectSpec & { crawl: CrawlSummary; confidence: Record<string, Record<string, number>> }> = [];
+  const projects: Array<
+    ProjectSpec & { crawl: CrawlSummary; confidence: Record<string, Record<string, number>> }
+  > = [];
 
   for (const spec of manifest.projects) {
     const dir = ensureProject(spec);
@@ -289,9 +314,9 @@ async function main(): Promise<void> {
     for (const c of file.cases) {
       const outcome = evaluate(store, spec.name, file.language, c);
       outcomes.push(outcome);
-      add(byKind[c.edgeKind] ?? (byKind[c.edgeKind] = emptyTally()), outcome);
-      add(byLanguage[file.language] ?? (byLanguage[file.language] = emptyTally()), outcome);
-      add(byProject[spec.name] ?? (byProject[spec.name] = emptyTally()), outcome);
+      add(tallyFor(byKind, c.edgeKind), outcome);
+      add(tallyFor(byLanguage, file.language), outcome);
+      add(tallyFor(byProject, spec.name), outcome);
       if (outcome.outcome === "FN" || outcome.outcome === "FP")
         process.stderr.write(`  ✗ ${spec.name}/${c.id}: ${outcome.reason ?? outcome.outcome}\n`);
     }
@@ -396,7 +421,9 @@ async function main(): Promise<void> {
   lines.push("## Misses and false positives", "");
   if (failures.length === 0) lines.push("None.");
   for (const f of failures.sort((a, b) => a.project.localeCompare(b.project))) {
-    lines.push(`- **${f.project}/${f.id}** (${f.edgeKind}, expected ${f.expected}): ${f.reason}. ${f.note}`);
+    lines.push(
+      `- **${f.project}/${f.id}** (${f.edgeKind}, expected ${f.expected}): ${f.reason}. ${f.note}`
+    );
   }
   lines.push("");
   lines.push("## Parse errors", "");

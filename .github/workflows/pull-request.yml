@@ -69,6 +69,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Cache pinned benchmark checkouts
         uses: actions/cache@v4
         with:
@@ -77,6 +83,9 @@ jobs:
 
       - name: Run accuracy benchmark
         run: npm run bench:accuracy
+
+      - name: Run runtime dispatch check
+        run: npm run bench:runtime
 
       - name: Upload accuracy report
         if: always()

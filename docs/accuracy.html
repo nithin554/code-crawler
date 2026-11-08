@@ -8,14 +8,14 @@
     <title>Accuracy benchmark — Code-Crawler</title>
     <meta
       name="description"
-      content="Measured precision and recall of Code-Crawler's graph edges against hand-verified ground truth on pinned Spring Boot, FastAPI and NestJS projects."
+      content="Measured precision and recall of Code-Crawler's graph edges against labelled ground truth on pinned Spring Boot, FastAPI and NestJS projects, plus runtime-verified virtual dispatch."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Accuracy benchmark — Code-Crawler" />
     <meta
       property="og:description"
-      content="Measured precision and recall of Code-Crawler's graph edges against hand-verified ground truth on pinned Spring Boot, FastAPI and NestJS projects."
+      content="Measured precision and recall of Code-Crawler's graph edges against labelled ground truth on pinned Spring Boot, FastAPI and NestJS projects, plus runtime-verified virtual dispatch."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/accuracy.html" />
     <meta name="twitter:card" content="summary" />
@@ -59,6 +59,7 @@
             <a href="#by-edge">By edge type</a>
             <a href="#by-language">By language</a>
             <a href="#confidence">Confidence</a>
+            <a href="#runtime">Runtime proof</a>
             <a href="#weak">Where it is weak</a>
             <a href="#reproduce">Reproduce</a>
           </div>
@@ -170,16 +171,18 @@
           </div>
 
           <div class="note" style="margin-top: 20px">
-            <strong>Ground truth is hand-verified, not runtime-captured.</strong> Every case was
-            derived by reading the pinned source, never by querying the graph, so the benchmark is
-            able to fail. But no execution trace was recorded for these projects: Maven is not
-            available in the build environment and the NestJS application's dependencies are not
+            <strong>The four projects are hand-verified, not runtime-captured.</strong> Every case
+            was derived by reading the pinned source, never by querying the graph, so the benchmark
+            is able to fail. But no execution trace was recorded for these four projects: Maven is
+            not available in the build environment and the NestJS application's dependencies are not
             installed, so the two Spring Boot apps and the NestJS app were crawled, not run.
             A case describes what the code genuinely does at runtime (for example a Lombok-generated
             all-arguments constructor, or a class-level <code>@RequestMapping</code> joined to a
-            bare <code>@GetMapping</code>), but a runtime call log would be stronger evidence.
-            Capturing real traces with a Java agent on a focused fixture is the next step, and
-            until then nothing on this page should be described as runtime-verified.
+            bare <code>@GetMapping</code>), but a runtime call log is stronger evidence.
+            Virtual dispatch is the one edge type with execution-backed proof, on a small compiled
+            fixture rather than on these projects &mdash; see
+            <a href="#runtime">runtime proof</a>. The precision and recall numbers on this page
+            are hand-verified, not runtime-verified.
           </div>
 
           <div class="note" style="margin-top: 12px">
@@ -449,6 +452,91 @@
         </div>
       </section>
 
+      <section class="section" id="runtime">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Runtime proof: dispatch edges against a real call log</h2>
+            <p>
+              One edge type is checked by running code instead of reading it.
+            </p>
+          </div>
+
+          <div class="card">
+            <p>
+              <code>DYNAMIC_DISPATCH</code> is the edge type where static reading is most likely to
+              be wrong: the call site names an interface method, and the target is whichever
+              implementation happens to be live at that moment. So it is verified against execution.
+              A fixture defines an interface <code>Shape</code> with three implementations
+              (<code>Circle</code>, <code>Square</code>, <code>Triangle</code>); <code>Main</code>
+              builds a <code>Circle</code> and a <code>Square</code>, never a <code>Triangle</code>,
+              and drives all of them through the interface. Every implementation prints a line when
+              its method actually runs, so the log is a real call log rather than a second reading of
+              the source.
+            </p>
+            <p class="muted small">
+              <code>npm run bench:runtime</code> compiles the fixture with <code>javac</code>, runs
+              it, crawls the fixture directory, and reconciles the two.
+            </p>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Target</th>
+                  <th>Confidence</th>
+                  <th>Proven by execution</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>fixture.Shape#area</code></td>
+                  <td><code>fixture.Circle#area</code></td>
+                  <td>0.80</td>
+                  <td>yes</td>
+                </tr>
+                <tr>
+                  <td><code>fixture.Shape#area</code></td>
+                  <td><code>fixture.Square#area</code></td>
+                  <td>0.80</td>
+                  <td>yes</td>
+                </tr>
+                <tr>
+                  <td><code>fixture.Shape#area</code></td>
+                  <td><code>fixture.Triangle#area</code></td>
+                  <td>0.80</td>
+                  <td>no &mdash; never constructed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note" style="margin-top: 20px">
+            <strong>The third edge is not a false positive, and the benchmark does not score it as
+            one.</strong> <code>Triangle</code> really does implement <code>Shape</code>, so the edge
+            becomes true the moment any code constructs a <code>Triangle</code>; this particular run
+            simply never did. Counting it as an error would understate the graph, and counting it as
+            proven would overstate it, so it is reported separately as unexercised. That
+            over-approximation is exactly why <code>DYNAMIC_DISPATCH</code> carries a flat 0.80
+            rather than a near-1.00 confidence: the edge set is deliberately a superset, and a
+            single-implementation interface gives that superset nothing to add while an interface
+            with many implementations gives it plenty.
+          </div>
+
+          <div class="note" style="margin-top: 12px">
+            <strong>What this proves, and what it does not.</strong> It proves soundness for the
+            dispatch edges it exercises: every method the graph claims is reachable through the
+            interface, and which actually ran, is an edge the graph contains. It does not turn the
+            precision and recall numbers above into runtime measurements &mdash; those four projects
+            are still hand-verified, and the Spring and NestJS wiring (routes, injection, proxy
+            boundaries) is not exercised by this fixture at all. There is no Java agent here, only
+            observable side effects in a five-class fixture. Treat it as one edge type verified
+            deeply, not the whole graph verified broadly.
+          </div>
+        </div>
+      </section>
+
       <section class="section" id="weak">
         <div class="wrap">
           <div class="section-head">
@@ -567,7 +655,8 @@
             <pre><code>git clone https://github.com/nithin554/code-crawler
 cd code-crawler
 npm ci
-npm run bench:accuracy</code></pre>
+npm run bench:accuracy
+npm run bench:runtime</code></pre>
           </div>
           <p class="muted small" style="margin-top: 12px">
             The runner clones each project into a gitignored <code>benchmarks/.cache/</code> at the
@@ -576,6 +665,9 @@ npm run bench:accuracy</code></pre>
             <code>benchmarks/reports/accuracy.md</code> and <code>accuracy.json</code>. It exits
             non-zero when precision or recall drops below the floors in the manifest, and CI runs
             it on every pull request, so an accuracy regression fails the build.
+            <code>bench:runtime</code> is the separate dispatch proof described above: it needs a
+            JDK 17 or newer (<code>javac</code> on <code>PATH</code>) and writes
+            <code>benchmarks/reports/runtime.md</code>. CI installs Temurin 21 for it.
           </p>
           <div class="note" style="margin-top: 20px">
             Thresholds in the manifest are ratchets, not targets: they sit at the value last

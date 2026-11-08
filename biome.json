@@ -11,6 +11,7 @@
       "tests/**/*.ts",
       "!tests/fixtures",
       "bench/**/*.ts",
+      "benchmarks/**/*.ts",
       ".github/scripts/**/*.js",
       "package.json",
       "tsconfig.json",
