@@ -86,9 +86,10 @@
             </div>
             <div class="card">
               <div class="badge">Recall</div>
-              <h3>0.420</h3>
+              <h3>0.696</h3>
               <p class="muted">
-                40 of 69 expected edges were produced. The gap is concentrated in two edge types.
+                48 of 69 expected edges were produced. What remains is almost entirely one edge
+                type.
               </p>
             </div>
             <div class="card">
@@ -136,8 +137,8 @@
                   <td><code>500158f73241</code></td>
                   <td>50</td>
                   <td>1,244</td>
-                  <td>2,637</td>
-                  <td>921 ms</td>
+                  <td>2,654</td>
+                  <td>659 ms</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
@@ -145,8 +146,8 @@
                   <td><code>ee17e31aafe7</code></td>
                   <td>116</td>
                   <td>1,978</td>
-                  <td>5,029</td>
-                  <td>1,332 ms</td>
+                  <td>5,048</td>
+                  <td>973 ms</td>
                 </tr>
                 <tr>
                   <td>fastapi-template</td>
@@ -155,7 +156,7 @@
                   <td>138</td>
                   <td>1,798</td>
                   <td>3,475</td>
-                  <td>1,394 ms</td>
+                  <td>1,040 ms</td>
                 </tr>
                 <tr>
                   <td>nestjs-realworld</td>
@@ -164,7 +165,7 @@
                   <td>36</td>
                   <td>466</td>
                   <td>865</td>
-                  <td>251 ms</td>
+                  <td>156 ms</td>
                 </tr>
               </tbody>
             </table>
@@ -250,10 +251,10 @@
                   <td><code>ROUTES</code></td>
                   <td>40</td>
                   <td>1.000</td>
-                  <td>0.325</td>
-                  <td>13</td>
+                  <td>0.800</td>
+                  <td>32</td>
                   <td>0</td>
-                  <td>27</td>
+                  <td>8</td>
                   <td>0</td>
                 </tr>
               </tbody>
@@ -294,10 +295,10 @@
                   <td>java</td>
                   <td>44</td>
                   <td>1.000</td>
-                  <td>0.250</td>
-                  <td>9</td>
+                  <td>0.778</td>
+                  <td>28</td>
                   <td>0</td>
-                  <td>27</td>
+                  <td>8</td>
                   <td>8</td>
                 </tr>
                 <tr>
@@ -342,20 +343,20 @@
                   <td>spring-petclinic</td>
                   <td>27</td>
                   <td>1.000</td>
-                  <td>0.182</td>
-                  <td>4</td>
-                  <td>0</td>
+                  <td>0.818</td>
                   <td>18</td>
+                  <td>0</td>
+                  <td>4</td>
                   <td>5</td>
                 </tr>
                 <tr>
                   <td>spring-boot-realworld</td>
                   <td>17</td>
                   <td>1.000</td>
-                  <td>0.357</td>
-                  <td>5</td>
+                  <td>0.714</td>
+                  <td>10</td>
                   <td>0</td>
-                  <td>9</td>
+                  <td>4</td>
                   <td>3</td>
                 </tr>
                 <tr>
@@ -545,15 +546,16 @@
           </div>
 
           <div class="card">
-            <h3>1. Spring mappings are not extracted at all</h3>
+            <h3>1. FastAPI router prefixes are dropped</h3>
             <p>
-              All 14 Spring route cases miss. The Spring framework descriptor declares entry
-              points but produces no route registrations, so a Java controller can never yield a
-              <code>ROUTES</code> edge. Nothing is invented either, which is why precision stays
-              at 1.000 — the feature is simply absent. <code>@GetMapping</code>,
-              <code>@PostMapping</code>, the array form <code>@GetMapping({"/vets"})</code>,
-              class-level <code>@RequestMapping</code> prefixes, and paths without a leading slash
-              all need to be joined, and none of it is implemented.
+              <code>APIRouter(prefix="/items")</code> is ignored, so <code>@router.get("/")</code>
+              is reported as <code>/</code> instead of <code>/items/</code>. Every route from a
+              prefixed router is wrong in its path while still being emitted, which is the most
+              dangerous shape of error: present, plausible and incorrect. All 8 route misses left in
+              this benchmark are this one defect, and it is the only reason Python recalls worse
+              than Java. The <code>login</code> router, whose decorators spell out full paths, is
+              correct, which isolates the cause. Routes derived from a router prefix must be
+              joined, and the trailing slash is significant in FastAPI.
             </p>
           </div>
 
@@ -572,20 +574,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>3. FastAPI router prefixes are dropped</h3>
-            <p>
-              <code>APIRouter(prefix="/items")</code> is ignored, so <code>@router.get("/")</code>
-              is reported as <code>/</code> instead of <code>/items/</code>. Every route from a
-              prefixed router is wrong in its path while still being emitted, which is the most
-              dangerous shape of error: present, plausible and incorrect. The <code>login</code>
-              router, whose decorators spell out full paths, is correct, which isolates the cause.
-              Routes derived from a router prefix must be joined, and the trailing slash is
-              significant in FastAPI.
-            </p>
-          </div>
-
-          <div class="card" style="margin-top: 16px">
-            <h3>4. <code>INJECTS</code> and <code>ROUTES</code> have no confidence model</h3>
+            <h3>3. <code>INJECTS</code> and <code>ROUTES</code> have no confidence model</h3>
             <p>
               Both edge kinds are written without a confidence value, so a consumer cannot tell a
               proven mapping from a derived guess. The project rule is that no edge type exists
@@ -596,7 +585,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>5. Dispatch is matched by name and arity, not by proof</h3>
+            <h3>4. Dispatch is matched by name and arity, not by proof</h3>
             <p>
               A virtual dispatch edge carries a flat 0.80 and is emitted to every in-project
               subtype with a same-named, same-arity method. It is correct on the sampled labels,
@@ -608,7 +597,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
-            <h3>6. Foreign calls are unresolved by design</h3>
+            <h3>5. Foreign calls are unresolved by design</h3>
             <p>
               Calls into framework or library types resolve to an <code>ext:</code> node or to an
               <code>__unknown__</code> marker, for example
@@ -639,6 +628,24 @@
               <code>Owner</code> JPA entity: files parsed went from 43 to 50,
               <code>CALLS</code> edges from 574 to 1,426, and total edges from 1,408 to 2,637.
               The bug is fixed and covered by regression tests.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <p>
+              The Spring route cases failed on a missing feature rather than a bug. The framework
+              descriptor declared the mapping annotations as entry points, but the Java parser never
+              produced route registrations, so no controller could yield a <code>ROUTES</code> edge
+              at all.
+            </p>
+            <p class="muted">
+              Spring mappings are now extracted: a class-level <code>@RequestMapping</code> prefix
+              is joined with each verb annotation, covering the array form
+              <code>@GetMapping({"/vets"})</code>, a named <code>path =</code> attribute, a bare
+              annotation that inherits the class path, paths without a leading slash, and
+              <code>method = RequestMethod.PUT</code> on the prefix-less form. <code>ROUTES</code>
+              recall went from 0.325 to 0.800 and Java recall from 0.250 to 0.778, with no invented
+              edge.
             </p>
           </div>
         </div>
