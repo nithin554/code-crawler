@@ -43,6 +43,7 @@ export const EDGE_KINDS = [
   "REFLECTS",
   "INJECTS",
   "ROUTES",
+  "EMITS",
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
@@ -97,8 +98,17 @@ export interface EdgeProperties {
   line?: number;
   /** For CALLS edges: whether the target was statically resolved. */
   resolved?: boolean;
-  /** For CALLS edges: heuristic confidence 0..1 when resolved. */
+  /**
+   * Confidence 0..1 that the edge names the right target.
+   *
+   * Present on every edge whose target is inferred rather than read from
+   * source: `CALLS`, `DYNAMIC_DISPATCH`, `INJECTS`, `ROUTES` and `EMITS`.
+   * Structural edges (`CONTAINS`, `EXTENDS`, `IMPLEMENTS`) are certain by
+   * construction and carry no number rather than a meaningless `1`.
+   */
   confidence?: number;
+  /** For CALLS: rival overloads an ambiguous call site could equally target. */
+  alternatives?: string[];
   /** For DYNAMIC_DISPATCH: why the runtime target was inferred. */
   via?: string;
   /** For ADVISES: the advice kind that intercepts the call. */
@@ -115,7 +125,7 @@ export interface EdgeProperties {
   guards?: string[];
   /** For CALLS/IMPORTS: the target is outside the crawled source tree. */
   external?: boolean;
-  /** For INJECTS: framework that performs the injection. */
+  /** For INJECTS/EMITS: framework that performs the injection or delivers the event. */
   framework?: string;
   /** For REFLECTS: the run-time lookup mechanism (`Class.forName`, `getattr`). */
   mechanism?: string;
@@ -125,6 +135,12 @@ export interface EdgeProperties {
   entryPointDetail?: string;
   /** For INJECTS: injected field/parameter name. */
   injectedName?: string;
+  /** For EMITS: the event class or topic that joins publisher to listener. */
+  channel?: string;
+  /** For EMITS: whether `channel` is an event type or a message topic. */
+  channelKind?: string;
+  /** For EMITS: transaction phase a listener only runs in (`AFTER_COMMIT`, ...). */
+  phase?: string;
   /** For IMPORTS/REFERENCES: imported member name. */
   member?: string;
   /** Free-form language-specific metadata. */

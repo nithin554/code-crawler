@@ -1,5 +1,10 @@
 import type { JavaParsedFile } from "../parser/languages/java.js";
-import { type ArgumentTypeHints, inferArgumentTypes, pickOverload } from "./common.js";
+import {
+  AMBIGUOUS_OVERLOAD_CONFIDENCE,
+  type ArgumentTypeHints,
+  inferArgumentTypes,
+  pickOverloadCandidates,
+} from "./common.js";
 import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
 
 /**
@@ -69,14 +74,16 @@ function resolveCall(
     const argTypes = inferArgumentTypes(call.argumentTexts);
     for (const fqn of types) {
       const ctors = (index.methodsByFqn.get(fqn) ?? []).filter((m) => m.name === "<init>");
-      const match = pickOverload(ctors, call.argumentTexts.length, argTypes);
-      if (match) {
+      const pick = pickOverloadCandidates(ctors, call.argumentTexts.length, argTypes);
+      if (pick.method) {
+        const alternatives = pick.alternatives.map((m) => m.id);
         return {
           callSite: call,
-          targetId: match.id,
+          targetId: pick.method.id,
           resolved: true,
-          confidence: 1.0,
+          confidence: confidenceFor(1.0, alternatives),
           reason: `constructor of ${fqn}`,
+          ...(alternatives.length > 0 ? { alternatives } : {}),
         };
       }
     }
@@ -114,8 +121,12 @@ function resolveCall(
         callSite: call,
         targetId: found.method.id,
         resolved: true,
-        confidence: baseConfidence(candidates) * found.confidence,
-        reason: `${found.method.id} (via ${candidates.how}${found.inherited ? ", inherited" : ""})`,
+        confidence: confidenceFor(
+          baseConfidence(candidates) * found.confidence,
+          found.alternatives
+        ),
+        reason: `${found.method.id} (via ${candidates.how}${found.inherited ? ", inherited" : ""}${found.alternatives.length > 0 ? `, ${found.alternatives.length} rival overload(s)` : ""})`,
+        ...(found.alternatives.length > 0 ? { alternatives: found.alternatives } : {}),
       };
     }
   }
@@ -231,6 +242,8 @@ interface FoundMethod {
   method: { id: string };
   confidence: number;
   inherited: boolean;
+  /** Sibling overloads the call site did not distinguish. */
+  alternatives: string[];
 }
 
 /** Find a method on a type or (optionally) its ancestors, matching arity. */
@@ -243,8 +256,15 @@ function findMethod(
   searchInheritance: boolean
 ): FoundMethod | null {
   const direct = (index.methodsByFqn.get(typeFqn) ?? []).filter((m) => m.name === methodName);
-  const match = pickOverload(direct, argCount, argTypes);
-  if (match) return { method: { id: match.id }, confidence: 1.0, inherited: false };
+  const pick = pickOverloadCandidates(direct, argCount, argTypes);
+  if (pick.method) {
+    return {
+      method: { id: pick.method.id },
+      confidence: 1.0,
+      inherited: false,
+      alternatives: pick.alternatives.map((m) => m.id),
+    };
+  }
 
   if (searchInheritance) {
     const inherited = findInherited(typeFqn, methodName, argCount, argTypes, index, new Set(), 0);
@@ -269,9 +289,14 @@ function findInherited(
       const candidates = (index.methodsByFqn.get(parent) ?? []).filter(
         (m) => m.name === methodName
       );
-      const match = pickOverload(candidates, argCount, argTypes);
-      if (match) {
-        return { method: { id: match.id }, confidence: 0.9, inherited: true };
+      const pick = pickOverloadCandidates(candidates, argCount, argTypes);
+      if (pick.method) {
+        return {
+          method: { id: pick.method.id },
+          confidence: 0.9,
+          inherited: true,
+          alternatives: pick.alternatives.map((m) => m.id),
+        };
       }
       const deeper = findInherited(
         parent,
@@ -340,6 +365,10 @@ function isNameLike(receiver: string): boolean {
   return /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(receiver);
 }
 
+/** Damp a confidence when the pick left rival overloads in play. */
+function confidenceFor(base: number, alternatives: string[]): number {
+  return alternatives.length === 0 ? base : Math.min(base, AMBIGUOUS_OVERLOAD_CONFIDENCE);
+}
 function baseConfidence(candidates: CandidateSet): number {
   switch (candidates.how.split(" ")[0]) {
     case "local":

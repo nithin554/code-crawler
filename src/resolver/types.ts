@@ -23,6 +23,12 @@ export interface ResolvedCall {
   external?: boolean;
   /** Package/specifier of the external target (also used as node id suffix). */
   externalModule?: string;
+  /**
+   * Other in-project methods this call could equally target — the overloads a
+   * tie left in play. Present only when the call is ambiguous; `targetId` is
+   * then the best-ranked candidate, not a proven one.
+   */
+  alternatives?: string[];
 }
 
 /**
@@ -49,6 +55,15 @@ export interface Resolver {
   resolveFile(parsed: ParsedFile, index: TypeIndex): ResolvedCall[];
 }
 
+/** A dependency alias as the index sees it, with the module that declares it. */
+export interface IndexedDependencyAlias {
+  moduleId: string;
+  /** Callable named inside `Depends(...)`. */
+  provider: string;
+  /** Base type inside `Annotated[...]`. */
+  base: string;
+}
+
 /**
  * Global index over all parsed files, used to resolve type and method names
  * across the whole project. Built once per crawl pass.
@@ -72,6 +87,14 @@ export class TypeIndex {
   defaultExports = new Map<string, string>();
   /** Module id -> source file path that declares it. */
   fileByModuleId = new Map<string, string>();
+  /**
+   * `module.Name` -> the dependency alias it declares.
+   *
+   * Keyed by the qualified name a file's imports already produce, so a use of
+   * `SessionDep` resolves with one map hit whether the alias is local or
+   * imported from another module.
+   */
+  dependencyAliases = new Map<string, IndexedDependencyAlias>();
 
   private hierarchyDirty = false;
 
@@ -99,6 +122,11 @@ export class TypeIndex {
       this.fileByModuleId.set(moduleId, file.filePath);
       if (file.defaultExportName) {
         this.defaultExports.set(moduleId, this.symbolId(moduleId, file.defaultExportName));
+      }
+    }
+    if (moduleId) {
+      for (const [name, alias] of file.dependencyAliases ?? []) {
+        this.dependencyAliases.set(`${moduleId}.${name}`, { ...alias, moduleId });
       }
     }
     this.hierarchyDirty = true;

@@ -55,6 +55,12 @@ export interface TypeInfo {
   endLine: number;
   /** Annotations/decorators applied to the type. */
   annotations: AnnotationInfo[];
+  /**
+   * Proxy kinds an annotation puts around this type's methods
+   * (`transactional`, `async`, `cacheable`). Recorded because the interception
+   * leaves no trace in the source.
+   */
+  proxies?: string[];
   /** True when the type is an aspect (`@Aspect`). */
   isAspect?: boolean;
   /** Java `record` declaration: indexed as a `class` with component accessors. */
@@ -94,6 +100,34 @@ export interface InjectionPoint {
   framework: string;
   line: number;
   optional?: boolean;
+  /**
+   * Set when the injection can only be confirmed project-wide.
+   *
+   * FastAPI's `session: SessionDep` is a dependency only if `SessionDep` is an
+   * `Annotated[..., Depends(...)]` alias the file can see, which a single-file
+   * parse cannot know. Candidates that turn out not to be aliases are dropped
+   * rather than reported, so an ordinary parameter never becomes a dependency.
+   */
+  /**
+   * Callable named inside `Depends(...)` / `dependencies=[...]`, when one is
+   * named literally. The framework runs this callable to produce the value, so
+   * it is a better dependency target than the declared type.
+   */
+  provider?: string;
+  candidate?: boolean;
+}
+
+/**
+ * A named dependency alias: `SessionDep = Annotated[Session, Depends(get_db)]`.
+ *
+ * The provider is the callable the framework actually runs, which is what a
+ * dependency edge should point at; the base type is what the parameter holds.
+ */
+export interface DependencyAlias {
+  /** Callable named inside `Depends(...)`. */
+  provider: string;
+  /** Base type inside `Annotated[...]`. */
+  base: string;
 }
 
 /** Why a method is a root even though nothing in the source calls it. */
@@ -158,6 +192,14 @@ export interface MethodInfo {
   adviceKind?: string;
   /** AspectJ pointcut expression carried by advice/pointcut methods. */
   pointcut?: string;
+  /** Proxy kinds around this method, from its own or its type's annotations. */
+  proxies?: string[];
+  /**
+   * Why a proxy annotation on this method does nothing at run time. Spring can
+   * only intercept a method it can override, so `private`, `static` and `final`
+   * methods (and anything on a `final` class) silently lose the annotation.
+   */
+  proxyBlocked?: string;
   /** Why this method is an entry point (framework-invoked root). */
   entryPoint?: EntryPointInfo;
 }
@@ -253,6 +295,12 @@ export interface ParsedFile {
   reflectiveRefs?: ReflectiveRef[];
   /** Framework-injected dependencies declared by this file. */
   injections?: InjectionPoint[];
+  /**
+   * Named dependency aliases declared at module level, by local name.
+   * Other files reach these through their imports, so the crawler indexes them
+   * project-wide instead of resolving them per file.
+   */
+  dependencyAliases?: Map<string, DependencyAlias>;
   /** Express/Fastify-style route registrations declared by this file. */
   routes?: RouteRegistration[];
   /** Entry point when the whole file is one (e.g. `__main__` script). */

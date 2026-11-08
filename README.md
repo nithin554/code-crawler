@@ -250,6 +250,21 @@ The index is 66 MB for those 14.4k nodes / 38.8k edges. `find_hotspots` and
 their band is an order of magnitude looser than the symbol lookups; both were profiled
 with `EXPLAIN QUERY PLAN` and are served by `idx_edges_target_kind`.
 
+### Agent cost: graph versus grep-and-read
+
+`npm run bench:ergonomics` measures ten structural questions (who calls this, what runs on
+this endpoint, what breaks if I change this, what is dead) on the four pinned benchmark
+projects, against the real MCP server and against a model of text search plus reading every
+file a search hit. Across the ten, the graph answered in **12 tool calls / 22,907 tokens**
+where grep-and-read cost **120 calls / 105,758 tokens** — and **8,553 tokens** with
+`compact: true`. Reads are capped at 20 files and the dead-code baseline is handed the
+answer set for free, so the baseline is under-charged.
+
+Where plain search wins is measured too: a question about template text or a config key has
+no graph answer, and a one-file lookup is cheaper as a search. Use the graph for structure,
+search for text. The full comparison, method and caveats are on the
+[accuracy page](https://nithin554.github.io/code-crawler/accuracy.html#ergonomics).
+
 ## CI & publishing
 
 GitHub Actions runs on every pull request (`pull-request.yml`): `npm ci` →
@@ -427,11 +442,13 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 | `find_dead_code` | Methods with no incoming call/dispatch/advice edges |
 | `find_entry_points` | Framework-invoked roots: HTTP routes, listeners, schedulers, CLI mains, tests |
 | `find_routes` | HTTP route → handler mappings (`@GetMapping`, NestJS, FastAPI, Express) |
+| `find_event_flows` | Publisher → listener wiring: Spring events, Kafka/JMS, `@OnEvent` |
 | `find_injections` | DI-supplied dependencies (`@Autowired`, NestJS, FastAPI `Depends`) |
 | `find_reflections` | Run-time lookups: `Class.forName`, `getattr`, `importlib`, dynamic `import()` |
 | `find_external_dependencies` | Third-party packages with reference and file counts |
 | `find_unresolved` | Call sites the resolver could not bind, grouped by failure reason |
 | `impact_analysis` | Callers + entry points + routes + overrides + risk band in one call |
+| `change_impact` | Ranked blast radius for a whole diff, file list or symbol list, with injection points and advice |
 | `explain_symbol` | One-shot digest: members, decorators, callers, callees, wiring |
 | `find_cycles` | Call cycles (SCCs) with a sample closed path, plus direct recursion |
 | `export_graph` | Neighborhood rendered as Mermaid or Graphviz DOT |
@@ -442,7 +459,7 @@ See [`USAGE.md`](USAGE.md) for the full task-oriented walkthrough.
 **Resources**: `codecrawler://schema`, `codecrawler://status`
 **Prompt**: `trace-call-path(from, to)`
 
-**Token budgeting.** The 18 list-returning query tools — every tool whose payload is a
+**Token budgeting.** The 19 list-returning query tools — every tool whose payload is a
 single result list — accept `max_tokens` (100–200000) and `cursor`. Passing either adds a
 `page` block with `totalCount`, `returnedCount`, `truncated`, `estimatedTokens`, and
 `nextCursor`; omit both and the response shape is unchanged, so existing clients keep
@@ -456,11 +473,20 @@ so cutting one list would leave edges pointing at omitted nodes. It is bounded b
 single-object tools (`get_node`, `index_status`, `get_schema`) return one object and take no
 budget.
 
+**Compact responses.** Every tool accepts `compact: true`, which returns each symbol
+reference as its fully-qualified name (`com.acme.Payment#pay`) instead of an
+`{id, name, kind, filePath}` object. It is a structural projection applied in one place, so it
+works the same on all 29 tools, and it measured 61% smaller (`get_callers`) to 83%
+(`search_symbols`) on the dynamic-dispatch fixture. A qualified name already says whether it
+is a type (`pkg.Type`) or a member (`pkg.Type#member`); call `get_node` with that name to get
+the metadata back. The budget is computed before the projection runs, so a compact page holds
+the same items as the non-compact one and costs less — it is a size win, not a packing win.
+
 ### Agent skill
 
 The server tells an agent *what* it can call; the skill tells it *when*. `skills/code-crawler/`
 ships in the npm package and is plain Markdown — `SKILL.md` for discovery and the
-crawl-first workflow, `reference/tools.md` mapping all 27 tools to the questions they
+crawl-first workflow, `reference/tools.md` mapping every tool to the questions they
 answer, and `reference/edge-semantics.md` explaining `confidence`, `external`, and phantom
 nodes.
 
@@ -486,10 +512,11 @@ blob (signature, modifiers, lines, annotations, ...).
 
 **Edges** — `kind` is one of `CALLS | DECLARED_IN | CONTAINS | IMPLEMENTS | EXTENDS |
 IMPORTS | REFERENCES | DYNAMIC_DISPATCH | ADVISES | ANNOTATED_WITH | REFLECTS | INJECTS |
-ROUTES`. `CALLS` edges carry `line`, `resolved`, `confidence`, and — when the call sits
+ROUTES | EMITS`. `CALLS` edges carry `line`, `resolved`, `confidence`, and — when the call sits
 behind control flow — `conditional`, `controlFlow`, and `guards`; `ANNOTATED_WITH` edges
 carry `line` and `arguments`; `ADVISES` edges carry `adviceKind` and the resolved
-`pointcut`; `INJECTS` carries `injectedName` and `framework`; `REFLECTS` carries
+`pointcut`; `INJECTS` carries `injectedName` and `framework`; `EMITS` carries `channel`,
+`channelKind`, `framework`, and for transactional listeners `phase`; `REFLECTS` carries
 `mechanism`; `REFERENCES` carries `external`.
 
 Id scheme:
@@ -590,14 +617,26 @@ Dependencies the framework supplies are `INJECTS` edges instead of missing calls
 
 | Framework | Detected from |
 | --- | --- |
-| Spring | `@Autowired` fields/methods/constructors |
+| Spring | `@Autowired` fields/methods/constructors; the sole constructor of a bean, annotated or not (Spring 4.3+); Lombok `@AllArgsConstructor`/`@RequiredArgsConstructor` promoted fields |
 | NestJS | constructor parameters with decorators; `@Injectable()` classes |
-| FastAPI | `Depends(...)` parameters |
+| FastAPI | `Depends(...)` parameters, `Annotated[T, Depends(fn)]` aliases declared once and reused across modules, and decorator-level `dependencies=[Depends(fn)]` |
 | dependency-injector | constructor parameters of `@injectable` classes |
 | plain TS/JS | constructor parameters typed with a project class |
 
 Primitive and structural parameter types (`string`, `{ id: string }`, `list[str]`) are
 counted but produce no edge, so `@Body() body: { id: string }` does not pollute the graph.
+
+For Spring, the sole-constructor rule needs the class to carry a stereotype
+(`@Component`, `@Service`, `@Repository`, `@Controller`, `@RestController`, `@Configuration`,
+`@ControllerAdvice`, `@RestControllerAdvice`) — no container constructs anything else. A bean
+with two unannotated constructors injects nothing, because Spring cannot choose either, and
+neither does a class that declares a constructor next to a Lombok generator. Fields with an
+initialiser at their declaration are not treated as injected.
+
+An `INJECTS` edge points from what the container **populates** to the provider it **calls**:
+a constructor belongs to its type, a FastAPI parameter belongs to the function whose signature
+declares it, and `service: OrderService = Depends(get_service)` targets `get_service` rather
+than `OrderService` — the container invokes `get_service` and hands back what it returns.
 
 ### Framework entry points and routes
 
@@ -613,6 +652,62 @@ analysis honest and gives `trace_execution` a root (`find_entry_points`, `find_r
 Express handlers written inline get a synthetic method node
 (`module:src.routes#<anonymous@7>`) so their body still gets call edges, containment, and
 a route edge.
+
+### Event and message flows
+
+A listener is called by the framework, not by the publisher, so no `CALLS` edge joins
+them. `EMITS` joins them by the channel they share (`find_event_flows`, and by default in
+`get_callers`, `get_callees`, `trace_path`):
+
+| Framework | Publication | Listener | Channel |
+| --- | --- | --- | --- |
+| Spring events | `applicationEventPublisher.publishEvent(new OrderPlaced(...))` | `@EventListener` | the event class |
+| Spring transactional events | as above | `@TransactionalEventListener` | the event class, plus `phase` |
+| Kafka | `kafkaTemplate.send("orders", ...)` | `@KafkaListener(topics = "orders")` | `"orders"` |
+| JMS | `jmsTemplate.convertAndSend("queue.billing", ...)` | `@JmsListener(destination = "queue.billing")` | `"queue.billing"` |
+| NestJS | `this.eventEmitter.emit("order.placed", ...)` | `@OnEvent("order.placed")` | `"order.placed"` |
+
+`confidence` is `1` when both sides resolved a fully-qualified event type — the same class by
+identity, which is why `InvoiceService` publishing `billing.InvoicePaid` does not reach a
+listener for `legacy.InvoicePaid` — and `0.85` for a literal topic or queue, where the same
+name can belong to a different broker. Only a constructed event or a literal topic names a
+channel: a run-time-computed destination, or a published plain parameter, produces no edge
+instead of a guess. A `@TransactionalEventListener`'s `phase` says *when* the listener runs,
+not whether the edge exists; an `AFTER_ROLLBACK` listener does not run on the happy path.
+
+### Run-time proxy boundaries
+
+`@Transactional`, `@Async` and `@Cacheable` put a proxy in front of a method, so what runs
+depends on how it is reached. `get_callers` reports that on direct callers:
+
+| Caller | proxy | proxyBlocked | inert |
+| --- | --- | --- | --- |
+| another bean | `["transactional"]` | — | — |
+| the same bean (`this.place(...)`) | `["transactional"]` | — | `true` |
+| `@Async private void audit()` | `["async"]` | `private` | — |
+| `final void seal()` in a `@Transactional` class | `["transactional"]` | `final` | — |
+| any method of a `final` class | `["transactional"]` | `final-type` | — |
+
+`inert` is self-invocation: the call never leaves the object, so the proxy is bypassed and
+the annotation does nothing. `proxyBlocked` is the same problem at declaration time — the
+container cannot override a `private`, `static` or `final` method, or subclass a `final`
+class. Both are the case a reader of the source assumes works; reporting the annotation
+without them would be a confident wrong answer.
+
+### Ambiguous overloads
+
+When a call site matches several overloads equally, the graph ranks them instead of
+guessing silently. The edge keeps the first declaration as its target and lists the rivals:
+
+| Caller | target | confidence | alternatives |
+| --- | --- | --- | --- |
+| `render(7)` | `Formatter#render(int)` | `0.95` | — |
+| `render("seven")` | `Formatter#render(String)` | `1` | — |
+| `render(input)` where `input` is `Object` | `Formatter#render` | `0.6` | `["Formatter#render(String)"]` |
+
+The last row is the honest answer: the call provably happens, only the choice among
+overloads is unknown. The edge stays `resolved: true` and confidence drops into the hedge
+band, so nothing downstream can mistake the leading candidate for a proven target.
 
 ### Control flow on call edges
 
@@ -666,7 +761,7 @@ Each resolved edge carries a `confidence` score and a human-readable `reason` tr
 
 | Language | Extensions | Extracted | Dynamic features |
 | --- | --- | --- | --- |
-| Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired`, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
+| Java | `.java` | packages, classes, interfaces, enums, annotations, constructors, methods, fields | virtual dispatch, AspectJ/Spring AOP advice, `@Autowired` and bean-constructor injection including Lombok-generated constructors, `@RequestMapping` family, `Class.forName`, `ServiceLoader` |
 | Python | `.py`, `.pyi` | modules, classes, functions, methods, fields, decorators | `@injectable`/`Depends` injection, FastAPI/Flask/Quart routes, `getattr`, `importlib`, `__main__`, tests |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | modules, classes, interfaces, type aliases, enums, methods, fields, arrow functions | NestJS/Angular decorators, DI constructor injection, NestJS/Express routes, `import()`, `require()` |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | modules, classes, functions, fields | decorators, Express routes, `require()` |
@@ -687,8 +782,8 @@ Adding a language requires:
    most languages work with the shared `module` resolver and only override
    language-specific builtins.
 5. Any framework it should recognise that is not registered yet — a module in
-   `src/parser/frameworks/` declaring its entry points, injections and markers. That is
-   a data change: no parser is edited.
+   `src/parser/frameworks/` declaring its entry points, injections, constructor-generating
+   annotations and markers. That is a data change: no parser is edited.
 
 Frameworks are resolved per file by import evidence, then by the descriptor's
 `frameworks` order, then by every registered module. A file that imports
@@ -756,7 +851,7 @@ src/
 │   ├── methodId.ts             method id scheme (overload signatures, constructor ids)
 │   ├── frameworks/
 │   │   ├── types.ts            FrameworkModule / FrameworkScope contracts
-│   │   ├── index.ts            registry + scope/entry-point/injection lookups
+│   │   ├── index.ts            registry + scope/entry-point/injection/constructor lookups
 │   │   └── <framework>.ts      one module per framework (spring, nestjs, fastapi, …)
 │   └── languages/
 │       ├── index.ts            descriptor table + per-file language detection

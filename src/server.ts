@@ -6,6 +6,8 @@ import type { Config } from "./config.js";
 import { loadConfig } from "./config.js";
 import { crawlProject } from "./crawler.js";
 import { applyBudget, pageMeta } from "./graph/budget.js";
+import { changeImpact } from "./graph/changeImpact.js";
+import { compactify } from "./graph/compact.js";
 import {
   explainSymbol,
   exportGraph,
@@ -19,6 +21,7 @@ import {
   externalDependencies,
   findAnnotated,
   findEntryPoints,
+  findEventFlows,
   findImplementations,
   findInjections,
   findReflections,
@@ -169,6 +172,41 @@ export function createServer(
   };
 
   /**
+   * Added to every tool's schema by `tool` below. Kept here so the description
+   * matches the projection in `compactify` rather than being reworded per tool.
+   */
+  const compactParam = z
+    .boolean()
+    .optional()
+    .describe(
+      'Return every symbol reference as its fully-qualified name ("pkg.Type#method") instead of an {id, name, kind, filePath} object. Typically removes 60-80% of a response, and more on deep traces. A class is "pkg.Type" and a member is "pkg.Type#member", so the name still says what it is; call get_node with the name when you need the metadata back.'
+    );
+
+  /**
+   * Apply the compact projection to a tool result. Only JSON text parts are
+   * touched; a non-JSON payload (export_graph) passes through unchanged.
+   */
+  const compactResult = (result: unknown): unknown => {
+    if (typeof result !== "object" || result === null) return result;
+    const content = (result as { content?: unknown }).content;
+    if (!Array.isArray(content)) return result;
+    let projected = false;
+    const next = content.map((part) => {
+      const entry = part as { type?: string; text?: unknown };
+      if (entry?.type !== "text" || typeof entry.text !== "string") return part;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(entry.text);
+      } catch {
+        return part;
+      }
+      projected = true;
+      return { ...entry, text: JSON.stringify(compactify(parsed), null, 2) };
+    });
+    return projected ? { ...(result as Record<string, unknown>), content: next } : result;
+  };
+
+  /**
    * Attach a `page` block and cut the list when the caller asked for a budget.
    * Counting keys keep reporting the full window size so clients can decide
    * whether to ask for the next page. Each tool keeps its own counting key name,
@@ -198,6 +236,10 @@ export function createServer(
   /**
    * Every handler shares one error boundary so MCP clients always receive the
    * same `{ ok, error, hint }` shape instead of a mix of throws and payloads.
+   *
+   * `compact` is added to every tool here rather than to each schema, because
+   * the projection is structural (see `compactify`) and a per-tool copy would
+   * drift the moment a new tool is added.
    */
   const tool = <Args extends unknown[]>(
     name: string,
@@ -211,15 +253,21 @@ export function createServer(
       s: unknown,
       h: (...args: unknown[]) => unknown
     ) => void;
-    register(name, description, paramsSchema, async (...args: unknown[]) => {
+    const schema = {
+      ...(paramsSchema as Record<string, unknown>),
+      compact: compactParam,
+    };
+    register(name, description, schema, async (...args: unknown[]) => {
       try {
         // `crawl_project` names the project it wants; every other tool inherits
         // the client's roots or the project the previous call selected.
         const requested =
           name === "crawl_project" ? (args[0] as { path?: unknown } | undefined)?.path : undefined;
-        return await scoped(typeof requested === "string" ? requested : undefined, () =>
+        const result = await scoped(typeof requested === "string" ? requested : undefined, () =>
           handler(...(args as Args))
         );
+        const compact = (args[0] as { compact?: unknown } | undefined)?.compact === true;
+        return compact ? compactResult(result) : result;
       } catch (err) {
         return errorResult(err);
       }
@@ -370,18 +418,26 @@ export function createServer(
 
   tool(
     "get_callers",
-    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Optionally follow virtual-dispatch and aspect-advice edges for dynamic callers.",
+    "Find every symbol that calls the given symbol, directly or transitively (the call graph above it). Follows virtual-dispatch and framework event edges by default, because a method reached only through either one is still called; pass include_dynamic: false and include_events: false for a static-only view. Each caller reports the edge kind and, when the edge has one, its confidence. When the callee sits behind a run-time proxy, direct callers also report the proxy kind, whether the container can honour the annotation at all, and whether the call is a self-invocation that never reaches the proxy.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callers (default true)."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callers returned."),
       ...budgetParams,
@@ -391,6 +447,7 @@ export function createServer(
       transitive,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -400,6 +457,7 @@ export function createServer(
         transitive,
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -409,30 +467,52 @@ export function createServer(
         depth: c.depth,
         callSiteLine: line(c.callSiteLine),
         edgeKind: c.edgeKind,
+        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+        ...(c.resolved !== undefined ? { resolved: c.resolved } : {}),
+        ...(c.conditional !== undefined ? { conditional: c.conditional } : {}),
+        ...(c.controlFlow ? { controlFlow: c.controlFlow } : {}),
+        ...(c.guards ? { guards: c.guards } : {}),
       }));
       return text(
-        paged({ target: ref(result.target), count: callers.length, callers }, "callers", callers, {
-          max_tokens,
-          cursor,
-        })
+        paged(
+          {
+            target: ref(result.target),
+            count: callers.length,
+            callers,
+            edgesFollowed: result.edgesFollowed,
+            includeDynamic: result.includeDynamic,
+            includeAdvice: result.includeAdvice,
+          },
+          "callers",
+          callers,
+          { max_tokens, cursor }
+        )
       );
     }
   );
 
   tool(
     "get_callees",
-    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Set include_dynamic to also follow virtual/interface dispatch targets.",
+    "Find every symbol the given symbol calls, directly or transitively (the call graph below it). Follows virtual/interface dispatch and framework event edges by default; pass include_dynamic: false and include_events: false for a static-only view. Each callee reports the edge kind and, when the edge has one, its confidence.",
     {
       symbol: z.string().describe("Method/constructor id or qualified name."),
       transitive: z.boolean().optional().describe("Include transitive callees (default true)."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Traversal depth cap."),
       limit: z.number().int().min(1).max(500).optional().describe("Max callees returned."),
       ...budgetParams,
@@ -442,6 +522,7 @@ export function createServer(
       transitive,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -451,6 +532,7 @@ export function createServer(
         transitive,
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -460,30 +542,52 @@ export function createServer(
         depth: c.depth,
         callSiteLine: line(c.callSiteLine),
         edgeKind: c.edgeKind,
+        ...(c.confidence !== undefined ? { confidence: c.confidence } : {}),
+        ...(c.resolved !== undefined ? { resolved: c.resolved } : {}),
+        ...(c.conditional !== undefined ? { conditional: c.conditional } : {}),
+        ...(c.controlFlow ? { controlFlow: c.controlFlow } : {}),
+        ...(c.guards ? { guards: c.guards } : {}),
       }));
       return text(
-        paged({ source: ref(result.source), count: callees.length, callees }, "callees", callees, {
-          max_tokens,
-          cursor,
-        })
+        paged(
+          {
+            source: ref(result.source),
+            count: callees.length,
+            callees,
+            edgesFollowed: result.edgesFollowed,
+            includeDynamic: result.includeDynamic,
+            includeAdvice: result.includeAdvice,
+          },
+          "callees",
+          callees,
+          { max_tokens, cursor }
+        )
       );
     }
   );
 
   tool(
     "trace_path",
-    "Find call paths between two symbols. Follows static CALLS edges by default; set include_dynamic/include_advice to also route through virtual dispatch and aspect advice.",
+    "Find call paths between two symbols. Follows static CALLS, virtual/interface dispatch and framework event edges by default, so the path reflects what can actually run; pass include_dynamic: false and include_events: false for static edges only. Each hop reports its edge kind and confidence.",
     {
       source: z.string().describe("Starting symbol id or qualified name."),
       target: z.string().describe("Destination symbol id or qualified name."),
       include_dynamic: z
         .boolean()
         .optional()
-        .describe("Also follow DYNAMIC_DISPATCH edges (virtual/interface targets)."),
+        .describe(
+          "Follow DYNAMIC_DISPATCH edges (virtual/interface targets). Default true — pass false to see only static CALLS edges."
+        ),
       include_advice: z
         .boolean()
         .optional()
         .describe("Also follow ADVISES edges (aspect advice methods)."),
+      include_events: z
+        .boolean()
+        .optional()
+        .describe(
+          "Follow EMITS edges (event/message publication -> listener). Default true — pass false to ignore framework event wiring."
+        ),
       max_depth: z.number().int().min(1).max(50).optional().describe("Maximum path length."),
       limit: z
         .number()
@@ -499,6 +603,7 @@ export function createServer(
       target,
       include_dynamic,
       include_advice,
+      include_events,
       max_depth,
       limit,
       max_tokens,
@@ -507,6 +612,7 @@ export function createServer(
       const paths = tracePath(store, source, target, {
         includeDynamic: include_dynamic,
         includeAdvice: include_advice,
+        includeEvents: include_events,
         maxDepth: max_depth,
         limit,
       });
@@ -519,6 +625,8 @@ export function createServer(
           target: e.target,
           kind: e.kind,
           callSiteLine: line(e.callSiteLine),
+          ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
+          ...(e.resolved !== undefined ? { resolved: e.resolved } : {}),
         })),
       }));
       return text(
@@ -898,6 +1006,33 @@ export function createServer(
   );
 
   tool(
+    "find_event_flows",
+    "Join event and message publications to the listeners that receive them (`publishEvent` -> `@EventListener`, `KafkaTemplate.send` -> `@KafkaListener`, `emit` -> `@OnEvent`). This is the edge static call graphs miss: the publisher never names the listener. `confidence` is 1 for a fully-qualified event match and 0.85 for a literal topic, where the same name can belong to another broker. A `phase` means the listener only runs at that transaction phase.",
+    {
+      symbol: z
+        .string()
+        .optional()
+        .describe("Restrict to a single publishing or listening symbol id/qualified name."),
+      limit: z.number().int().min(1).max(500).optional().describe("Max results (default 50)."),
+      ...budgetParams,
+    },
+    async ({ symbol, limit, max_tokens, cursor }) => {
+      const results = findEventFlows(store, { symbol, limit });
+      const flows = results.map((e) => ({
+        source: ref(e.source),
+        listener: ref(e.target),
+        ...(e.channel ? { channel: e.channel } : {}),
+        ...(e.channelKind ? { channelKind: e.channelKind } : {}),
+        ...(e.framework ? { framework: e.framework } : {}),
+        ...(e.phase ? { phase: e.phase } : {}),
+        ...(e.confidence !== undefined ? { confidence: e.confidence } : {}),
+        ...(e.line !== undefined ? { line: line(e.line) } : {}),
+      }));
+      return text(paged({ count: flows.length, flows }, "flows", flows, { max_tokens, cursor }));
+    }
+  );
+
+  tool(
     "find_external_dependencies",
     "Summarize third-party packages the crawled source imports, with reference and file counts. External libraries are modelled as package-level nodes: the crawler records the dependency, not the library's internals.",
     {
@@ -1021,7 +1156,7 @@ export function createServer(
 
   tool(
     "impact_analysis",
-    "One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol, HTTP routes that serve it, and overriding implementations. Analysing a type aggregates the callers of all its methods. Returns a heuristic risk band: high when a framework entry point reaches the symbol, medium when it has direct callers, low otherwise.",
+    "One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol, HTTP routes that serve it, events it publishes or listens to, and overriding implementations. Analysing a type aggregates the callers of all its methods. Returns a heuristic risk band: high when a framework entry point reaches the symbol, medium when it has direct callers, low otherwise.",
     {
       symbol: z.string().describe("Symbol id or qualified name."),
       max_depth: z
@@ -1066,6 +1201,7 @@ export function createServer(
           viaDepth: e.viaDepth,
         })),
         routes: result.routes.map(wiring),
+        eventFlows: result.eventFlows.map(wiring),
         implementations: result.implementations.map((i) => ({
           type: ref(i.type),
           ...(i.method ? { method: ref(i.method) } : {}),
@@ -1074,6 +1210,131 @@ export function createServer(
         })),
         affectedFiles: result.affectedFiles,
       });
+    }
+  );
+
+  tool(
+    "change_impact",
+    "Answers 'what does this change break?' for a whole diff instead of one symbol: pass a unified diff (from `git diff`), a list of files, or a list of symbols, in any combination. Hunk line ranges are mapped onto the declarations they overlap, and a changed method replaces its enclosing class so call sites are not counted twice. Every touched declaration gets the impact_analysis treatment plus injection points and AOP advice, ranked by exposure. The score orders the report and is not a probability. Unmatched paths and symbols are returned rather than silently dropped.",
+    {
+      diff: z
+        .string()
+        .optional()
+        .describe("Unified diff text (output of `git diff` or `git diff HEAD~1`)."),
+      files: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Changed file paths, repo- or crawl-root-relative. Expands to each file's top-level declarations."
+        ),
+      symbols: z
+        .array(z.string())
+        .optional()
+        .describe("Changed symbols, as ids or qualified names."),
+      max_depth: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Caller traversal depth per symbol (default 10)."),
+      include_dynamic: z
+        .boolean()
+        .optional()
+        .describe("Also follow DYNAMIC_DISPATCH edges (default true)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .describe("Max callers kept per symbol (default 20)."),
+      max_symbols: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe(
+          "Max ranked symbols in the report (default 25). Lower-risk symbols are dropped and counted in `truncated`."
+        ),
+    },
+    async ({ diff, files, symbols, max_depth, include_dynamic, limit, max_symbols }) => {
+      if (!diff?.trim() && !files?.length && !symbols?.length) {
+        return text({
+          ok: false,
+          error: "no change description supplied",
+          hint: "Pass at least one of `diff` (unified diff text), `files` (changed paths) or `symbols` (changed symbol ids).",
+        });
+      }
+      try {
+        const report = changeImpact(
+          store,
+          { diff, files, symbols },
+          {
+            maxDepth: max_depth,
+            includeDynamic: include_dynamic,
+            limit,
+            maxSymbols: max_symbols,
+          }
+        );
+        return text({
+          input: report.input,
+          totals: report.totals,
+          ...(report.truncated
+            ? {
+                truncated: true,
+                truncatedHint: `Report limited to ${max_symbols ?? 25} symbols by risk score; raise max_symbols or narrow the diff to see the rest.`,
+              }
+            : {}),
+          ...(report.unmatched.symbols.length || report.unmatched.files.length
+            ? { unmatched: report.unmatched }
+            : {}),
+          symbols: report.symbols.map((s) => ({
+            symbol: ref(s.symbol),
+            matchedBy: s.matchedBy,
+            ...(s.diffRanges ? { diffRanges: s.diffRanges } : {}),
+            score: s.score,
+            summary: s.summary,
+            callers: s.callers.map((c) => ({
+              caller: ref(c.caller),
+              depth: c.depth,
+              callSiteLine: line(c.callSiteLine),
+              edgeKind: c.edgeKind,
+            })),
+            entryPoints: s.entryPoints.map((e) => ({
+              symbol: ref(e.symbol),
+              entryPointKind: e.entryPointKind,
+              ...(e.detail ? { detail: e.detail } : {}),
+              viaDepth: e.viaDepth,
+            })),
+            routes: s.routes.map(wiring),
+            injectionPoints: s.injectionPoints.map((i) => ({
+              role: i.role,
+              symbol: ref(i.symbol),
+              ...(i.injectedName ? { injectedName: i.injectedName } : {}),
+              ...(i.framework ? { framework: i.framework } : {}),
+              ...(i.line !== undefined ? { line: line(i.line) } : {}),
+            })),
+            advice: s.advice.map((a) => ({
+              advice: ref(a.advice),
+              advised: ref(a.advised),
+              ...(a.framework ? { framework: a.framework } : {}),
+              ...(a.line !== undefined ? { line: line(a.line) } : {}),
+            })),
+            eventFlows: s.eventFlows.map(wiring),
+            implementations: s.implementations.map((i) => ({
+              type: ref(i.type),
+              ...(i.method ? { method: ref(i.method) } : {}),
+              depth: i.depth,
+              via: i.via,
+            })),
+            affectedFiles: s.affectedFiles,
+          })),
+        });
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -1277,6 +1538,8 @@ export function createServer(
                 INJECTS: "injecting symbol -> injected type, from DI/framework wiring.",
                 REFLECTS: "looking-up symbol -> resolved target, from reflection/dynamic import.",
                 ROUTES: "registering symbol -> handler symbol, with HTTP verb and path.",
+                EMITS:
+                  "publisher symbol -> listener symbol, joined on event class or message topic.",
                 ANNOTATED_WITH: "symbol -> annotation node, carrying arguments and source line.",
               },
             },

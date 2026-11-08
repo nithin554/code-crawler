@@ -83,6 +83,44 @@ describe("Java parser", () => {
     const pf = await javaConfig.parseFile("public class Broken { void x( { }", "/tmp/Broken.java");
     expect(pf.types.length).toBeGreaterThanOrEqual(1);
   });
+
+  // `REFLECTIVE_METHODS` is a plain object literal, so `toString`, `valueOf`
+  // and `hasOwnProperty` used to resolve through `Object.prototype` and make
+  // the parser throw, dropping the whole file from the graph.
+  it("ignores Object.prototype method names when detecting reflection", async () => {
+    const pf = await javaConfig.parseFile(
+      `package com.acme;
+       public class Label {
+         private final Object id;
+         public Label(Object id) { this.id = id; }
+         public String render(Label other) {
+           return this.id.toString() + this.id.valueOf() + other.hasOwnProperty("x");
+         }
+       }`,
+      "/tmp/Label.java"
+    );
+    expect(pf.reflectiveRefs).toEqual([]);
+    expect(pf.types.map((t) => t.id)).toContain("com.acme.Label");
+  });
+
+  it("still records genuine reflective lookups", async () => {
+    const pf = await javaConfig.parseFile(
+      `package com.acme;
+       public class Lookup {
+         public void go(Class<?> cls) throws Exception {
+           Class.forName("com.acme.Impl");
+           cls.getDeclaredMethod("run");
+           cls.getDeclaredConstructor();
+         }
+       }`,
+      "/tmp/Lookup.java"
+    );
+    expect(pf.reflectiveRefs?.map((r) => r.mechanism)).toEqual([
+      "Class.forName",
+      "Class.getDeclaredMethod",
+      "Class.getDeclaredConstructor",
+    ]);
+  });
 });
 
 describe("baseTypeName", () => {

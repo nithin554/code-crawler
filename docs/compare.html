@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="google-site-verification" content="URgYOLgzCY-V-CbXInuNNyseZdk3NOCpVA5K6nTz9Mw" />
+    <link rel="canonical" href="https://nithin554.github.io/code-crawler/compare.html" />
+    <title>Why not something else? &mdash; Code-Crawler</title>
+    <meta
+      name="description"
+      content="An honest comparison of Code-Crawler with other code-graph MCP servers, including the cases where they are the better choice."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Code-Crawler" />
+    <meta property="og:title" content="Why not something else? &mdash; Code-Crawler" />
+    <meta
+      property="og:description"
+      content="An honest comparison of Code-Crawler with other code-graph MCP servers, including the cases where they are the better choice."
+    />
+    <meta property="og:url" content="https://nithin554.github.io/code-crawler/compare.html" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2338bdf8'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' text-anchor='middle' fill='%2305101f'%3E%7B%7D%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true">{}</span>
+          Code-Crawler
+        </a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="usage.html">Usage</a>
+          <a href="examples.html">Examples</a>
+          <a href="tools.html">Tools</a>
+          <a href="accuracy.html">Accuracy</a>
+          <a href="compare.html" aria-current="page">Compare</a>
+          <a href="skill.html">Skill</a>
+          <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div class="wrap">
+          <span class="eyebrow">Comparison</span>
+          <h1>Why not something else?</h1>
+          <p class="lead">
+            Several MCP servers now turn a repository into a queryable graph. They overlap, but
+            they are not solving the same problem. This page says what each one is better at,
+            including the ones that are better than Code-Crawler at the thing you may care about
+            most.
+          </p>
+          <div class="toc">
+            <a href="#short">The short answer</a>
+            <a href="#better">Where they win</a>
+            <a href="#different">Where we differ</a>
+            <a href="#not-claimed">What we don't claim</a>
+            <a href="#verify">Check it yourself</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="short">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>The short answer</h2>
+            <p>
+              If you need many languages, pick one of the tree-sitter projects below: they index
+              well over a hundred file formats and Code-Crawler indexes four. If you want the graph
+              pushed into context automatically rather than queried, that is also not what this is.
+              Code-Crawler is aimed at a narrower claim: inside JVM and framework-heavy code, the
+              edges should describe what actually runs, and every edge should admit how sure it is.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Choose it when</th>
+                  <th>Choose Code-Crawler when</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <a href="https://github.com/DeusData/codebase-memory-mcp">
+                      codebase-memory-mcp
+                    </a>
+                  </td>
+                  <td>
+                    You need breadth: its README states 162 languages and formats, a pure-C native
+                    backend, hybrid LSP type resolution for a dozen languages, a 3D explorer, and
+                    channel detection for Socket.IO, EventEmitter and generic pub-sub across eight
+                    languages. It is a far larger project than this one.
+                  </td>
+                  <td>
+                    You are tracing Spring or CDI wiring specifically and want the result reported
+                    per edge with a confidence value and a benchmark of where that confidence is
+                    justified.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="https://github.com/tigercosmos/code-cortex-mcp">code-cortex-mcp</a>
+                  </td>
+                  <td>
+                    You want the graph delivered as context by a hook instead of as tools the agent
+                    decides to call. Its README states 155 languages on tree-sitter and reports
+                    wall-clock savings over shell tools.
+                  </td>
+                  <td>
+                    You want the agent to ask a question and get structured JSON back, including
+                    the confidence level and, when resolution fails, ranked candidates.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="https://github.com/CodeGraphContext/CodeGraphContext">
+                      CodeGraphContext
+                    </a>
+                  </td>
+                  <td>
+                    You want a CLI as well as an MCP server, and you are willing to point it at an
+                    external graph database. Its database options are a feature we deliberately do
+                    not have.
+                  </td>
+                  <td>
+                    You want a single SQLite file, no services, and no connection string in your
+                    agent's configuration.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="https://github.com/diffbot/mcp-code-graph">mcp-code-graph</a>
+                  </td>
+                  <td>
+                    You want graph analysis and visualisation over a broad set of languages, with
+                    the visual surface as part of the product.
+                  </td>
+                  <td>
+                    You want runtime wiring &mdash; dispatch, injection, advice, routes &mdash; as
+                    queryable edges rather than as a rendered picture.
+                  </td>
+                </tr>
+                <tr>
+                  <td>grep, ripgrep, or plain file reading</td>
+                  <td>
+                    The question is about text, not structure: a message key, a template string, a
+                    config value, a comment, a regex. Our own measurement shows the graph losing
+                    these cases, and the agent skill says to use search for them.
+                  </td>
+                  <td>
+                    The question crosses files and hops: who calls this, what runs on this endpoint,
+                    what breaks if I change this.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="note">
+            <strong>Read the numbers with care.</strong> The feature claims above are quoted from
+            each project's own README on 2026-11-08. These projects change quickly; check their
+            repositories rather than trusting this table. No runtime benchmark of another tool was
+            run to produce this page.
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="better">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Where they are the better choice</h2>
+            <p>Stated plainly, because pretending otherwise would be dishonest.</p>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="badge">Language breadth</div>
+              <h3>Not close</h3>
+              <p class="muted">
+                Code-Crawler indexes Java, Python, TypeScript and JavaScript. If you work in Go,
+                Rust, C#, Kotlin, PHP or C++, a tree-sitter project indexes your code and this one
+                does not. Four languages is a deliberate scope, not a roadmap promise.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">Production maturity</div>
+              <h3>Theirs</h3>
+              <p class="muted">
+                codebase-memory-mcp and CodeGraphContext have orders of magnitude more users,
+                contributors and platform coverage. If you need something load-bearing today with
+                an installer for every editor, start there.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">Push over pull</div>
+              <h3>Model difference</h3>
+              <p class="muted">
+                An agent that forgets to call a tool gets no value from it. A hook-based server
+                that injects the graph on every search avoids that failure mode. Code-Crawler
+                requires the agent, or its skill, to choose the graph.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">Ecosystem integration</div>
+              <h3>Theirs</h3>
+              <p class="muted">
+                Dozens of client integrations, native installers and visual explorers are real
+                work that this repository has not done.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="different">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Where Code-Crawler is different</h2>
+            <p>
+              Four claims, each one checkable with a command rather than with an adjective.
+            </p>
+          </div>
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="badge">1</div>
+              <h3>Every edge carries its confidence</h3>
+              <p class="muted">
+                A call resolved through a concrete receiver is not the same claim as a call
+                resolved through an interface with one implementation. Both are returned, labelled
+                differently, and the reason for the lower number is documented.
+                <a href="tools.html#conventions">Read the conventions</a>.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">2</div>
+              <h3>Ambiguity returns candidates, not a guess</h3>
+              <p class="muted">
+                When an overload cannot be resolved, the edge is emitted with
+                <code>resolved: false</code> and the ranked alternatives attached. A named method
+                with no body &mdash; a Spring Data derived query, an interface method &mdash; stays
+                in the graph as what it is.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">3</div>
+              <h3>Accuracy is measured, and it is published with the misses</h3>
+              <p class="muted">
+                A pinned-commit benchmark suite runs in CI and fails the build when precision or
+                recall regresses. The page reports the weak spots next to the strong ones.
+                <a href="accuracy.html">See the numbers</a>.
+              </p>
+            </div>
+            <div class="card">
+              <div class="badge">4</div>
+              <h3>Runtime wiring, not just syntax</h3>
+              <p class="muted">
+                Injection, advice, dispatch, routes and event channels are first-class edge kinds,
+                derived in one place and rebuilt correctly on incremental crawls &mdash; with a
+                test proving the invalidation.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="not-claimed">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>What we don't claim</h2>
+            <p>The limits of the evidence, so you can discount it correctly.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Claim we avoid</th>
+                  <th>Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>&ldquo;More accurate than tool X.&rdquo;</td>
+                  <td>
+                    No head-to-head benchmark was run against any other tool on the same projects,
+                    so any such comparison would be invented.
+                  </td>
+                </tr>
+                <tr>
+                  <td>&ldquo;Precision and recall of 1.000 for real.&rdquo;</td>
+                  <td>
+                    Those figures are for 83 hand-labelled cases on four pinned repositories. They
+                    are a ratchet that catches regressions, not an estimate for your codebase.
+                  </td>
+                </tr>
+                <tr>
+                  <td>&ldquo;Framework X is supported.&rdquo;</td>
+                  <td>
+                    A framework or annotation is only claimed where a fixture exercises it and a
+                    test asserts the resulting edge.
+                  </td>
+                </tr>
+                <tr>
+                  <td>&ldquo;Exact runtime behaviour.&rdquo;</td>
+                  <td>
+                    The Java dispatch fixture is checked against a real recorded call log, but
+                    reflection, proxies and messaging are modelled from static evidence with
+                    confidence, not observed at run time on arbitrary projects.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="verify">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Check it yourself</h2>
+            <p>
+              Reproduce every number on this page, and compare against a competitor on the same
+              repository rather than trusting either README.
+            </p>
+          </div>
+          <div class="code-card">
+            <div class="code-title">baseline</div>
+            <pre><code>npm ci
+npm run bench:accuracy      <span class="c-com"># precision / recall per edge kind</span>
+npm run bench:runtime       <span class="c-com"># dispatch checked against a recorded call log</span>
+npm run bench:ergonomics    <span class="c-com"># agent cost: graph vs grep-and-read</span>
+npm run docs:check          <span class="c-com"># the counts on this site match the tool registry</span></code></pre>
+          </div>
+          <p class="muted small">
+            The benchmark projects are pinned by commit in <code>benchmarks/manifest.json</code>.
+            Point another tool at the same commits and compare; that is the only comparison worth
+            reading.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Code-Crawler · MIT licensed · <a href="https://www.npmjs.com/package/@nithin554/code-crawler">@nithin554/code-crawler</a></span>
+        <span>
+          <a href="https://github.com/nithin554/code-crawler">GitHub</a> ·
+          <a href="https://github.com/nithin554/code-crawler/issues">Issues</a> ·
+          <a href="https://github.com/nithin554/code-crawler/blob/main/ROADMAP.md">Roadmap</a> ·
+          <a href="tools.html">Tools</a> ·
+          <a href="accuracy.html">Accuracy</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

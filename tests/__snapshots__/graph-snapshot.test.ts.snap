@@ -158,7 +158,7 @@ unknown_symbol __reflect__:app.plugins.
 unknown_symbol __unknown__:plugin
 unknown_symbol __unknown__:plugin().run
 
-# edges (65)
+# edges (66)
 <fixture>/app/__init__.py -CONTAINS-> module:app
 <fixture>/app/api.py -CONTAINS-> module:app.api
 <fixture>/app/api.py -IMPORTS-> __import__:app.service.OrderService
@@ -201,16 +201,17 @@ module:app.api -CONTAINS-> module:app.api#create_order
 module:app.api -CONTAINS-> module:app.api#get_service
 module:app.api -CONTAINS-> module:app.api#read_order
 module:app.api -CONTAINS-> module:app.api$router
-module:app.api -INJECTS-> app.service.OrderService
 module:app.api -ROUTES-> module:app.api#create_order
 module:app.api -ROUTES-> module:app.api#read_order
 module:app.api#create_order -ANNOTATED_WITH-> @router.post
 module:app.api#create_order -CALLS-> app.service.OrderService#place
 module:app.api#create_order -CALLS-> ext:fastapi
+module:app.api#create_order -INJECTS-> module:app.api#get_service
 module:app.api#get_service -CALLS-> app.service.OrderService#<init>
 module:app.api#read_order -ANNOTATED_WITH-> @router.get
 module:app.api#read_order -CALLS-> app.repository.OrderRepository#find
 module:app.api#read_order -CALLS-> ext:fastapi
+module:app.api#read_order -INJECTS-> module:app.api#get_service
 module:app.dynamic -CONTAINS-> module:app.dynamic#load_plugin
 module:app.dynamic -CONTAINS-> module:app.dynamic#run
 module:app.dynamic#load_plugin -CALLS-> ext:builtins

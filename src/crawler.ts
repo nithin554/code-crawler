@@ -10,9 +10,17 @@ import type { AnnotationInfo, EntryPointInfo, ParsedFile } from "./parser/langua
 import { getLanguageConfig, languageForFile } from "./parser/languages/index.js";
 import { isConstructorMethodId, ownerTypeOfMethodId } from "./parser/methodId.js";
 import { aliasSignature, readTsconfigAliases } from "./parser/tsPaths.js";
+import { buildChannelEdges } from "./resolver/channels.js";
 import { normalizeTypeText, resolveTypeCandidates } from "./resolver/common.js";
 import { buildDynamicEdges, isDecoratorAnnotation } from "./resolver/dynamic.js";
 import {
+  INJECT_CONFIDENCE_ALIAS,
+  INJECT_CONFIDENCE_EXTERNAL,
+  INJECT_CONFIDENCE_PROVIDER,
+  INJECT_CONFIDENCE_UNIQUE_TYPE,
+  INJECT_CONFIDENCE_UNRESOLVED,
+  resolveDependencyAliasProvider,
+  resolveDependencyProvider,
   resolveInjectionTarget,
   resolveReflectiveTarget,
   resolveRouteHandler,
@@ -103,6 +111,8 @@ export interface CrawlResult {
   externalDependencies: number;
   /** Route registrations mapped to handler methods. */
   routes: number;
+  /** Publication-to-listener edges (events, topics, queues). */
+  eventFlows: number;
   languages: string[];
   durationMs: number;
 }
@@ -320,6 +330,7 @@ export function buildDeclarationGraph(parsed: ParsedFile): {
         startLine: t.startLine,
         endLine: t.endLine,
         annotations: t.annotations.map((a) => a.name),
+        ...(t.proxies && t.proxies.length > 0 ? { proxies: t.proxies } : {}),
         ...(t.isAspect ? { aspect: true } : {}),
         ...(t.isRecord ? { record: true } : {}),
         ...(t.exported === false ? { exported: false } : {}),
@@ -359,6 +370,8 @@ export function buildDeclarationGraph(parsed: ParsedFile): {
         startLine: m.startLine,
         endLine: m.endLine,
         annotations: m.annotations.map((a) => a.name),
+        ...(m.proxies && m.proxies.length > 0 ? { proxies: m.proxies } : {}),
+        ...(m.proxyBlocked ? { proxyBlocked: m.proxyBlocked } : {}),
         ...(m.adviceKind ? { adviceKind: m.adviceKind } : {}),
         ...(m.pointcut ? { pointcut: m.pointcut } : {}),
         ...(m.entryPoint
@@ -524,6 +537,9 @@ export function buildCallEdges(
           resolved: true,
           confidence: Math.round(rc.confidence * 100) / 100,
           reason: rc.reason,
+          ...(rc.alternatives && rc.alternatives.length > 0
+            ? { alternatives: rc.alternatives }
+            : {}),
           ...flowProps,
           ...flowKind,
         },
@@ -642,25 +658,68 @@ export function buildDependencyGraph(
     const owner = inj.ownerId;
     if (!owner) continue;
     injections++;
-    // Primitive/structural types carry no dependency identity, so they get a
-    // count but no target edge (`@Body() body: { id: string }`).
-    if (isBuiltinTypeText(inj.type)) continue;
-    const scoped = resolveTypeCandidates(parsed, index, inj.type);
-    let target: string | undefined = scoped.length === 1 ? scoped[0] : undefined;
+    // A candidate is an unannotated parameter that only *might* be a dependency
+    // alias. It is kept only when the alias really resolves to a provider —
+    // a guess would point the edge at whatever the type name happens to match.
+    if (inj.candidate) {
+      const provider = resolveDependencyAliasProvider(parsed, index, inj.type);
+      if (!provider) continue;
+      edges.push({
+        source: owner,
+        target: provider,
+        kind: "INJECTS",
+        properties: {
+          line: inj.line,
+          injectedName: inj.name,
+          framework: inj.framework,
+          inferred: true,
+          confidence: INJECT_CONFIDENCE_ALIAS,
+        },
+      });
+      continue;
+    }
+    // The framework calls the provider to build the value, so when one is named
+    // the dependency is that callable — not the type it happens to return.
+    let target: string | undefined = inj.provider
+      ? (resolveDependencyProvider(parsed, index, inj.provider) ?? undefined)
+      : undefined;
+    let confidence = INJECT_CONFIDENCE_PROVIDER;
+    if (!target) {
+      confidence = INJECT_CONFIDENCE_UNIQUE_TYPE;
+      // Primitive/structural types carry no dependency identity, so they get a
+      // count but no target edge (`@Body() body: { id: string }`).
+      if (isBuiltinTypeText(inj.type)) continue;
+      const scoped = resolveTypeCandidates(parsed, index, inj.type);
+      target = scoped.length === 1 ? scoped[0] : undefined;
+    }
     let isExternal = false;
     if (!target && parsed.language !== "java") {
       const resolved = resolveInjectionTarget(parsed, index, inj.type);
       if (resolved?.targetId) {
+        // A phantom id has no node behind it yet; materialise it below so the
+        // edge survives the global rebuild and reads as unresolved rather than
+        // disappearing.
         target = resolved.targetId.startsWith("ext:")
           ? externalNode(resolved.external ?? inj.type)
           : resolved.targetId;
         isExternal = Boolean(resolved.external);
+        confidence = isExternal
+          ? INJECT_CONFIDENCE_EXTERNAL
+          : resolved.targetId.startsWith("__inject__:")
+            ? INJECT_CONFIDENCE_UNRESOLVED
+            : INJECT_CONFIDENCE_UNIQUE_TYPE;
       }
     }
-    if (!target)
+    if (!target) {
+      confidence = INJECT_CONFIDENCE_UNRESOLVED;
       target = unknownNode(`__inject__:${inj.type || inj.name}`, inj.type || inj.name, {
         reason: "unresolved injected type",
       });
+    } else if (target.startsWith("__inject__:")) {
+      target = unknownNode(target, inj.type || inj.name, {
+        reason: "injected dependency is not named in source",
+      });
+    }
     edges.push({
       source: owner,
       target,
@@ -670,6 +729,7 @@ export function buildDependencyGraph(
         injectedName: inj.name,
         framework: inj.framework,
         ...(isExternal ? { external: true } : {}),
+        confidence,
       },
     });
   }
@@ -712,21 +772,22 @@ export function buildDependencyGraph(
   for (const route of parsed.routes ?? []) {
     const owner = route.enclosingTypeId;
     if (!owner) continue;
-    const handlerId = resolveRouteHandler(parsed, index, route.handlerName, route.moduleId);
-    if (!handlerId) continue;
+    const handler = resolveRouteHandler(parsed, index, route.handlerName, route.moduleId);
+    if (!handler) continue;
     routes++;
     edges.push({
       source: owner,
-      target: handlerId,
+      target: handler.id,
       kind: "ROUTES",
       properties: {
         line: route.line,
         framework: route.framework,
         httpMethod: route.httpMethod,
         path: route.path,
+        confidence: handler.confidence,
       },
     });
-    entryPointMarks.set(handlerId, {
+    entryPointMarks.set(handler.id, {
       kind: "http",
       detail: `${route.httpMethod} ${route.path}`,
     });
@@ -1034,6 +1095,7 @@ export async function crawlProject(
   let dynamicDispatchCount = 0;
   let adviceCount = 0;
   let aspectCount = 0;
+  let eventFlows = 0;
 
   // Every resolved call edge across the project, used to derive virtual
   // dispatch edges once the whole type hierarchy is known.
@@ -1150,11 +1212,15 @@ export async function crawlProject(
         for (const p of calls.phantomNodes) store.ensureNode(p);
 
         // Drop edges whose endpoints aren't part of the indexed project
-        // (external EXTENDS/IMPLEMENTS/IMPORTS targets).
+        // (external EXTENDS/IMPLEMENTS/IMPORTS targets). INJECTS is excluded:
+        // its target resolves through project-wide dependency aliases and
+        // provider callables, so it is rebuilt globally below.
         const edges = decl.edges
           .map((edge) => normalizeHierarchyTarget(edge, parsed.filePath))
           .concat(calls.edges, deps.edges)
-          .filter((e) => allNodeIds.has(e.source) && allNodeIds.has(e.target));
+          .filter(
+            (e) => e.kind !== "INJECTS" && allNodeIds.has(e.source) && allNodeIds.has(e.target)
+          );
         const nodes = decl.nodes.concat(calls.phantomNodes, deps.nodes);
         store.replaceFile(parsed.filePath, nodes, edges);
       }
@@ -1200,12 +1266,30 @@ export async function crawlProject(
       store.markEntryPoint(id, mark.kind, mark.detail ?? mark.kind);
     }
 
-    // Rebuild project-wide derived edges: virtual dispatch and AOP advice.
-    // Nothing changed, so the existing derived edges are still correct.
+    // Rebuild project-wide derived edges: virtual dispatch, AOP advice,
+    // injection and event wiring. Nothing changed, so the existing derived
+    // edges are still correct. Injection and events are rebuilt here because a
+    // dependency alias in one module retargets an edge owned by another, and a
+    // listener anywhere in the project changes a publisher's outbound set.
     if (changedPaths.size > 0 || filesRemoved > 0) {
-      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES"]);
+      store.deleteEdgesByKind(["DYNAMIC_DISPATCH", "ADVISES", "INJECTS", "EMITS"]);
       const dynamic = buildDynamicEdges(parsedFiles, index, allNodeIds, allCallEdges);
       store.upsertEdges(dynamic.edges);
+
+      const injectionEdges: GraphEdge[] = [];
+      for (const deps of dependencyGraphs.values()) {
+        for (const edge of deps.edges) {
+          if (edge.kind !== "INJECTS") continue;
+          if (!allNodeIds.has(edge.source) || !allNodeIds.has(edge.target)) continue;
+          injectionEdges.push(edge);
+        }
+      }
+      store.upsertEdges(injectionEdges);
+
+      const channels = buildChannelEdges(parsedFiles, allNodeIds);
+      store.upsertEdges(channels.edges);
+      eventFlows = channels.count;
+
       dynamicDispatchCount = dynamic.dispatchCount;
       adviceCount = dynamic.adviceCount;
       aspectCount = dynamic.aspects;
@@ -1247,6 +1331,7 @@ export async function crawlProject(
     reflections: totalReflections,
     externalDependencies: externalDeps.size,
     routes: totalRoutes,
+    eventFlows,
     languages: [...new Set(parsedFiles.map((p) => p.language))],
     durationMs: Date.now() - started,
   };

@@ -2,10 +2,13 @@ import { controlFlowOf, type FlowSpec } from "../controlFlow.js";
 import {
   adviceIn,
   aspectIn,
+  constructorModeIn,
   entryPointIn,
   type FrameworkScope,
   frameworkScope,
+  injectableFrameworkIn,
   injectionIn,
+  proxyKindIn,
 } from "../frameworks/index.js";
 import type {
   AnnotationInfo,
@@ -17,6 +20,7 @@ import type {
   MethodInfo,
   ParsedFile,
   ReflectiveRef,
+  RouteRegistration,
   TypeInfo,
   TypeKind,
 } from "../language.js";
@@ -110,7 +114,8 @@ function javaEntryPointOf(
   annotations: AnnotationInfo[],
   name: string,
   modifiers: string[],
-  scope: FrameworkScope
+  scope: FrameworkScope,
+  controllerPath: string
 ): EntryPointInfo | undefined {
   for (const annotation of annotations) {
     const match = entryPointIn(scope, annotation.name);
@@ -118,8 +123,11 @@ function javaEntryPointOf(
     const simple = annotation.name;
     switch (match.spec.kind) {
       case "http": {
-        const path = annotationValue(annotation) ?? "/";
-        return { kind: "http", detail: `${match.spec.httpMethod ?? "ANY"} ${path}` };
+        const path = joinPath(controllerPath, mappingPathOf(annotation) ?? "");
+        return {
+          kind: "http",
+          detail: `${mappingVerbOf(annotation, match.spec.httpMethod)} ${path}`,
+        };
       }
       case "messaging": {
         const topic = annotationValue(annotation);
@@ -146,6 +154,61 @@ function injectionFrameworkOf(annotations: AnnotationInfo[], scope: FrameworkSco
     if (framework) return framework;
   }
   return null;
+}
+
+/** String literals in an annotation argument list, with escapes resolved. */
+function stringLiteralsOf(text: string): string[] {
+  const out: string[] = [];
+  const re = /"((?:[^"\\]|\\.)*)"/g;
+  let m = re.exec(text);
+  while (m) {
+    out.push((m[1] ?? "").replace(/\\"/g, '"').replace(/\\\\/g, "\\"));
+    m = re.exec(text);
+  }
+  return out;
+}
+
+/**
+ * Every path a mapping annotation declares; empty when it declares none.
+ *
+ * Covers each form these annotations accept: a bare literal
+ * (`@GetMapping("/owners")`), the array form (`@GetMapping({"/vets"})`), the
+ * named attribute (`@RequestMapping(path = "/articles/{slug}")`), and no
+ * argument at all (`@GetMapping` on a method whose class carries the path).
+ * An empty result is not an empty path: the class prefix is then the whole
+ * route.
+ */
+function pathLiteralsOf(annotation: AnnotationInfo): string[] {
+  const args = annotation.arguments.join(", ").trim();
+  if (!args) return [];
+  const named = /\b(?:path|value)\s*=/.exec(args);
+  const body = named ? args.slice(named.index + named[0].length) : args;
+  return stringLiteralsOf(body);
+}
+
+/** First path an annotation declares, or null when it declares none. */
+function mappingPathOf(annotation: AnnotationInfo): string | null {
+  return pathLiteralsOf(annotation)[0] ?? null;
+}
+
+/**
+ * HTTP verb a mapping annotation implies.
+ *
+ * A verb-specific annotation (`@GetMapping`) carries its own verb, so
+ * `@RequestMapping` is the only one that needs reading: it is verb-agnostic
+ * unless it names one, as in `method = RequestMethod.POST`. Falling back to
+ * `ANY` is deliberate — claiming a verb we did not see would be a wrong edge.
+ */
+function mappingVerbOf(annotation: AnnotationInfo, implied: string | undefined): string {
+  if (implied && implied !== "ANY") return implied;
+  const m = /RequestMethod\.([A-Z]+)/.exec(annotation.arguments.join(", "));
+  return m?.[1] ?? "ANY";
+}
+
+/** Join a class-level prefix with a method-level path, rooted and slash-normalised. */
+function joinPath(base: string, suffix: string): string {
+  const joined = `${base}/${suffix}`.replace(/\/+/g, "/").replace(/(.)\/$/, "$1");
+  return joined === "" ? "/" : joined.startsWith("/") ? joined : `/${joined}`;
 }
 
 /** Extract simple/qualified type names from a `superclass`/`super_interfaces` node. */
@@ -195,6 +258,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   const callSites: CallSite[] = [];
   const reflectiveRefs: ReflectiveRef[] = [];
   const injections: InjectionPoint[] = [];
+  const routes: RouteRegistration[] = [];
   const localsByMethod = new Map<string, Map<string, string>>();
   /** Method ids emitted so far, so overloads stay distinct instead of collapsing. */
   const usedMethodIds = new Set<string>();
@@ -230,6 +294,22 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
   // === Pass A: structural extraction with nesting stack for type FQNs. ===
   const nestingStack: string[] = [];
 
+  /**
+   * Prefix a controller class contributes to its handlers.
+   *
+   * Only a class-level mapping annotation counts. Its meaning comes from the
+   * framework registry rather than a hardcoded name list, so a new mapping
+   * annotation only has to be declared once in `spring.ts`.
+   */
+  function controllerPrefixOf(annotations: AnnotationInfo[]): string {
+    for (const annotation of annotations) {
+      const match = entryPointIn(scope, annotation.name);
+      if (match?.spec.kind !== "http") continue;
+      return mappingPathOf(annotation) ?? "";
+    }
+    return "";
+  }
+
   function visitType(node: TSNode): void {
     const simple = typeName(node);
     const outer = nestingStack[nestingStack.length - 1];
@@ -239,6 +319,9 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
 
     const annotations = extractAnnotations(node);
     const isRecord = node.type === "record_declaration";
+    const typeModifiers = extractModifiers(node);
+    // A class-level annotation puts every interceptable method behind the proxy.
+    const typeProxies = proxyKindsOf(annotations, scope);
     types.push({
       id,
       kind: typeKind(node),
@@ -249,6 +332,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       endLine: node.endPosition.row,
       annotations,
       isAspect: annotations.some((a) => aspectIn(scope, a.name)),
+      ...(typeProxies.length > 0 ? { proxies: typeProxies } : {}),
       ...(isRecord ? { isRecord: true } : {}),
     });
     nestingStack.push(id);
@@ -257,12 +341,40 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     const components = isRecord ? extractRecordComponents(node, id) : [];
 
     const body = fieldChild(node, "body") ?? childOfType(node, "class_body");
+    // A class-level mapping annotation supplies the prefix every handler path
+    // hangs off, e.g. `@RequestMapping("/owners/{ownerId}")` on PetController.
+    const controllerPath = controllerPrefixOf(annotations);
+    // A bean's dependencies reach it through the container, so only a bean can
+    // have an implicit injection point.
+    const beanFramework = annotations
+      .map((a) => injectableFrameworkIn(scope, a.name))
+      .find((name) => name !== undefined);
+    const declaredConstructors = body
+      ? body.namedChildren.filter(
+          (member) =>
+            member.type === "constructor_declaration" ||
+            member.type === "compact_constructor_declaration"
+        ).length
+      : 0;
+    // Lombok generates the constructor at compile time, so it is absent from
+    // the AST. Derive its parameters only when the class wrote none itself.
+    const lombokMode = annotations
+      .map((a) => constructorModeIn(scope, a.name))
+      .find((mode) => mode !== undefined);
+    const generatedConstructors = lombokMode ? 1 : 0;
+    // Spring autowires the sole constructor without an annotation; with more
+    // than one it needs `@Autowired` to choose, so an unannotated pair is not
+    // an injection point at all.
+    const implicitFramework =
+      beanFramework && declaredConstructors + generatedConstructors === 1
+        ? beanFramework
+        : undefined;
     if (body) {
       for (const member of body.namedChildren) {
         if (member.type === "method_declaration") {
-          extractMethod(member, id);
+          extractMethod(member, id, controllerPath, typeProxies, typeModifiers.includes("final"));
         } else if (member.type === "constructor_declaration") {
-          extractConstructor(member, id);
+          extractConstructor(member, id, implicitFramework);
         } else if (member.type === "compact_constructor_declaration") {
           extractCompactConstructor(member, id, components);
         } else if (member.type === "field_declaration") {
@@ -274,6 +386,10 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     }
 
     extractRecordAccessors(id, components, node.startPosition.row);
+
+    if (body && lombokMode && beanFramework && declaredConstructors === 0) {
+      collectLombokInjections(body, id, lombokMode, beanFramework);
+    }
 
     nestingStack.pop();
   }
@@ -334,14 +450,22 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     }
   }
 
-  function extractMethod(node: TSNode, typeId: string): void {
+  function extractMethod(
+    node: TSNode,
+    typeId: string,
+    controllerPath: string,
+    typeProxies: string[],
+    typeFinal: boolean
+  ): void {
     const name = childOfType(node, "identifier")?.text ?? "";
     const params = extractParams(node);
     const id = methodIdFor(typeId, name, params, hasVarargs(node));
     const annotations = extractAnnotations(node);
     const advice = adviceOf(annotations, scope);
     const modifiers = extractModifiers(node);
-    const entryPoint = javaEntryPointOf(annotations, name, modifiers, scope);
+    const proxy = methodProxiesOf(annotations, modifiers, typeProxies, typeFinal, scope);
+    const entryPoint = javaEntryPointOf(annotations, name, modifiers, scope, controllerPath);
+    collectRoutes(annotations, name, typeId, controllerPath);
     methods.push({
       id,
       typeId,
@@ -354,41 +478,131 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       returnType: extractReturnType(node),
       modifiers,
       annotations,
+      ...proxy,
       ...advice,
       ...(entryPoint ? { entryPoint } : {}),
     });
-    collectParamInjections(node, id, annotations);
+    collectParamInjections(node, typeId, annotations);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }
 
-  /** Constructor parameter injections: Spring/Jakarta constructor injection. */
+  /**
+   * Record the HTTP routes a handler responds to.
+   *
+   * A Spring handler is registered by annotation, not by any call in the source,
+   * so these registrations are the only evidence the route exists. One method can
+   * serve several paths (`@GetMapping({"/a", "/b"})`); the path recorded is the
+   * class prefix joined with the method's own, which is what the server serves. A
+   * method-level annotation with no path of its own still registers the class
+   * prefix, and a method with no mapping annotation registers nothing.
+   */
+  function collectRoutes(
+    annotations: AnnotationInfo[],
+    handlerName: string,
+    typeId: string,
+    controllerPath: string
+  ): void {
+    for (const annotation of annotations) {
+      const match = entryPointIn(scope, annotation.name);
+      if (match?.spec.kind !== "http") continue;
+      const paths = pathLiteralsOf(annotation);
+      const httpMethod = mappingVerbOf(annotation, match.spec.httpMethod);
+      for (const path of paths.length > 0 ? paths : [""]) {
+        routes.push({
+          framework: match.module.name,
+          httpMethod,
+          path: joinPath(controllerPath, path),
+          handlerName,
+          moduleId: "",
+          enclosingTypeId: typeId,
+          line: annotation.line,
+        });
+      }
+    }
+  }
+
+  /**
+   * Dependency parameters of a constructor or a bean method.
+   *
+   * A parameter is injected when it, or the member carrying it, is annotated.
+   * `implicitFramework` covers the case Spring resolves silently: the sole
+   * constructor of a bean needs no annotation since Spring 4.3.
+   *
+   * The owner is the type, not the constructor: the dependency belongs to the
+   * bean, and field injection is recorded that way too.
+   */
   function collectParamInjections(
     node: TSNode,
-    typeId: string,
-    memberAnnotations: AnnotationInfo[]
+    ownerId: string,
+    memberAnnotations: AnnotationInfo[],
+    implicitFramework?: string
   ): void {
     const paramsNode = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
     if (!paramsNode) return;
     const memberFramework = injectionFrameworkOf(memberAnnotations, scope);
     for (const fp of childrenOfType(paramsNode, "formal_parameter")) {
-      const framework = injectionFrameworkOf(extractAnnotations(fp), scope);
+      const framework =
+        injectionFrameworkOf(extractAnnotations(fp), scope) ?? memberFramework ?? implicitFramework;
       if (!framework) continue;
       const name = childOfType(fp, "identifier")?.text ?? "";
       if (!name) continue;
       const typeNode = typeNodeOf(fp);
       injections.push({
         kind: "constructor-parameter",
-        ownerId: typeId,
+        ownerId,
         name,
         type: typeNode ? baseTypeName(typeNode.text) : "",
-        framework: framework ?? memberFramework ?? "unknown",
+        framework,
         line: fp.startPosition.row,
       });
     }
   }
 
-  function extractConstructor(node: TSNode, typeId: string): void {
+  /**
+   * Dependencies a Lombok-generated constructor takes.
+   *
+   * The constructor does not exist in the AST, so its parameters are derived
+   * from the fields the annotation promotes. Only used when the class declares
+   * no constructor of its own, so a hand-written constructor and a generated
+   * one can never both report the same edge. A field initialised at its
+   * declaration is skipped: the container may still set it, but the value in
+   * the source is what the code actually uses, and treating it as injected
+   * invents dependencies on things like `new HashMap<>()`.
+   */
+  function collectLombokInjections(
+    body: TSNode,
+    typeId: string,
+    mode: "all" | "required",
+    framework: string
+  ): void {
+    for (const member of body.namedChildren) {
+      if (member.type !== "field_declaration") continue;
+      const modifiers = extractModifiers(member);
+      if (modifiers.includes("static")) continue;
+      const required =
+        modifiers.includes("final") || extractAnnotations(member).some((a) => a.name === "NonNull");
+      if (mode === "required" && !required) continue;
+      const typeNode = typeNodeOf(member);
+      const type = typeNode ? baseTypeName(typeNode.text) : "";
+      for (const declarator of childrenOfType(member, "variable_declarator")) {
+        const name = childOfType(declarator, "identifier")?.text ?? "";
+        if (!name) continue;
+        // `Foo foo = …` has a second named child; `Foo foo` has only the name.
+        if (declarator.namedChildren.length > 1) continue;
+        injections.push({
+          kind: "constructor-parameter",
+          ownerId: typeId,
+          name,
+          type,
+          framework,
+          line: declarator.startPosition.row,
+        });
+      }
+    }
+  }
+
+  function extractConstructor(node: TSNode, typeId: string, implicitFramework?: string): void {
     const params = extractParams(node);
     const id = methodIdFor(typeId, "<init>", params, hasVarargs(node));
     const annotations = extractAnnotations(node);
@@ -405,7 +619,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
       modifiers: extractModifiers(node),
       annotations,
     });
-    collectParamInjections(node, id, annotations);
+    collectParamInjections(node, typeId, annotations, implicitFramework);
     const locals = collectLocals(node);
     if (locals) localsByMethod.set(id, locals);
   }
@@ -533,6 +747,7 @@ export async function parseFile(source: string, filePath: string): Promise<JavaP
     scopeTypes: typeByName,
     reflectiveRefs,
     injections,
+    routes,
   };
 }
 
@@ -615,6 +830,46 @@ function firstIdentifier(node: TSNode): TSNode | null {
 function hasVarargs(node: TSNode): boolean {
   const params = fieldChild(node, "parameters") ?? childOfType(node, "formal_parameters");
   return params ? params.namedChildren.some((p) => p.type === "spread_parameter") : false;
+}
+
+/** Proxy kinds carried by annotations, deduplicated and in declaration order. */
+function proxyKindsOf(annotations: AnnotationInfo[], scope: FrameworkScope): string[] {
+  const kinds: string[] = [];
+  for (const annotation of annotations) {
+    const kind = proxyKindIn(scope, annotation.name);
+    if (kind !== undefined && !kinds.includes(kind)) kinds.push(kind);
+  }
+  return kinds;
+}
+
+/**
+ * The proxy around a method, and why it is absent when Spring cannot wrap it.
+ *
+ * A class-level annotation applies to every method the container can override,
+ * so the method inherits it. A `private`, `static` or `final` method cannot be
+ * overridden by the generated subclass, and a `final` class cannot be
+ * subclassed at all, so the annotation is silently inert - the case where the
+ * source reads as transactional or asynchronous and the run time does neither.
+ */
+function methodProxiesOf(
+  annotations: AnnotationInfo[],
+  modifiers: string[],
+  typeProxies: string[],
+  typeFinal: boolean,
+  scope: FrameworkScope
+): { proxies?: string[]; proxyBlocked?: string } {
+  const own = proxyKindsOf(annotations, scope);
+  const proxies = own.length > 0 ? own : typeProxies;
+  if (proxies.length === 0) return {};
+  const blocked = modifierBlockerOf(modifiers) ?? (typeFinal ? "final-type" : undefined);
+  return { proxies, ...(blocked ? { proxyBlocked: blocked } : {}) };
+}
+
+function modifierBlockerOf(modifiers: string[]): string | undefined {
+  if (modifiers.includes("private")) return "private";
+  if (modifiers.includes("static")) return "static";
+  if (modifiers.includes("final")) return "final";
+  return undefined;
 }
 
 function extractReturnType(node: TSNode): string {
@@ -759,7 +1014,12 @@ function reflectionOf(
     const target = unquote(info.args[0] ?? "");
     return target ? { ...base, mechanism: "ServiceLoader.load", targetKind: "type", target } : null;
   }
-  const spec = REFLECTIVE_METHODS[info.name];
+  // `REFLECTIVE_METHODS` is a plain object, so an unguarded index finds
+  // `Object.prototype.toString`/`valueOf`/`constructor` for ordinary calls like
+  // `id.toString()`. Only own keys are reflective mechanisms.
+  const spec = Object.hasOwn(REFLECTIVE_METHODS, info.name)
+    ? REFLECTIVE_METHODS[info.name]
+    : undefined;
   if (!spec || info.receiver === null) return null;
   if (
     spec.mechanism.startsWith("Class.getConstructor") ||

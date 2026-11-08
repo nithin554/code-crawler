@@ -1,0 +1,197 @@
+{
+  "project": "fastapi-template",
+  "language": "python",
+  "framework": "fastapi",
+  "cases": [
+    {
+      "id": "calls-imported-function",
+      "edgeKind": "CALLS",
+      "from": "module:backend.app.api.routes.utils#test_email",
+      "to": "module:backend.app.utils#generate_test_email",
+      "expected": "present",
+      "source": "hand",
+      "note": "Plain module-level import call. The cleanest Python resolution case in this project."
+    },
+    {
+      "id": "calls-second-imported-function",
+      "edgeKind": "CALLS",
+      "from": "module:backend.app.api.routes.utils#test_email",
+      "to": "module:backend.app.utils#send_email",
+      "expected": "present",
+      "source": "hand",
+      "note": "Second import from the same module, in a multi-line import block."
+    },
+    {
+      "id": "calls-no-unimported-sibling",
+      "edgeKind": "CALLS",
+      "from": "module:backend.app.api.routes.utils#test_email",
+      "to": "module:backend.app.api.routes.items#read_items",
+      "expected": "absent",
+      "source": "hand",
+      "note": "Unrelated route module that is never imported here. Guards against resolving otherwise-unqualified names across the whole project."
+    },
+    {
+      "id": "injects-session-alias",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.items#read_items",
+      "to": "module:backend.app.api.deps#get_db",
+      "expected": "present",
+      "source": "hand",
+      "note": "read_items takes session: SessionDep, where SessionDep is Annotated[Session, Depends(get_db)]. The dependency is reached through a type alias, not a literal Depends(...) in this file."
+    },
+    {
+      "id": "injects-current-user-alias",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.items#read_items",
+      "to": "module:backend.app.api.deps#get_current_user",
+      "expected": "present",
+      "source": "hand",
+      "note": "read_items takes current_user: CurrentUser, another Annotated dependency alias."
+    },
+    {
+      "id": "injects-nested-dependency",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.deps#get_current_user",
+      "to": "module:backend.app.api.deps#get_db",
+      "expected": "present",
+      "source": "hand",
+      "note": "Dependencies chain: get_current_user itself depends on get_db. Without this edge the whole read path is disconnected."
+    },
+    {
+      "id": "injects-superuser-guard",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.utils#test_email",
+      "to": "module:backend.app.api.deps#get_current_active_superuser",
+      "expected": "present",
+      "source": "hand",
+      "note": "Uses the plain Depends(get_current_active_superuser) form rather than an alias, so both forms must work."
+    },
+    {
+      "id": "injects-session-in-login",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.login#login_access_token",
+      "to": "module:backend.app.api.deps#get_db",
+      "expected": "present",
+      "source": "hand",
+      "note": "login_access_token takes session: SessionDep alongside an Annotated Depends() form parameter."
+    },
+    {
+      "id": "injects-no-dependency-free-handler",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.utils#health_check",
+      "to": "module:backend.app.api.deps#get_db",
+      "expected": "absent",
+      "source": "hand",
+      "note": "health_check() takes no parameters at all. Guards against attaching every declared dependency to every handler in the module."
+    },
+    {
+      "id": "injects-no-unused-current-user",
+      "edgeKind": "INJECTS",
+      "from": "module:backend.app.api.routes.login#login_access_token",
+      "to": "module:backend.app.api.deps#get_current_user",
+      "expected": "absent",
+      "source": "hand",
+      "note": "login_access_token uses only SessionDep and OAuth2PasswordRequestForm, not CurrentUser, even though their sibling module imports CurrentUser."
+    },
+    {
+      "id": "route-items-list",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.items",
+      "to": "module:backend.app.api.routes.items#read_items",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/items/" },
+      "note": "router = APIRouter(prefix=\"/items\") with @router.get(\"/\"). Graded at router-prefix level; the app also mounts this router under /api/v1."
+    },
+    {
+      "id": "route-items-create",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.items",
+      "to": "module:backend.app.api.routes.items#create_item",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/items/" },
+      "note": "Prefix joined with a root decorator path."
+    },
+    {
+      "id": "route-items-read-one",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.items",
+      "to": "module:backend.app.api.routes.items#read_item",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/items/{id}" },
+      "note": "Prefix joined with a single-segment path variable."
+    },
+    {
+      "id": "route-items-delete",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.items",
+      "to": "module:backend.app.api.routes.items#delete_item",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "DELETE", "path": "/items/{id}" },
+      "note": "Verb must come from the decorator name, not a default."
+    },
+    {
+      "id": "route-users-list",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.users",
+      "to": "module:backend.app.api.routes.users#read_users",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/users/" },
+      "note": "Second prefixed router, so a fix cannot be special-cased to one module."
+    },
+    {
+      "id": "route-users-me",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.users",
+      "to": "module:backend.app.api.routes.users#read_user_me",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/users/me" },
+      "note": "Prefix joined with a literal segment."
+    },
+    {
+      "id": "route-utils-health",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.utils",
+      "to": "module:backend.app.api.routes.utils#health_check",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "GET", "path": "/utils/health-check/" },
+      "note": "Prefix plus a trailing-slash path. The trailing slash is significant in FastAPI."
+    },
+    {
+      "id": "route-private-create-user",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.private",
+      "to": "module:backend.app.api.routes.private#create_user",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/private/users/" },
+      "note": "Router declared as APIRouter(tags=[\"private\"], prefix=\"/private\") and the decorator path already contains /users/. Prefix must still be prepended."
+    },
+    {
+      "id": "route-login-token",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.login",
+      "to": "module:backend.app.api.routes.login#login_access_token",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/login/access-token" },
+      "note": "Control case: this router has no prefix and the decorator spells the full path, so this route is correct today and must stay correct after prefix joining is added."
+    },
+    {
+      "id": "route-login-test-token",
+      "edgeKind": "ROUTES",
+      "from": "module:backend.app.api.routes.login",
+      "to": "module:backend.app.api.routes.login#test_token",
+      "expected": "present",
+      "source": "hand",
+      "route": { "httpMethod": "POST", "path": "/login/test-token" },
+      "note": "Second control case in the unprefixed router."
+    }
+  ]
+}

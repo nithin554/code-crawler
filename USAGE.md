@@ -242,8 +242,8 @@ The directory is self-contained — `SKILL.md` plus a `reference/` folder — so
 is the whole install.
 
 `SKILL.md` carries the discovery `description`, the client config above, the
-one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps all
-27 tools to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
+one-database-per-project rule, and the crawl-first workflow; `reference/tools.md` maps every
+tool to the questions they answer; `reference/edge-semantics.md` explains `confidence`,
 `external`, and phantom nodes, which are the three things agents misread most.
 
 ### Installing the plugin
@@ -363,7 +363,7 @@ flowchart TD
    include `resolved`, `confidence`, and `reason` on each edge.
 5. **`trace_execution`** — follow *runtime* order from a root: virtual dispatch fans out to
    overrides, and aspect advice is woven in at the right position.
-6. **`find_routes`, `find_injections`, `find_reflections`,
+6. **`find_routes`, `find_injections`, `find_event_flows`, `find_reflections`,
    `find_external_dependencies`** — map the wiring that no call graph can see.
 7. **`find_hotspots` / `find_dead_code`** — prioritise and prune.
 
@@ -388,6 +388,50 @@ trace_execution(symbol: "src.controller.OrderController#create", depth: 4)
 The route tells you the entry point; `trace_execution` tells you the reachable set with
 dispatch and advice applied.
 
+### "Who reacts when this publishes an event?"
+
+```text
+find_event_flows(symbol: "com.acme.events.OrderPublisher#place")
+```
+
+The publisher never names the listener, so no `CALLS` edge joins them — the framework
+makes that call. Each flow names the shared `channel` and its `confidence`:
+
+| Source | Listener | channel | channelKind | confidence |
+| --- | --- | --- | --- | --- |
+| `OrderPublisher#place` | `OrderListeners#onPlaced` | `OrderPlaced` | `event-class` | `1` |
+| `OrderPublisher#place` | `AuditListener#onPlaced` | `OrderPlaced` | `event-class` | `1` (phase `AFTER_COMMIT`) |
+| `OrderMessaging#publishOrder` | `OrderConsumers#consumeOrder` | `orders` | `topic` | `0.85` |
+
+`confidence` is `1` when both sides resolved a fully-qualified event type (the same class,
+by identity) and `0.85` for a literal topic or queue, where the same name could belong to a
+different broker. A channel computed at run time, or a published plain parameter, produces
+no edge at all rather than a guess. Event edges are followed by `get_callers`,
+`get_callees`, and `trace_path` by default; pass `include_events: false` to ignore them.
+
+### "Is this @Transactional method actually transactional?"
+
+```text
+get_callers(symbol: "com.acme.OrderService#place")
+```
+
+`@Transactional`, `@Async` and `@Cacheable` are delivered by a run-time proxy, so the
+behaviour depends on *how* the method is reached, not on the annotation alone. Direct
+callers report the proxy around the callee and whether the call actually crosses it:
+
+| Caller | proxy | proxyBlocked | inert | Meaning |
+| --- | --- | --- | --- | --- |
+| `ReportService#publish` | `["transactional"]` | â€” | â€” | crosses the proxy: a transaction opens |
+| `OrderService#retry` | `["transactional"]` | â€” | `true` | self-invocation: the proxy is bypassed |
+| `OrderService#audit` (`@Async`, private) | `["async"]` | `private` | â€” | the container cannot override it |
+| `OrderService#seal` (final, class-level `@Transactional`) | `["transactional"]` | `final` | â€” | no proxy can wrap it |
+| `SealedService#run` (final class) | `["transactional"]` | `final-type` | â€” | the class cannot be subclassed |
+
+A proxy annotation the container cannot honour is worse than a missing one: the source
+reads as transactional and the run time does nothing. `proxyBlocked` names the reason,
+and `inert` marks a call that never leaves the object. Proxy facts appear on direct
+callers only â€” at depth 2 the call that would be proxied no longer exists.
+
 ### "What breaks if I change this method?"
 
 ```text
@@ -397,6 +441,32 @@ get_callers(symbol: "app.repository.OrderRepository#find", depth: 3)
 Incoming `CALLS` edges answer the static case; incoming `DYNAMIC_DISPATCH` edges answer
 the "called through an interface" case. Check both — a method with zero callers can still
 be reached through dispatch.
+
+### "What does this whole diff break?"
+
+```text
+change_impact(diff: "<output of git diff>")
+change_impact(files: ["app/repository/OrderRepository.java"])
+change_impact(symbols: ["app.repository.OrderRepository#find"])
+```
+
+`impact_analysis` answers for one symbol. `change_impact` answers for a review: hand it a
+unified diff, a list of files, or a list of symbols in any combination, and every touched
+declaration gets the same treatment — callers, entry points, routes, implementations — plus
+two things a call graph alone cannot show: who injects the changed type
+(`injectionPoints`, split into `injects` and `injectedBy`) and which advice intercepts the
+changed method (`advice`).
+
+Hunk line ranges are mapped onto declarations by their recorded line span, and a changed
+method replaces its enclosing class so a class-level and a method-level view of one edit are
+not counted twice. Files are matched exactly first, then by path suffix, because a diff is
+repository-relative while `file_path` is crawl-root-relative.
+
+Results are ordered by `score`. That score is for ordering only — a framework entry point
+dominates, then routes, entry points, injection points, advice and event flows, then raw
+caller count. It is not a probability, and a low score is not a safety guarantee. Paths and
+symbols that matched nothing come back in `unmatched` rather than being dropped, and
+`truncated` is set when `max_symbols` cut the report.
 
 ### "Who implements this interface?"
 
@@ -487,7 +557,7 @@ before it, overloads collapsed into one node and the last one indexed won.
 ### Edge kinds
 
 `CALLS`, `DECLARED_IN`, `CONTAINS`, `IMPLEMENTS`, `EXTENDS`, `IMPORTS`, `REFERENCES`,
-`DYNAMIC_DISPATCH`, `ADVISES`, `ANNOTATED_WITH`, `REFLECTS`, `INJECTS`, `ROUTES`.
+`DYNAMIC_DISPATCH`, `ADVISES`, `ANNOTATED_WITH`, `REFLECTS`, `INJECTS`, `ROUTES`, `EMITS`.
 
 `CALLS` edges are enriched:
 
@@ -511,9 +581,39 @@ before it, overloads collapsed into one node and the last one indexed won.
 - `resolved: false` means the target is an `unknown_symbol` phantom node — the graph stays
   traversable, but do not trust it as a real dependency.
 - `confidence` is a heuristic score; `reason` explains how the receiver type was inferred.
+- `alternatives` lists the rival overloads when the call site could not be narrowed to one
+  declaration. The edge is still `resolved` — only the target among rivals is uncertain — and
+  confidence is capped at `0.6`. Report the ambiguity with the call instead of picking one.
 - `conditional` / `controlFlow` / `guards` tell you the call is not on the happy path,
   with the guard text as it appears in source.
 - `external` on `REFERENCES` edges names the package a symbol belongs to.
+
+### Compact responses and truncation hints
+
+Every tool accepts `compact: true`. Symbol references then come back as fully-qualified
+names, so `{"caller": {"id": "app.Svc#run", "qualifiedName": "app.Svc#run", "name": "run",
+"kind": "method", "filePath": "/abs/path/svc.py"}}` becomes `{"caller": "app.Svc#run"}`.
+Everything that is not a reference — `count`, `page`, `path`, `line`, `confidence`,
+`edgeKind` — is unchanged, so the payload still says the same thing with less framing.
+Measured on the dispatch fixture it removes 61% of a `get_callers` response and 83% of a
+`search_symbols` response. Expand just the names you decided to care about with `get_node`,
+which accepts a qualified name.
+
+The list tools also accept `max_tokens` and `cursor`. When a budget cuts the list, the
+`page` block carries `truncated: true` and a `hint` naming the exact `cursor` to pass next:
+
+```json
+"page": {
+  "totalCount": 25, "returnedCount": 2, "cursor": 0, "nextCursor": 2,
+  "truncated": true, "estimatedTokens": 86,
+  "hint": "Truncated: items 0-1 of 25. Pass cursor=2 for the next page, raise max_tokens, or narrow the query with this tool's filter arguments."
+}
+```
+
+Read that hint rather than recomputing the arithmetic, and read `totalCount` instead of
+paging to count. Note that the budget is measured before `compact` is applied, so a compact
+page holds the same items as the non-compact one and costs less to read; it does not fit
+more items.
 
 ---
 
@@ -525,7 +625,7 @@ different surface.
 
 ### Python — FastAPI routes and `Depends()`
 
-`tests/fixtures/python/sample` (6 files · 49 nodes · 65 edges):
+`tests/fixtures/python/sample` (6 files · 49 nodes · 66 edges):
 
 ```jsonc
 // find_routes()
@@ -538,9 +638,9 @@ different surface.
 { "source": { "id": "app.service.OrderService" },
   "target": { "id": "app.repository.OrderRepository" },
   "framework": "dependency-injector", "injectedName": "repo", "line": 15 }
-{ "source": { "id": "module:app.api" },
-  "target": { "id": "app.service.OrderService" },
-  "framework": "fastapi", "injectedName": "service", "line": 19 }
+{ "source": { "id": "module:app.api#read_order" },
+  "target": { "id": "module:app.api#get_service" },
+  "framework": "fastapi", "injectedName": "service", "line": 15 }
 
 // find_reflections()
 { "source": { "id": "module:app.dynamic#load_plugin" },
@@ -638,9 +738,16 @@ walkthrough.
   become `annotation` nodes with `ANNOTATED_WITH` edges.
 - **Reflection and run-time indirection** — `Class.forName`, `ServiceLoader`, `getattr`,
   `importlib`, `require`, dynamic `import()`, as `REFLECTS` edges.
-- **Dependency injection** — `@Autowired`, NestJS constructor injection, FastAPI `Depends`,
+- **Dependency injection** — `@Autowired`, Spring sole-constructor and Lombok-generated
+  constructor injection, NestJS constructor injection, FastAPI `Depends` including
+  module-level `Annotated[...]` aliases and decorator-level `dependencies=[...]`,
   `dependency-injector`, as `INJECTS` edges.
 - **Framework entry points and routes** — Spring MVC, FastAPI, Flask, Quart, NestJS, Express.
+- **Event and message flows** — Spring `@EventListener` / `@TransactionalEventListener`,
+  Kafka and JMS listeners, NestJS `@OnEvent`, as `EMITS` edges from publisher to listener.
+- **Run-time proxy boundaries** — `@Transactional`, `@Async` and `@Cacheable` recorded on the
+  declaration, including why the container cannot honour one (`private`, `static`, `final`,
+  `final-type`) and whether a call is a self-invocation that bypasses the proxy.
 - **Control flow on edges** — conditional flags, control-flow kinds, and guard text.
 - **External dependencies** — package-level `external_symbol` nodes with a summary query.
 - **Analytics** — hotspots and dead-code candidates.
@@ -654,12 +761,22 @@ walkthrough.
   `__reflect__:` marker instead. That is deliberate — inventing a target would be worse
   than the marker.
 - **DI containers configured outside code** (XML, `application.yml` bean wiring, NestJS
-  dynamic module factories). Only injection visible in source is reported.
+  dynamic module factories). Only injection visible in source is reported — an annotation,
+  a Spring sole constructor, or a FastAPI `Depends(...)` alias. Lombok is the one case where a
+  dependency is derived from a generator rather than a written constructor, and it is limited
+  to the promoted-field rules of the annotation itself.
+- **Which candidate a container would actually choose.** A `@Qualifier` marks the site as an
+  injection, but its bean name is not used to pick a target, and `@Primary` and conditional
+  beans are ignored. When several beans satisfy one injection, the edge names the declared
+  type, which may not be the instance that runs.
 - **Libraries outside the crawled tree.** Third-party code is summarised as `ext:`
   packages; it is never crawled, so you cannot trace into it.
 - **Runtime plugin loading beyond a literal prefix.** A prefix plus a variable
   (`"app.plugins." + name`) resolves as far as the prefix; the concrete module is unknown.
 - **Branch-level dead code.** `find_dead_code` is whole-method, not per-branch.
+- **Proxies configured outside annotations.** XML `<tx:advice>`, `ProxyFactoryBean`, and a
+  custom annotation meta-annotated with `@Transactional` are not followed; only the three
+  annotations in the framework table produce proxy facts, and only for Java.
 - **Cross-language edges.** Python does not call into Java even when they share a process
   boundary (e.g. via gRPC); the languages share a graph, not a call edge.
 - **Types changed at runtime** — monkey-patching, `__getattr__`-based proxies, and
@@ -749,6 +866,31 @@ It is probably invoked by a framework. Confirm with `find_entry_points` and `fin
 if the annotation is a bespoke one, the crawler does not know it is an entry point. It
 will still be excluded from dead code if it has an incoming `DYNAMIC_DISPATCH` edge.
 
+**A `@Transactional` method is reported but evidently never ran in a transaction.**
+Read `proxyBlocked` and `inert` on `get_callers`. A `private`, `static` or `final` method, a
+method of a `final` class, or a call from inside the same bean never crosses the proxy, so the
+annotation is decoration. This is an annotation-aware answer, not a tracing one: it does not
+prove the transaction committed, only that the proxy could not have wrapped the call.
+
+**The callee looks like the wrong overload.**
+Check `alternatives` on the edge. An overloaded call site whose argument type cannot be
+narrowed keeps the first declaration as the target and lists the rivals, at confidence `0.6`
+or below. Read the call site's argument type to settle it; if you assert one callee, say which
+rivals were ruled out and how.
+
+**`change_impact` returned an empty `symbols` list.**
+Read `unmatched`. Every path and symbol that resolved to nothing is listed there, so an
+all-`unmatched` report means the paths are not under the crawl root (they are matched by
+suffix against `file_path`) or the symbol names do not exist. A diff that only deletes lines
+touches no declaration and legitimately produces nothing. If files matched but no
+declarations did, the hunks fell in imports, comments or whitespace.
+
+**`change_impact` ranked something below what I expected.**
+The `score` field orders the report; it is not a probability, and a low rank is not a
+safety signal. It weighs the risk band first, then routes, entry points, injection points,
+advice and event flows, then caller count — so a widely-called private helper can sit under
+an endpoint nobody uses. Read the full list.
+
 **An unknown symbol has suggestions instead of an error.**
 That is `CODECRAWLER_HELPFUL_ERRORS` working as intended. Set it to `false` for strict
 lookups in scripts.
@@ -771,3 +913,49 @@ newer build of the crawler is rejected rather than misread; run `clear_index` to
 **The index is much larger than the source tree.**
 The SQLite file also holds the FTS5 index and the per-file manifest. It is a cache — delete
 it and re-crawl if disk matters more than the re-index time.
+
+### What the confidence number means
+
+Every edge that names an inferred target carries `confidence` (0 to 1) and `resolved`: `CALLS`,
+`DYNAMIC_DISPATCH`, `ADVISES`, `INJECTS`, `ROUTES` and `EMITS`. The band tells you how the target
+was found, which is the only thing that varies:
+
+| Confidence | How the target was found |
+| --- | --- |
+| `1.00` | Receiver is a local variable or parameter, or the type is named at the call site |
+| `0.95` | Field receiver, bare call in the enclosing type, `this(...)`, `super(...)`; the only project type matching a declared name |
+| `0.90` | Implicit default constructor, or pointcut `execution()` |
+| `0.85` | Receiver type inferred from an assignment, field or return type; `within()`, `@annotation()`; an import-bound dependency alias |
+| `0.80` | External package call; `@within()`; a `DYNAMIC_DISPATCH` candidate; a dependency or handler resolved through a module prefix |
+| `0.75` | Target found by searching base types or interface default methods |
+| `0.60` | Ambiguous overload; `args()` pointcut arity; two equally good route handlers |
+| `0.55` | `target()` / `this()` pointcuts, a static approximation of a run-time type test |
+| `0.00` | Unresolved. Always paired with `resolved: false` and a `reason` |
+
+The same numbers describe the same kind of evidence whichever edge they sit on: for `INJECTS`
+they grade **the provider the container calls** (`1.00` named at the injection site, `0.00`
+supplied but unnamed), and for `ROUTES` they grade **the handler dispatched to** (path and HTTP
+method are read from source, so only the lookup can be uncertain).
+
+Treat `0.95` and above as fact. Verify anything at `0.85` whose type has overriding subclasses.
+When you see `0.60`, read `alternatives` instead of trusting the pick.
+
+### Reading unresolved reasons
+
+`find_unresolved` groups unresolved calls by reason with a count per reason, and accepts a
+`reason` filter. `get_node` reports them for a single symbol. The reason strings are written by
+the resolver, so match on a substring rather than the whole message:
+
+| Reason contains | Means | What to do |
+| --- | --- | --- |
+| `receiver type could not be inferred` | Receiver is a call result, a conditional, a map or array lookup, or a generic bound only at the call site | Name the type in a local, or trace from the type instead of the call |
+| `implicit this/module scope` | Bare name that no enclosing type, module or import declares | Usually a wildcard import; index the module that declares it |
+| `resolves outside the project` | Target lives in a package or module that was not crawled | Expected; crawl that module. Cross-repository linking is not modelled |
+
+A lambda or method reference leaves no target because the receiver is a function value, not an
+object: find the functional interface with `find_implementations` and read the method that
+creates it. A reflective target appears as a `REFLECTS` edge only when the name is a constant.
+
+The rule the resolver follows: a missing edge and a wrong edge are not the same failure. When it
+cannot be sure it returns a lower confidence, or an unresolved edge with a reason, never a
+confident guess.

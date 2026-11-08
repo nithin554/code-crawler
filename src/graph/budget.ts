@@ -34,6 +34,11 @@ export interface PageMeta {
   nextCursor?: number;
   truncated: boolean;
   estimatedTokens: number;
+  /**
+   * Present only when `truncated` is true: the exact next step, so a caller that
+   * only reads the payload never has to guess how to continue.
+   */
+  hint?: string;
 }
 
 export function estimateTokens(value: unknown): number {
@@ -87,6 +92,20 @@ export function applyBudget<T>(items: readonly T[], opts: BudgetOptions = {}): B
   };
 }
 
+/**
+ * The next step for a truncated page, phrased so it names the actual cursor
+ * value rather than describing the mechanism.
+ */
+export function truncationHint<T>(page: BudgetPage<T>): string {
+  const first = page.cursor;
+  const last = page.cursor + page.returnedCount - 1;
+  return (
+    `Truncated: items ${first}-${last} of ${page.totalCount}. ` +
+    `Pass cursor=${page.nextCursor} for the next page, raise max_tokens, ` +
+    `or narrow the query with this tool's filter arguments.`
+  );
+}
+
 /** Strip the items from a page so it can be attached as response metadata. */
 export function pageMeta<T>(page: BudgetPage<T>): PageMeta {
   return {
@@ -96,6 +115,7 @@ export function pageMeta<T>(page: BudgetPage<T>): PageMeta {
     ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
     truncated: page.truncated,
     estimatedTokens: page.estimatedTokens,
+    ...(page.truncated ? { hint: truncationHint(page) } : {}),
   };
 }
 

@@ -21,6 +21,14 @@ function jobBlock(text: string, job: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+// Dependabot raises these actions and workflow tags, so a test that restates a
+// version blocks its own upgrade. Assert instead that the step exists and that
+// every job agrees on one ref.
+function actionRefs(text: string, action: string): string[] {
+  const pattern = new RegExp(`uses: ${action.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}@(\\S+)`, "g");
+  return [...text.matchAll(pattern)].map((match) => match[1] ?? "");
+}
+
 interface Author {
   name: string;
   url?: string;
@@ -192,9 +200,9 @@ describe("ClawHub publishing", () => {
 
   it("delegates the skill publish to the official ClawHub workflow", () => {
     const workflow = read(".github/workflows/publish-clawhub.yml");
-    expect(workflow).toContain(
-      "uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v0.24.1"
-    );
+    const refs = actionRefs(workflow, "openclaw/clawhub/.github/workflows/skill-publish.yml");
+    expect(refs.length).toBeGreaterThan(0);
+    expect(new Set(refs).size).toBe(1);
     expect(workflow).toContain("skill_path: skills/code-crawler");
     expect(workflow).toContain("owner: nithin554");
     expect(workflow).toContain("dry_run: ${{ inputs.dry_run }}");
@@ -233,17 +241,21 @@ describe("ClawHub publishing", () => {
     expect(workflow).not.toContain("--version");
   });
 
-  // A floating `v1` ref does not exist upstream, so the skill call pins a
-  // release tag and the plugin workflow pins the CLI to the same release.
-  it("pins both ClawHub publishers to one upstream release", () => {
+  // A floating `v1` ref does not exist upstream, so both publishers must pin a
+  // full release. Which release is Dependabot's to raise, so the versions are
+  // read and checked for shape, never restated. The CLI pin lives in a file
+  // Dependabot does not manage, so a reviewer still has to move it in step.
+  it("pins both ClawHub publishers to a release rather than a floating ref", () => {
     const skill = read(".github/workflows/publish-clawhub.yml");
-    const refs = [
-      ...skill.matchAll(/openclaw\/clawhub\/\.github\/workflows\/[\w-]+\.yml@(\S+)/g),
-    ].map((match) => match[1]);
-    expect(new Set(refs)).toEqual(new Set(["v0.24.1"]));
+    const refs = actionRefs(skill, "openclaw/clawhub/.github/workflows/skill-publish.yml");
+    expect(new Set(refs).size).toBe(1);
+    for (const ref of refs) {
+      expect(ref).toMatch(/^v\d+\.\d+\.\d+$/);
+    }
 
     const plugin = workflow(".github/workflows/publish-plugin.yml");
-    expect(plugin).toContain('CLAWHUB_CLI_VERSION: "0.24.1"');
+    const cliVersion = plugin.match(/CLAWHUB_CLI_VERSION: "([^"]+)"/)?.[1];
+    expect(cliVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(plugin).toContain('npx --yes "clawhub@$CLAWHUB_CLI_VERSION"');
   });
 
@@ -426,7 +438,7 @@ describe("ClawHub plugin bundle", () => {
 
     for (const job of ["publish", "publish-retry"]) {
       const block = jobBlock(text, job);
-      expect(block).toContain("uses: actions/download-artifact@v8");
+      expect(actionRefs(block, "actions/download-artifact")).toHaveLength(1);
       expect(block).toContain("name: clawhub-plugin-package");
       // A relative `dist/x.tgz` is parsed as a GitHub `owner/repo` shorthand, so
       // the CLI has to be handed an absolute path.
@@ -446,10 +458,51 @@ describe("ClawHub plugin bundle", () => {
     expect(text).not.toContain("uses: openclaw/clawhub/");
     for (const job of ["publish", "publish-retry"]) {
       const block = jobBlock(text, job);
-      expect(block).toContain("uses: actions/setup-node@v5");
-      expect(block).toContain("node-version: 24");
+      expect(actionRefs(block, "actions/setup-node")).toHaveLength(1);
+      // The requirement is a floor ("22.13+ (22.x) or 24+"), so assert the floor
+      // rather than the literal major a later bump would have to re-edit here.
+      const nodeMajor = Number(/node-version:\s*(\d+)/.exec(block)?.[1]);
+      expect(nodeMajor).toBeGreaterThanOrEqual(22);
       // `bundle-plugin` and `bun` share a prefix, so match the command.
       expect(block).not.toMatch(/(^|\s)bun\s/m);
     }
+    // Retrying a publish must not silently change the Node major version.
+    expect(new Set(actionRefs(text, "actions/setup-node")).size).toBe(1);
+  });
+});
+
+// A test that restates a dependency version blocks that dependency's own
+// upgrade: the bump lands, the pinned assertion fails, and the Dependabot PR
+// stalls for a reason unrelated to the change. Assert the property instead --
+// that the ref exists, is a release tag, and is consistent across jobs -- and
+// let the version float.
+describe("tests do not pin dependency versions", () => {
+  // Matches an inline action reference carrying a release tag. This pattern is
+  // deliberately spelled so it does not match the line it is declared on.
+  const PINNED_REF = /uses:[ \t]+\S+@v\d/g;
+
+  it("no test hardcodes an action or workflow ref version", () => {
+    const tests = path.join(ROOT, "tests");
+    const offences = fs
+      .readdirSync(tests)
+      .filter((file) => file.endsWith(".test.ts"))
+      .flatMap((file) =>
+        [...fs.readFileSync(path.join(tests, file), "utf8").matchAll(PINNED_REF)].map(
+          (match) => `${file}: ${match[0]}`
+        )
+      );
+
+    expect(
+      offences,
+      "Read the ref out of the workflow and assert its shape, as actionRefs() does, so the upgrade is not blocked."
+    ).toEqual([]);
+  });
+
+  it("finds workflow refs through a helper rather than by restating them", () => {
+    const text = workflow(".github/workflows/publish-plugin.yml");
+    const refs = actionRefs(text, "actions/setup-node");
+
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) expect(ref).toMatch(/^v\d+(\.\d+){0,2}$/);
   });
 });

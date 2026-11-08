@@ -5,10 +5,12 @@ import {
   frameworkScope,
   injectionIn,
   paramMarkerIn,
+  routeGroupIn,
 } from "../frameworks/index.js";
 import type {
   AnnotationInfo,
   CallSite,
+  DependencyAlias,
   EntryPointInfo,
   FieldInfo,
   ImportInfo,
@@ -97,6 +99,21 @@ function routeVerb(name: string): string {
   if (name === "websocket" || name === "websocket_route") return "WEBSOCKET";
   if (name === "route" || name === "api_route") return "";
   return name.toUpperCase();
+}
+
+/**
+ * Join a route group's prefix to a decorator path.
+ *
+ * FastAPI concatenates the two as written, so the trailing slash of
+ * `@router.get("/")` is part of the served path (`/items/`) and must survive.
+ * Only the doubled separator between prefix and path is collapsed.
+ */
+function joinPath(prefix: string, path: string): string {
+  if (!prefix) return path;
+  if (!path) return prefix;
+  const left = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+  const right = path.startsWith("/") ? path : `/${path}`;
+  return `${left}${right}`;
 }
 
 const ROUTE_RECEIVERS = new Set([
@@ -188,6 +205,10 @@ export const pythonConfig: LanguageDescriptor = {
     const reflectiveRefs: ReflectiveRef[] = [];
     const injections: InjectionPoint[] = [];
     const routes: RouteRegistration[] = [];
+    /** Route-group variable -> its path prefix (`router` -> `/items`). */
+    const routeGroupPrefixes = new Map<string, string>();
+    /** Named dependency aliases declared by this module (`SessionDep`). */
+    const dependencyAliases = new Map<string, DependencyAlias>();
 
     /**
      * Conventions this file is judged against. Imports are collected as the tree
@@ -268,6 +289,98 @@ export const pythonConfig: LanguageDescriptor = {
       return "";
     }
 
+    /** Receiver of a decorator, e.g. `router` in `@router.get(...)`. */
+    function receiverOf(annotation: AnnotationInfo): string {
+      const qualified = annotation.fqn ?? annotation.name;
+      return qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
+    }
+
+    /**
+     * Served path of a route decorator, with its group's prefix applied:
+     * `router = APIRouter(prefix="/items")` makes `@router.get("/")` serve
+     * `/items/`, and recording the bare `/` would be actively misleading.
+     */
+    function servedPathOf(annotation: AnnotationInfo): string {
+      const prefix = routeGroupPrefixes.get(receiverOf(annotation)) ?? "";
+      return joinPath(prefix, stringArgument(annotation));
+    }
+
+    /** Provider callables named inside `Depends(...)`, in source order. */
+    function dependencyProvidersIn(text: string): string[] {
+      const found: string[] = [];
+      for (const match of text.matchAll(/Depends\(\s*([A-Za-z_][\w.]*)\s*[,)]/g)) {
+        const name = match[1];
+        if (name && !found.includes(name)) found.push(name);
+      }
+      return found;
+    }
+
+    /**
+     * `SessionDep = Annotated[Session, Depends(get_db)]` — collected before the
+     * module walk because an alias is routinely declared *after* the function
+     * that uses it, and other modules reach it by name through an import.
+     */
+    function collectDependencyAliases(): void {
+      for (const statement of root.namedChildren) {
+        if (statement.type !== "expression_statement") continue;
+        const assignment = statement.namedChildren.find((c) => c.type === "assignment");
+        if (!assignment) continue;
+        const left = fieldChild(assignment, "left");
+        const right = fieldChild(assignment, "right");
+        if (left?.type !== "identifier" || right?.type !== "subscript") continue;
+        const text = right.text;
+        if (!text.startsWith("Annotated[")) continue;
+        const provider = dependencyProvidersIn(text)[0];
+        if (!provider) continue;
+        // Base type ends where the first `Depends(` starts; going to the first
+        // comma instead would truncate `Annotated[dict[str, int], ...]`.
+        const base = text
+          .slice(0, text.indexOf("Depends("))
+          .replace(/^Annotated\[/, "")
+          .replace(/,\s*$/, "")
+          .trim();
+        dependencyAliases.set(left.text, { provider, base });
+      }
+    }
+
+    /** True when the file imports from a framework that resolves parameters by alias. */
+    function usesDependencyAliases(): boolean {
+      return scope().evidenced.some((m) => m.name === "fastapi");
+    }
+
+    /** Literal value of a keyword argument, or `""` when absent or not a string. */
+    function keywordLiteralOf(call: TSNode, key: string): string {
+      const args = childOfType(call, "argument_list");
+      if (!args) return "";
+      for (const arg of childrenOfType(args, "keyword_argument")) {
+        if (fieldChild(arg, "name")?.text !== key) continue;
+        const value = fieldChild(arg, "value");
+        return value?.type === "string" ? unquote(value.text) : "";
+      }
+      return "";
+    }
+
+    /**
+     * `router = APIRouter(prefix="/items")` groups every route declared on the
+     * variable. Collected before the module walk because `servedPathOf` needs it.
+     */
+    function collectRouteGroupPrefixes(): void {
+      for (const statement of root.namedChildren) {
+        if (statement.type !== "expression_statement") continue;
+        const assignment = statement.namedChildren.find((c) => c.type === "assignment");
+        if (!assignment) continue;
+        const left = fieldChild(assignment, "left");
+        const right = fieldChild(assignment, "right");
+        if (left?.type !== "identifier" || right?.type !== "call") continue;
+        const callee = calleeName(fieldChild(right, "function"));
+        if (!callee) continue;
+        const prefixKey = routeGroupIn(scope(), callee.name);
+        if (!prefixKey) continue;
+        const prefix = keywordLiteralOf(right, prefixKey);
+        if (prefix) routeGroupPrefixes.set(left.text, prefix);
+      }
+    }
+
     function entryPointOf(annotations: AnnotationInfo[], name: string): EntryPointInfo | undefined {
       for (const annotation of annotations) {
         const simple = annotation.name;
@@ -282,7 +395,7 @@ export const pythonConfig: LanguageDescriptor = {
         );
         if (!match) continue;
         if (match.spec.kind === "http") {
-          const path = stringArgument(annotation);
+          const path = servedPathOf(annotation);
           const method = routeVerb(lower);
           return { kind: "http", detail: `${method} ${path}`.trim() || qualified };
         }
@@ -308,7 +421,7 @@ export const pythonConfig: LanguageDescriptor = {
         const lower = annotation.name.toLowerCase();
         if (!HTTP_VERBS.has(lower)) continue;
         const qualified = annotation.fqn ?? annotation.name;
-        const receiver = qualified.includes(".") ? qualified.slice(0, qualified.indexOf(".")) : "";
+        const receiver = receiverOf(annotation);
         if (!annotation.arguments.length && !receiver && !lower.endsWith("route")) continue;
         // The framework is the library, not the receiver the handler hangs off:
         // `@router.get` in a FastAPI module reports `fastapi`, not `router`.
@@ -316,7 +429,7 @@ export const pythonConfig: LanguageDescriptor = {
         found.push({
           framework: match?.module.name || receiver || "flask",
           httpMethod: routeVerb(lower) || "ANY",
-          path: stringArgument(annotation),
+          path: servedPathOf(annotation),
           handlerName,
           moduleId,
           enclosingTypeId: ownerTypeId,
@@ -603,7 +716,30 @@ export const pythonConfig: LanguageDescriptor = {
       });
 
       const isHandler = annotations.some((a) => HTTP_VERBS.has(a.name.toLowerCase()));
-      if (isHandler) routes.push(...decoratorRoutesOf(annotations, rawName, owner));
+      if (isHandler) {
+        routes.push(...decoratorRoutesOf(annotations, rawName, owner));
+        // `@router.post(..., dependencies=[Depends(guard)])` runs the guard before
+        // the handler with no parameter to hang the dependency on.
+        for (const annotation of annotations) {
+          if (!HTTP_VERBS.has(annotation.name.toLowerCase())) continue;
+          for (const arg of annotation.arguments) {
+            if (!arg.trim().startsWith("dependencies=")) continue;
+            const marker = paramMarkerIn(scope(), arg);
+            if (!marker) continue;
+            for (const provider of dependencyProvidersIn(arg)) {
+              injections.push({
+                kind: "parameter",
+                ownerId: id,
+                name: "dependencies",
+                type: provider,
+                provider,
+                framework: marker,
+                line: annotation.line,
+              });
+            }
+          }
+        }
+      }
 
       const locals = new Map<string, string>();
       for (const param of params) {
@@ -613,6 +749,10 @@ export const pythonConfig: LanguageDescriptor = {
       // Parameters supplied by the framework rather than by the caller.
       if (paramsNode) {
         const methodInjects = annotations.some((a) => injectionIn(scope(), a.name) !== undefined);
+        // An injection belongs to the callable the framework populates. A
+        // constructor is the exception: the container injects into the bean, so
+        // the edge starts at the type.
+        const injectionOwner = isCtor && ownerTypeId ? owner : id;
         for (const param of paramsNode.namedChildren) {
           const named = paramName(param);
           if (!named) continue;
@@ -625,9 +765,10 @@ export const pythonConfig: LanguageDescriptor = {
           if (depends || injectDecorator) {
             injections.push({
               kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared || (depends ? "Depends" : "Inject"),
+              provider: depends ? dependencyProvidersIn(raw)[0] : undefined,
               framework: depends ? "fastapi" : "dependency-injector",
               line: param.startPosition.row,
               optional: /Optional\s*\[/.test(declared) || /=\s*None/.test(raw),
@@ -635,7 +776,7 @@ export const pythonConfig: LanguageDescriptor = {
           } else if (methodInjects && declared) {
             injections.push({
               kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared,
               framework: "dependency-injector",
@@ -644,11 +785,29 @@ export const pythonConfig: LanguageDescriptor = {
           } else if (ownerInjectable && isCtor && declared) {
             injections.push({
               kind: "constructor-parameter",
-              ownerId: owner,
+              ownerId: injectionOwner,
               name: named.name,
               type: declared,
               framework: "dependency-injector",
               line: param.startPosition.row,
+            });
+          } else if (
+            declared &&
+            /^[A-Za-z_][\w.]*$/.test(declared) &&
+            !BUILTIN_TYPES.has(declared) &&
+            usesDependencyAliases()
+          ) {
+            // `session: SessionDep` — an alias declared in this module or imported
+            // from one, which a single-file parse cannot confirm. The crawler
+            // keeps it only when the name really is a dependency alias.
+            injections.push({
+              kind: ownerTypeId ? (isCtor ? "constructor-parameter" : "parameter") : "parameter",
+              ownerId: injectionOwner,
+              name: named.name,
+              type: declared,
+              framework: "fastapi",
+              line: param.startPosition.row,
+              candidate: true,
             });
           }
         }
@@ -882,6 +1041,11 @@ export const pythonConfig: LanguageDescriptor = {
     // Runs before call-site collection so `enclosingOf` can see the type and
     // method ranges that calls are attributed to.
 
+    // Route prefixes must be known before decorators are visited: a handler's
+    // recorded path is relative to the group it hangs off.
+    collectRouteGroupPrefixes();
+    collectDependencyAliases();
+
     for (const entry of definitionsIn(root)) {
       const annotations = annotationsOf(entry.decorators);
       if (entry.definition.type === "class_definition") {
@@ -1079,6 +1243,7 @@ export const pythonConfig: LanguageDescriptor = {
       scopeModules,
       reflectiveRefs,
       injections,
+      dependencyAliases,
       routes,
       entryPoint,
     };

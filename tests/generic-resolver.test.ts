@@ -3,6 +3,9 @@ import type { ParsedFile } from "../src/parser/language.js";
 import { pythonConfig } from "../src/parser/languages/python.js";
 import { typescriptConfig } from "../src/parser/languages/typescript.js";
 import {
+  ROUTE_CONFIDENCE_AMBIGUOUS,
+  ROUTE_CONFIDENCE_DIRECT,
+  ROUTE_CONFIDENCE_SCOPED,
   resolveGenericFile,
   resolveInjectionTarget,
   resolveReflectiveTarget,
@@ -586,18 +589,30 @@ describe("route handler resolution", () => {
     return None
 `,
     });
-    expect(resolveRouteHandler(p.file("app.api"), p.index, "read_order", "app.api")).toBe(
-      "module:app.api#read_order"
-    );
+    expect(resolveRouteHandler(p.file("app.api"), p.index, "read_order", "app.api")).toEqual({
+      id: "module:app.api#read_order",
+      confidence: ROUTE_CONFIDENCE_DIRECT,
+    });
   });
 
   it("resolves a method declared on a type in the same file", async () => {
     const p = await project("typescript", {
       "src/api.ts": `export class Controller { read(): void {} }`,
     });
-    expect(resolveRouteHandler(p.file("src.api"), p.index, "read", "src.api")).toBe(
-      "src.api.Controller#read"
-    );
+    expect(resolveRouteHandler(p.file("src.api"), p.index, "read", "src.api")).toEqual({
+      id: "src.api.Controller#read",
+      confidence: ROUTE_CONFIDENCE_DIRECT,
+    });
+  });
+
+  it("damps the confidence when two handlers in the file share the name", async () => {
+    const p = await project("typescript", {
+      "src/api.ts": `export class A { read(): void {} }
+export class B { read(): void {} }`,
+    });
+    const resolved = resolveRouteHandler(p.file("src.api"), p.index, "read", "src.api");
+    expect(resolved?.confidence).toBe(ROUTE_CONFIDENCE_AMBIGUOUS);
+    expect(resolved?.id).toMatch(/#read$/);
   });
 
   it("resolves a handler imported from another module", async () => {
@@ -606,9 +621,10 @@ describe("route handler resolution", () => {
       "src/api.ts": `import { read } from "./svc";
 export const x = 1;`,
     });
-    expect(resolveRouteHandler(p.file("src.api"), p.index, "read", "src.api")).toBe(
-      "module:src.svc#read"
-    );
+    expect(resolveRouteHandler(p.file("src.api"), p.index, "read", "src.api")).toEqual({
+      id: "module:src.svc#read",
+      confidence: ROUTE_CONFIDENCE_SCOPED,
+    });
   });
 
   it("returns null for a handler that exists nowhere", async () => {

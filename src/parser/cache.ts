@@ -1,4 +1,4 @@
-import type { ParsedFile } from "./language.js";
+import type { DependencyAlias, ParsedFile } from "./language.js";
 
 /**
  * Serialisation for the per-file parse cache.
@@ -12,11 +12,15 @@ import type { ParsedFile } from "./language.js";
  */
 
 interface PackedParsedFile
-  extends Omit<ParsedFile, "localsByMethod" | "scopeTypes" | "scopeModules" | "externalModules"> {
+  extends Omit<
+    ParsedFile,
+    "localsByMethod" | "scopeTypes" | "scopeModules" | "externalModules" | "dependencyAliases"
+  > {
   localsByMethod: Record<string, Record<string, string>>;
   scopeTypes?: Record<string, string>;
   scopeModules?: Record<string, string>;
   externalModules?: Record<string, string>;
+  dependencyAliases?: Record<string, DependencyAlias>;
   /** Java files expose a simple-name -> FQN map (usually `scopeTypes`). */
   typeByName?: Record<string, string>;
 }
@@ -60,6 +64,7 @@ export function packParsedFile(parsed: ParsedFile): PackedParsedFile {
     scopeTypes: mapToRecord(parsed.scopeTypes),
     scopeModules: mapToRecord(parsed.scopeModules),
     externalModules: mapToRecord(parsed.externalModules),
+    dependencyAliases: mapToRecord(parsed.dependencyAliases),
     typeByName: mapToRecord((parsed as WithTypeByName).typeByName),
   };
 }
@@ -77,6 +82,7 @@ export function unpackParsedFile(packed: PackedParsedFile): ParsedFile {
     scopeTypes,
     scopeModules: recordToMap(packed.scopeModules),
     externalModules: recordToMap(packed.externalModules),
+    dependencyAliases: recordToMap(packed.dependencyAliases),
   };
   if (packed.typeByName) {
     // Java sets `typeByName` to the very same map as `scopeTypes`; keep the

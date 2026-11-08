@@ -8,14 +8,14 @@
     <title>Tool reference — Code-Crawler</title>
     <meta
       name="description"
-      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for every Code-Crawler MCP tool: arguments, response shape, and usage examples."
     />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Code-Crawler" />
     <meta property="og:title" content="Tool reference — Code-Crawler" />
     <meta
       property="og:description"
-      content="Complete reference for all 27 Code-Crawler MCP tools: arguments, response shape, and usage examples."
+      content="Complete reference for every Code-Crawler MCP tool: arguments, response shape, and usage examples."
     />
     <meta property="og:url" content="https://nithin554.github.io/code-crawler/tools.html" />
     <meta name="twitter:card" content="summary" />
@@ -37,6 +37,8 @@
           <a href="usage.html">Usage</a>
           <a href="examples.html">Examples</a>
           <a href="tools.html" aria-current="page">Tools</a>
+          <a href="accuracy.html">Accuracy</a>
+          <a href="compare.html">Compare</a>
           <a href="skill.html">Skill</a>
           <a class="nav-cta" href="https://github.com/nithin554/code-crawler">GitHub</a>
         </div>
@@ -49,10 +51,11 @@
           <span class="eyebrow">Reference</span>
           <h1>Tool reference</h1>
           <p class="lead">
-            All 27 MCP tools with their arguments, response shape, and a working call. Every
-            tool returns structured JSON.
+            All <span data-tool-count>29</span> MCP tools with their arguments, response shape,
+            and a working call. Every tool returns structured JSON.
           </p>
           <div class="toc">
+            <a href="#all-tools">All tools</a>
             <a href="#conventions">Conventions</a>
             <a href="#index">Index</a>
             <a href="#lookup">Lookup</a>
@@ -61,6 +64,179 @@
             <a href="#wiring">Run-time wiring</a>
             <a href="#analytics">Analytics</a>
             <a href="#types">Types</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="all-tools">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="eyebrow">Index</span>
+            <h2>Every tool, and what it answers</h2>
+            <p class="lead">
+              Generated from the server's own tool registry, so this list cannot drift from
+              what clients actually see. Jump to the group for arguments and a working call.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Group</th>
+                  <th>What it answers</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- BEGIN GENERATED:tools-index -->
+                <tr>
+                  <td><code>crawl_project</code></td>
+                  <td><a href="#index">Index &amp; schema</a></td>
+                  <td>Index a project directory into the codebase graph.</td>
+                </tr>
+                <tr>
+                  <td><code>index_status</code></td>
+                  <td><a href="#index">Index &amp; schema</a></td>
+                  <td>Report the current state of the index: node/edge/file counts and the last crawl timestamp.</td>
+                </tr>
+                <tr>
+                  <td><code>get_schema</code></td>
+                  <td><a href="#index">Index &amp; schema</a></td>
+                  <td>Describe the property-graph model: node kinds, edge kinds, and the id scheme (including annotations, aspects, and dynamic edges).</td>
+                </tr>
+                <tr>
+                  <td><code>clear_index</code></td>
+                  <td><a href="#index">Index &amp; schema</a></td>
+                  <td>Wipe the entire graph database.</td>
+                </tr>
+                <tr>
+                  <td><code>export_graph</code></td>
+                  <td><a href="#index">Index &amp; schema</a></td>
+                  <td>Render a neighborhood, or a slice of the whole graph, as a Mermaid or Graphviz DOT diagram.</td>
+                </tr>
+                <tr>
+                  <td><code>search_symbols</code></td>
+                  <td><a href="#lookup">Symbol lookup</a></td>
+                  <td>Fuzzy-lookup symbols (classes, methods, fields, files) by name or fully-qualified name.</td>
+                </tr>
+                <tr>
+                  <td><code>get_node</code></td>
+                  <td><a href="#lookup">Symbol lookup</a></td>
+                  <td>Get metadata and source location for a single symbol by id or qualified name.</td>
+                </tr>
+                <tr>
+                  <td><code>explain_symbol</code></td>
+                  <td><a href="#lookup">Symbol lookup</a></td>
+                  <td>One-shot digest of a symbol: kind, file and line, annotations/decorators, contained members with their decorators, direct callers&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>get_callers</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>Find every symbol that calls the given symbol, directly or transitively (the call graph above it).</td>
+                </tr>
+                <tr>
+                  <td><code>get_callees</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>Find every symbol the given symbol calls, directly or transitively (the call graph below it).</td>
+                </tr>
+                <tr>
+                  <td><code>trace_path</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>Find call paths between two symbols.</td>
+                </tr>
+                <tr>
+                  <td><code>get_subgraph</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>Extract the neighborhood around a symbol across any edge kinds — for visualization and understanding the local shape of the graph.</td>
+                </tr>
+                <tr>
+                  <td><code>find_unresolved</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>List call sites the resolver could not bind to a symbol, grouped by reason, with the caller, source line and the callee text as&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>find_cycles</code></td>
+                  <td><a href="#calls">Call graph</a></td>
+                  <td>Find call cycles (strongly connected components of the call graph) with a sample closed path for each.</td>
+                </tr>
+                <tr>
+                  <td><code>trace_execution</code></td>
+                  <td><a href="#dynamic">Dynamic behaviour</a></td>
+                  <td>Produce a dynamic execution trace from a symbol: follows static and virtual-dispatch calls and weaves in aspect advice.</td>
+                </tr>
+                <tr>
+                  <td><code>find_implementations</code></td>
+                  <td><a href="#dynamic">Dynamic behaviour</a></td>
+                  <td>Find every class/interface that implements or extends a type, directly or transitively.</td>
+                </tr>
+                <tr>
+                  <td><code>find_aspects</code></td>
+                  <td><a href="#dynamic">Dynamic behaviour</a></td>
+                  <td>List aspects with their advice methods (@Before/@After/@Around/...), pointcuts, and the methods each advice intercepts.</td>
+                </tr>
+                <tr>
+                  <td><code>get_decorators</code></td>
+                  <td><a href="#dynamic">Dynamic behaviour</a></td>
+                  <td>Get the annotations/decorators applied to a symbol.</td>
+                </tr>
+                <tr>
+                  <td><code>find_annotated</code></td>
+                  <td><a href="#dynamic">Dynamic behaviour</a></td>
+                  <td>Find every symbol annotated/decorated with a given annotation (simple name, @name, or FQN).</td>
+                </tr>
+                <tr>
+                  <td><code>find_entry_points</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>List framework-invoked roots (HTTP routes/controllers, message listeners, schedulers, event handlers, CLI entry points, tests).</td>
+                </tr>
+                <tr>
+                  <td><code>find_injections</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>Find dependencies supplied by a DI container or framework rather than by an explicit `new`/import — Spring `@Autowired`, NestJS&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>find_reflections</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>Find run-time indirection the static call graph cannot see through: Java reflection and `ServiceLoader`, Python&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>find_routes</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>Map HTTP route registrations (`app.get`, `@GetMapping`, FastAPI decorators, Express routers) to the handler they invoke.</td>
+                </tr>
+                <tr>
+                  <td><code>find_event_flows</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>Join event and message publications to the listeners that receive them (`publishEvent` -&gt; `@EventListener`, `KafkaTemplate.send` -&gt;&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>find_external_dependencies</code></td>
+                  <td><a href="#wiring">Run-time wiring</a></td>
+                  <td>Summarize third-party packages the crawled source imports, with reference and file counts.</td>
+                </tr>
+                <tr>
+                  <td><code>find_hotspots</code></td>
+                  <td><a href="#analytics">Analytics &amp; impact</a></td>
+                  <td>Rank methods/constructors by call volume (fan-in, fan-out, advice interceptions).</td>
+                </tr>
+                <tr>
+                  <td><code>find_dead_code</code></td>
+                  <td><a href="#analytics">Analytics &amp; impact</a></td>
+                  <td>Find methods/constructors with no incoming calls, dispatch, or advice edges.</td>
+                </tr>
+                <tr>
+                  <td><code>impact_analysis</code></td>
+                  <td><a href="#analytics">Analytics &amp; impact</a></td>
+                  <td>One call that answers 'what breaks if I change this?': reverse callers to a depth, framework entry points that reach the symbol,&hellip;</td>
+                </tr>
+                <tr>
+                  <td><code>change_impact</code></td>
+                  <td><a href="#analytics">Analytics &amp; impact</a></td>
+                  <td>Answers 'what does this change break?' for a whole diff instead of one symbol: pass a unified diff (from `git diff`), a list of&hellip;</td>
+                </tr>
+<!-- END GENERATED:tools-index -->
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -99,7 +275,7 @@
             <div class="card">
               <h3>Token budgets</h3>
               <p>
-                The 18 list-returning query tools accept <code>max_tokens</code> (100–200000) and
+                The 19 list-returning query tools accept <code>max_tokens</code> (100–200000) and
                 <code>cursor</code>. Passing either adds a <code>page</code> block with
                 <code>totalCount</code>, <code>returnedCount</code>, <code>truncated</code>,
                 <code>estimatedTokens</code> and <code>nextCursor</code>; omit both and the
@@ -113,6 +289,32 @@
                 object (<code>impact_analysis</code>, <code>explain_symbol</code>,
                 <code>export_graph</code>, <code>get_node</code>, <code>index_status</code>,
                 <code>get_schema</code>) take no budget.
+              </p>
+              <p>
+                When a budget cuts the list, <code>page.truncated</code> is true and
+                <code>page.hint</code> states the exact <code>cursor</code> to pass next, the
+                page range, and the total — so a client that only reads the payload can always
+                continue without guessing.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Compact responses</h3>
+              <p>
+                All <span data-tool-count>29</span> tools accept <code>compact: true</code>, which returns every symbol
+                reference as its fully-qualified name (<code>com.acme.Payment#pay</code>) instead
+                of an <code>{id, name, kind, filePath}</code> object. A qualified name already
+                says whether it is a type (<code>pkg.Type</code>) or a member
+                (<code>pkg.Type#member</code>), and call <code>get_node</code> with that name when
+                you need the metadata back.
+              </p>
+              <p>
+                The projection is structural rather than per-tool, so one implementation covers
+                every response and cannot drift as tools are added. Measured on the
+                dynamic-dispatch fixture it removes 61% of a <code>get_callers</code> payload and
+                83% of a <code>search_symbols</code> payload; the more a response repeats
+                references and absolute paths, the more it saves. The budget is computed before
+                the projection runs, so <code>compact</code> keeps the same items and makes them
+                cheaper to read — raise <code>max_tokens</code> when you want more items.
               </p>
             </div>
             <div class="card">
@@ -277,17 +479,26 @@
                   <tbody>
                     <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Method or constructor id/qualified name.</td></tr>
                     <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callers. Default <code>true</code>.</td></tr>
-                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Also follow <code>DYNAMIC_DISPATCH</code> edges.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow <code>DYNAMIC_DISPATCH</code> edges (virtual/interface targets). Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also follow <code>ADVISES</code> edges.</td></tr>
+                    <tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Follow <code>EMITS</code> edges to event listeners. Default <code>true</code>; pass <code>false</code> with <code>include_dynamic: false</code> for a static-only view.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers, 1–500.</td></tr>
                   </tbody>
                 </table>
               </div>
               <p class="small muted" style="margin-top: 14px">
-                Returns <code>target</code> and <code>callers[]</code> with
-                <code>caller</code>, <code>depth</code>, <code>callSiteLine</code>,
-                <code>edgeKind</code>.
+                Returns <code>target</code>, <code>edgesFollowed</code>, <code>includeDynamic</code> and
+                <code>callers[]</code> with <code>caller</code>, <code>depth</code>,
+                <code>callSiteLine</code>, <code>edgeKind</code>, <code>confidence</code> and
+                <code>alternatives</code> - the rival overloads an ambiguous call site could
+                equally target, with confidence capped at <code>0.6</code>.
+                Direct callers of a proxied method also report
+                <code>proxy</code> (<code>transactional</code>, <code>async</code>,
+                <code>cacheable</code>), <code>proxyBlocked</code> when the container cannot
+                honour the annotation (<code>private</code>, <code>static</code>,
+                <code>final</code>, <code>final-type</code>), and <code>inert: true</code>
+                when the call stays inside the same object and never reaches the proxy.
               </p>
               <pre><code>get_callers({
   symbol: "com.acme.OrderRepository#create",
@@ -310,17 +521,20 @@
                   <tbody>
                     <tr><td><code>symbol</code></td><td>string</td><td>yes</td><td>Method or constructor id/qualified name.</td></tr>
                     <tr><td><code>transitive</code></td><td>boolean</td><td>no</td><td>Include transitive callees. Default <code>true</code>.</td></tr>
-                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow virtual/interface dispatch targets.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow virtual/interface dispatch targets. Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Follow advice edges.</td></tr>
+<tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Follow <code>EMITS</code> edges to event listeners. Default <code>true</code>.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Traversal depth cap, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callees, 1–500.</td></tr>
                   </tbody>
                 </table>
               </div>
               <p class="small muted" style="margin-top: 14px">
-                Returns <code>source</code> and <code>callees[]</code> with
-                <code>callee</code>, <code>depth</code>, <code>callSiteLine</code>,
-                <code>edgeKind</code>.
+                Returns <code>source</code>, <code>edgesFollowed</code>, <code>includeDynamic</code> and
+                <code>callees[]</code> with <code>callee</code>, <code>depth</code>,
+                <code>callSiteLine</code>, <code>edgeKind</code>, <code>confidence</code> and
+                <code>alternatives</code> - the rival overloads an ambiguous call site could
+                equally target, with confidence capped at <code>0.6</code>.
               </p>
               <pre><code>get_callees({ symbol: "com.acme.Checkout#checkout", max_depth: 4 })</code></pre>
             </div>
@@ -330,7 +544,7 @@
             <div class="tool-head">
               <code>trace_path</code>
               <span class="tag core">core</span>
-              <p>Find call paths between two symbols. Static by default; optionally route through dispatch and advice.</p>
+              <p>Find call paths between two symbols. Follows dispatch by default; pass <code>include_dynamic: false</code> for static edges only.</p>
             </div>
             <div class="tool-body">
               <div class="table-wrap">
@@ -339,8 +553,9 @@
                   <tbody>
                     <tr><td><code>source</code></td><td>string</td><td>yes</td><td>Starting symbol id or qualified name.</td></tr>
                     <tr><td><code>target</code></td><td>string</td><td>yes</td><td>Destination symbol id or qualified name.</td></tr>
-                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Also traverse <code>DYNAMIC_DISPATCH</code> edges.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Traverse <code>DYNAMIC_DISPATCH</code> edges. Default <code>true</code>; pass <code>false</code> for static <code>CALLS</code> only.</td></tr>
                     <tr><td><code>include_advice</code></td><td>boolean</td><td>no</td><td>Also traverse <code>ADVISES</code> edges.</td></tr>
+<tr><td><code>include_events</code></td><td>boolean</td><td>no</td><td>Also traverse <code>EMITS</code> edges. Default <code>true</code>.</td></tr>
                     <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Maximum path length, 1–50.</td></tr>
                     <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max paths, 1–100. Default 10.</td></tr>
                   </tbody>
@@ -349,7 +564,8 @@
               <p class="small muted" style="margin-top: 14px">
                 Returns <code>pathCount</code> and <code>paths[]</code>, each with
                 <code>length</code>, a symbol-id <code>path</code> array, and
-                <code>edges[]</code> carrying <code>kind</code> and <code>callSiteLine</code>.
+                <code>edges[]</code> carrying <code>kind</code>, <code>callSiteLine</code>,
+                <code>confidence</code> and, for an ambiguous overload, <code>alternatives</code>.
               </p>
               <pre><code>trace_path({
   source: "com.acme.Main#main",
@@ -606,6 +822,39 @@
 
           <div class="tool">
             <div class="tool-head">
+              <code>find_event_flows</code>
+              <span class="tag dynamic">dynamic</span>
+              <p>Publisher → listener wiring, as <code>EMITS</code> edges.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>symbol</code></td><td>string</td><td>no</td><td>Restrict to one publishing or listening symbol.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max flows, 1–500.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Joins <code>publishEvent</code> to <code>@EventListener</code>,
+                <code>KafkaTemplate.send</code> to <code>@KafkaListener</code>,
+                <code>JmsTemplate</code> to <code>@JmsListener</code>, and <code>emit</code> to
+                <code>@OnEvent</code>. The publisher never names the listener, so no
+                <code>CALLS</code> edge exists between them. Each flow carries
+                <code>channel</code>, <code>channelKind</code> (<code>event-class</code> or
+                <code>topic</code>), <code>framework</code>, and <code>confidence</code>:
+                <code>1</code> for a fully-qualified event type, <code>0.85</code> for a
+                literal topic, where the same name can belong to another broker. A
+                <code>phase</code> means the listener only runs at that transaction phase.
+                Channels known only at run time produce no edge.
+              </p>
+              <pre><code>find_event_flows({ symbol: "com.acme.events.OrderPublisher#place" })</code></pre>
+            </div>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
               <code>find_injections</code>
               <span class="tag dynamic">dynamic</span>
               <p>Dependencies supplied by a DI container, as <code>INJECTS</code> edges.</p>
@@ -817,6 +1066,53 @@
               framework entry point reaches the symbol, <code>medium</code> when it has direct
               callers, <code>low</code> otherwise. Reflection and configuration-file dispatch are
               outside the graph, so a <code>low</code> band does not prove the symbol is unused.
+            </p>
+          </div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <code>change_impact</code>
+              <span class="tag analytics">analytics</span>
+              <p>The <code>impact_analysis</code> answer for a whole diff: every touched declaration, ranked.</p>
+            </div>
+            <div class="tool-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Argument</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>diff</code></td><td>string</td><td>no</td><td>Unified diff text, straight from <code>git diff</code>.</td></tr>
+                    <tr><td><code>files</code></td><td>string[]</td><td>no</td><td>Changed paths. Expands to each file's top-level declarations.</td></tr>
+                    <tr><td><code>symbols</code></td><td>string[]</td><td>no</td><td>Changed symbol ids or qualified names.</td></tr>
+                    <tr><td><code>max_depth</code></td><td>number</td><td>no</td><td>Caller traversal depth per symbol, 1–50. Default <code>10</code>.</td></tr>
+                    <tr><td><code>include_dynamic</code></td><td>boolean</td><td>no</td><td>Follow dispatch edges. Default <code>true</code>.</td></tr>
+                    <tr><td><code>limit</code></td><td>number</td><td>no</td><td>Max callers per symbol, 1–1000. Default <code>20</code>.</td></tr>
+                    <tr><td><code>max_symbols</code></td><td>number</td><td>no</td><td>Max ranked symbols, 1–200. Default <code>25</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-top: 14px">
+                Supply any combination of <code>diff</code>, <code>files</code> and
+                <code>symbols</code>. Hunk line ranges are mapped onto the declarations they
+                overlap by the node's <code>startLine</code>/<code>endLine</code>; a changed
+                method replaces its enclosing class so the same call sites are not counted twice.
+                Returns <code>input</code>, <code>totals</code>, <code>truncated</code>,
+                <code>unmatched</code>, and per symbol the <code>impact_analysis</code> sections
+                plus <code>injectionPoints[]</code> (<code>injects</code>/<code>injectedBy</code>)
+                and <code>advice[]</code>.
+              </p>
+              <pre><code>change_impact({ diff: "&lt;output of git diff&gt;" })</code></pre>
+            </div>
+          </div>
+
+          <div class="note">
+            <p>
+              <code>change_impact</code> ranks by <code>score</code>, which is ordering only: a
+              framework entry point dominates, then routes, entry points, injection points,
+              advice and event flows, then raw caller count. It is not a probability and a low
+              score is not a safety guarantee. Paths are matched exactly, then by path suffix, so
+              a repo-relative diff resolves against crawl-root-relative file paths. Renames are
+              followed to their new path; deleted files and unreachable symbols come back in
+              <code>unmatched</code> instead of being silently dropped.
             </p>
           </div>
 

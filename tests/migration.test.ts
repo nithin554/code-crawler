@@ -3,8 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { searchSymbols } from "../src/graph/queries.js";
+import { loadConfig } from "../src/config.js";
+import { crawlProject } from "../src/crawler.js";
+import { findEventFlows, searchSymbols } from "../src/graph/queries.js";
 import { GraphStore } from "../src/graph/store.js";
+
+const JAVA_EVENTS = path.join(__dirname, "fixtures", "java", "events");
 
 const tempDirs: string[] = [];
 
@@ -53,7 +57,8 @@ describe("schema migration", () => {
       filePath: "/tmp/OrderService.java",
       properties: { name: "place", startLine: 3 },
     });
-    expect(original.schemaVersion).toBe(2);
+    const latestVersion = original.schemaVersion;
+    expect(latestVersion).toBeGreaterThanOrEqual(2);
     original.close();
 
     downgradeToV1(file);
@@ -75,23 +80,59 @@ describe("schema migration", () => {
 
     const upgraded = new GraphStore(file, { maxDepth: 10 });
     try {
-      expect(upgraded.schemaVersion).toBe(2);
-      // The display name is backfilled from the qualified name.
-      const row = upgraded.raw(
-        "SELECT name FROM nodes WHERE id = ?",
-        "com.acme.OrderService#place"
-      ) as {
-        name: string | null;
-      }[];
-      expect(row[0]?.name).toBe("place");
-      // The manifest exists and starts empty.
+      expect(upgraded.schemaVersion).toBe(latestVersion);
+      // v4 empties the graph on purpose: `EMITS` edges are only derivable from
+      // a whole-project parse, so an index that predates it must be rebuilt
+      // rather than patched. Nothing survives the upgrade.
+      expect(upgraded.raw("SELECT id FROM nodes")).toEqual([]);
       expect(upgraded.listFileRecords().size).toBe(0);
-      // The full-text index is rebuilt from the existing rows.
-      expect(searchSymbols(upgraded, "place").map((s) => s.qualifiedName)).toEqual([
-        "com.acme.OrderService#place",
-      ]);
+      // The full-text index must not keep returning the rows that were dropped.
+      expect(searchSymbols(upgraded, "place")).toEqual([]);
     } finally {
       upgraded.close();
+    }
+  });
+
+  it("invalidates a v3 index so the next crawl rebuilds event edges", async () => {
+    const file = tempDb();
+    const seeded = new GraphStore(file, { maxDepth: 10 });
+    // The version this build writes; asserted against rather than hardcoded so
+    // the test keeps testing the upgrade, not the current number.
+    const currentVersion = seeded.schemaVersion;
+    seeded.upsertNode({
+      id: "com.acme.events.OrderPublisher#place",
+      kind: "method",
+      qualifiedName: "com.acme.events.OrderPublisher#place",
+      filePath: "/tmp/OrderPublisher.java",
+      properties: { name: "place", startLine: 3 },
+    });
+    seeded.close();
+
+    // Rewind the stamp to simulate an index written before `EMITS` existed.
+    const raw = new Database(file);
+    raw.prepare("UPDATE crawl_meta SET value = '3' WHERE key = 'schema_version'").run();
+    raw.close();
+
+    const upgraded = new GraphStore(file, { maxDepth: 10 });
+    try {
+      expect(upgraded.schemaVersion).toBe(currentVersion);
+      expect(upgraded.getNode("com.acme.events.OrderPublisher#place")).toBeNull();
+    } finally {
+      upgraded.close();
+    }
+
+    // A crawl repopulates it, and the derived pass produces the event edges the
+    // old index could never have contained.
+    const cached = new GraphStore(file, { maxDepth: 10 });
+    try {
+      await crawlProject(cached, JAVA_EVENTS, loadConfig().excludeDirs, {});
+      const flows = findEventFlows(cached, { limit: 500 });
+      expect(flows.length).toBeGreaterThan(0);
+      expect(flows.map((f) => `${f.source.id} -> ${f.target.id}`)).toContain(
+        "com.acme.events.OrderPublisher#place -> com.acme.notifications.OrderListeners#onPlaced"
+      );
+    } finally {
+      cached.close();
     }
   });
 

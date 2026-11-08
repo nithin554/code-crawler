@@ -1,6 +1,7 @@
 import type { CallSite, ParsedFile } from "../parser/language.js";
 import { moduleNodeId } from "../parser/moduleId.js";
 import {
+  AMBIGUOUS_OVERLOAD_CONFIDENCE,
   externalPackageOf,
   findInherited,
   findMethodsNamed,
@@ -9,14 +10,20 @@ import {
   isPythonBuiltin,
   moduleIdOf,
   normalizeTypeText,
-  pickOverload,
+  pickOverloadCandidates,
   resolveModuleMember,
   resolveReceiver,
   resolveScopeValue,
   resolveTypeCandidates,
   starImportedModules,
 } from "./common.js";
-import { phantomNodeId, type ResolvedCall, type Resolver, type TypeIndex } from "./types.js";
+import {
+  type IndexedDependencyAlias,
+  phantomNodeId,
+  type ResolvedCall,
+  type Resolver,
+  type TypeIndex,
+} from "./types.js";
 
 /**
  * Call-target resolution for module-based languages (Python, TypeScript).
@@ -90,14 +97,20 @@ function resolveCall(
     const types = resolveTypeCandidates(file, index, call.name);
     if (types.length > 0) {
       for (const typeId of types) {
-        const ctor = pickOverload(findMethodsNamed(index, typeId, "<init>"), argCount, argTypes);
-        if (ctor) {
+        const pick = pickOverloadCandidates(
+          findMethodsNamed(index, typeId, "<init>"),
+          argCount,
+          argTypes
+        );
+        if (pick.method) {
+          const alternatives = pick.alternatives.map((m) => m.id);
           return {
             callSite: call,
-            targetId: ctor.id,
+            targetId: pick.method.id,
             resolved: true,
-            confidence: 1.0,
+            confidence: alternatives.length > 0 ? AMBIGUOUS_OVERLOAD_CONFIDENCE : 1.0,
             reason: `constructor of ${typeId}`,
+            ...(alternatives.length > 0 ? { alternatives } : {}),
           };
         }
       }
@@ -143,17 +156,24 @@ function resolveCall(
     const methods = searchInheritance
       ? findInherited(index, typeId, name)
       : findMethodsNamed(index, typeId, name);
-    const method = pickOverload(methods, argCount, argTypes);
+    const pick = pickOverloadCandidates(methods, argCount, argTypes);
+    const method = pick.method;
     if (method) {
       const inherited = method.typeId !== typeId;
+      const alternatives = pick.alternatives.map((m) => m.id);
+      const confidence = inherited ? 0.8 : 0.9;
       return {
         callSite: call,
         targetId: method.id,
         resolved: true,
-        confidence: inherited ? 0.8 : 0.9,
+        confidence:
+          alternatives.length > 0
+            ? Math.min(confidence, AMBIGUOUS_OVERLOAD_CONFIDENCE)
+            : confidence,
         reason: inherited
           ? `${name} inherited from ${method.typeId} (via ${receiver.reason})`
           : `${name} declared on ${method.typeId} (${receiver.reason})`,
+        ...(alternatives.length > 0 ? { alternatives } : {}),
       };
     }
   }
@@ -329,6 +349,90 @@ export function resolveReflectiveTarget(
   return { targetId: `__reflect__:${target}`, reason: `method ${target} not found` };
 }
 
+/** Resolve a name to a function declared in this file's module or in an imported one. */
+function resolveModuleFunction(file: ParsedFile, index: TypeIndex, name: string): string | null {
+  const simple = name.slice(name.lastIndexOf(".") + 1);
+  if (!simple) return null;
+  const scoped = file.scopeTypes?.get(simple);
+  const moduleText = scoped?.includes(".") ? scoped.slice(0, scoped.lastIndexOf(".")) : "";
+  if (moduleText) {
+    const moduleId = index.resolveModuleId(moduleText);
+    const member = moduleId ? resolveModuleMember(index, moduleId, simple) : null;
+    if (member) return member;
+  }
+  return file.moduleId ? resolveModuleMember(index, file.moduleId, simple) : null;
+}
+
+/**
+ * The dependency alias a name refers to, if it is one.
+ *
+ * Aliases are imported by name, so the lookup goes through the file's own
+ * import scope first and falls back to the declaring module of the same file.
+ */
+export function dependencyAliasOf(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): IndexedDependencyAlias | null {
+  const qualified = file.scopeTypes?.get(name) ?? name;
+  const direct = index.dependencyAliases.get(qualified);
+  if (direct) return direct;
+
+  // An import records the path as written (`from app.api.deps import
+  // SessionDep`), which usually omits the crawl root (`backend.`). Match the
+  // module suffix and require a single alias-bearing module, so a shared tail
+  // (`*.api.deps`) never produces a guess.
+  const parts = qualified.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    const symbol = parts[i] ?? "";
+    const modulePath = parts.slice(0, i).join(".");
+    const hits = index
+      .matchModuleSuffix(modulePath)
+      .map((moduleId) => index.dependencyAliases.get(`${moduleId}.${symbol}`))
+      .filter((alias): alias is IndexedDependencyAlias => alias !== undefined);
+    if (hits.length === 1) return hits[0] ?? null;
+    if (hits.length > 1) return null;
+  }
+
+  if (!file.moduleId) return null;
+  return index.dependencyAliases.get(`${file.moduleId}.${qualified}`) ?? null;
+}
+
+/**
+ * The provider a dependency *alias* stands for: `SessionDep` -> `get_db`.
+ *
+ * Alias-only on purpose. A candidate parameter is identified by its type name
+ * alone, and a type name is not evidence of a dependency — falling through to
+ * "any function with the same name" would invent edges like `user: User` ->
+ * `def User()`.
+ */
+export function resolveDependencyAliasProvider(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): string | null {
+  const alias = dependencyAliasOf(file, index, name);
+  if (!alias) return null;
+  return resolveModuleMember(index, alias.moduleId, alias.provider);
+}
+
+/**
+ * Resolve a callable named as a dependency provider.
+ *
+ * Accepts either form the framework supports: a name that is itself the
+ * callable (`dependencies=[Depends(guard)]`) or an alias that stands for one
+ * (`session: SessionDep`).
+ */
+export function resolveDependencyProvider(
+  file: ParsedFile,
+  index: TypeIndex,
+  name: string
+): string | null {
+  const alias = dependencyAliasOf(file, index, name);
+  if (alias) return resolveModuleMember(index, alias.moduleId, alias.provider);
+  return resolveModuleFunction(file, index, name);
+}
+
 /** Resolve an injection's declared type to a type id or external package. */
 export function resolveInjectionTarget(
   file: ParsedFile,
@@ -339,6 +443,11 @@ export function resolveInjectionTarget(
   if (!text) return null;
   const first = resolveTypeCandidates(file, index, typeText)[0];
   if (first) return { targetId: first };
+  // A provider named directly: `Depends(get_current_active_superuser)`. The
+  // framework runs the callable, so the dependency is the function — pointing at
+  // a library the annotation merely mentions would be the wrong edge.
+  const provider = resolveModuleFunction(file, index, text);
+  if (provider) return { targetId: provider };
   // Attribute through the import binding: `from fastapi import Depends` must
   // reach `ext:fastapi`, not a fabricated package named after the symbol.
   const external = externalPackageOf(file, index, file.scopeTypes?.get(text) ?? text);
@@ -348,43 +457,113 @@ export function resolveInjectionTarget(
   return { targetId: `__inject__:${text}` };
 }
 
+/**
+ * Confidence for `INJECTS`, which describes the *identity* of the provider the
+ * container calls — not whether it calls it. A field marked `@Autowired` is
+ * certainly injected; the question the number answers is whether we named the
+ * right provider.
+ *
+ * The values reuse the ladder the call resolver already uses (exact 1.0, local
+ * scope 0.95, inference 0.85, external 0.8, unknown 0) so that a consumer can
+ * compare an injection and a call on the same scale.
+ */
+/** The framework calls a callable named at the injection site. */
+export const INJECT_CONFIDENCE_PROVIDER = 1;
+/** Exactly one project type in scope matches the declared type. */
+export const INJECT_CONFIDENCE_UNIQUE_TYPE = 0.95;
+/** Resolved through a module-level dependency alias (`Annotated[..., Depends(f)]`). */
+export const INJECT_CONFIDENCE_ALIAS = 0.85;
+/** The declared type is a package outside the crawled tree. */
+export const INJECT_CONFIDENCE_EXTERNAL = 0.8;
+/** Token-only injection: a dependency is supplied, but it cannot be named. */
+export const INJECT_CONFIDENCE_UNRESOLVED = 0;
+
+/**
+ * Confidence for `ROUTES`, which describes whether the handler we attached is
+ * the one the framework dispatches to. Route paths are read from source and are
+ * exact; only the handler lookup can be indirect.
+ */
+/** The handler is declared in the module, or the file, that registers the route. */
+export const ROUTE_CONFIDENCE_DIRECT = 1;
+/** The handler belongs to another type declared in the same file. */
+export const ROUTE_CONFIDENCE_SIBLING_TYPE = 0.95;
+/** Resolved through a scope alias or import binding. */
+export const ROUTE_CONFIDENCE_SCOPED = 0.85;
+/** Found by scanning module types that share the route's module prefix. */
+export const ROUTE_CONFIDENCE_MODULE_PREFIX = 0.8;
+/**
+ * More than one method at the same tier answers to the handler's name, so the
+ * edge names a candidate rather than a certainty. 0.6 is the cap the call
+ * resolver already applies to ambiguous overloads.
+ */
+export const ROUTE_CONFIDENCE_AMBIGUOUS = 0.6;
+
+/** A route registration resolved to the handler the framework will invoke. */
+export interface ResolvedRouteHandler {
+  id: string;
+  confidence: number;
+}
+
+/**
+ * The first candidate at a tier, damped to `ROUTE_CONFIDENCE_AMBIGUOUS` when the
+ * tier offers no unique answer. Taking `[0]` silently would be a guess.
+ */
+function pickHandler(ids: string[], certain: number): ResolvedRouteHandler | null {
+  const first = ids[0];
+  if (first === undefined) return null;
+  return {
+    id: first,
+    confidence: ids.length > 1 ? ROUTE_CONFIDENCE_AMBIGUOUS : certain,
+  };
+}
+
 /** Resolve a route registration to the handler method node id. */
 export function resolveRouteHandler(
   file: ParsedFile,
   index: TypeIndex,
   handlerName: string,
   moduleId: string
-): string | null {
+): ResolvedRouteHandler | null {
   const moduleTypeId = moduleNodeId(moduleId);
-  const direct = findMethodsNamed(index, moduleTypeId, handlerName)[0];
-  if (direct) return direct.id;
-  const inFile = file.methods.find((m) => m.name === handlerName);
-  if (inFile) return inFile.id;
+  const direct = pickHandler(
+    findMethodsNamed(index, moduleTypeId, handlerName).map((m) => m.id),
+    ROUTE_CONFIDENCE_DIRECT
+  );
+  if (direct) return direct;
+  const inFile = pickHandler(
+    file.methods.filter((m) => m.name === handlerName).map((m) => m.id),
+    ROUTE_CONFIDENCE_DIRECT
+  );
+  if (inFile) return inFile;
+  const siblings: string[] = [];
   for (const type of file.types) {
-    const method = findMethodsNamed(index, type.id, handlerName)[0];
-    if (method) return method.id;
+    siblings.push(...findMethodsNamed(index, type.id, handlerName).map((m) => m.id));
   }
+  const sibling = pickHandler(siblings, ROUTE_CONFIDENCE_SIBLING_TYPE);
+  if (sibling) return sibling;
   const scoped = file.scopeTypes?.get(handlerName);
   if (scoped) {
     const firstType = resolveTypeCandidates(file, index, scoped)[0];
     if (firstType) {
-      const method = findInherited(index, firstType, handlerName)[0];
-      if (method) return method.id;
+      const inherited = pickHandler(
+        findInherited(index, firstType, handlerName).map((m) => m.id),
+        ROUTE_CONFIDENCE_SCOPED
+      );
+      if (inherited) return inherited;
     }
     const moduleCandidate = index.resolveModuleId(
       scoped.split(".").slice(0, -1).join(".") || scoped
     );
     if (moduleCandidate) {
       const member = resolveModuleMember(index, moduleCandidate, handlerName);
-      if (member) return member;
+      if (member) return { id: member, confidence: ROUTE_CONFIDENCE_SCOPED };
     }
   }
-  const moduleTypes = file.types.filter((t) => t.id.startsWith(moduleTypeId));
-  for (const type of moduleTypes) {
-    const method = findMethodsNamed(index, type.id, handlerName)[0];
-    if (method) return method.id;
+  const prefixed: string[] = [];
+  for (const type of file.types.filter((t) => t.id.startsWith(moduleTypeId))) {
+    prefixed.push(...findMethodsNamed(index, type.id, handlerName).map((m) => m.id));
   }
-  return null;
+  return pickHandler(prefixed, ROUTE_CONFIDENCE_MODULE_PREFIX);
 }
 
 export { resolveScopeValue };

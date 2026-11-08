@@ -10,6 +10,7 @@ import { flask } from "./flask.js";
 import { jakarta } from "./jakarta.js";
 import { jest } from "./jest.js";
 import { junit } from "./junit.js";
+import { lombok } from "./lombok.js";
 import { nestjs } from "./nestjs.js";
 import { nestjsParam } from "./nestjsParam.js";
 import { pytest } from "./pytest.js";
@@ -27,6 +28,7 @@ export type { EntryPointSpec, FrameworkModule, FrameworkScope } from "./types.js
 const REGISTRY: FrameworkModule[] = [
   spring,
   jakarta,
+  lombok,
   aspectj,
   junit,
   jest,
@@ -175,11 +177,48 @@ export function injectionIn(scope: FrameworkScope, name: string): string | undef
 
 /** Whether an annotation marks a class as container-managed. */
 export function injectableIn(scope: FrameworkScope, name: string): boolean {
-  return ordered(scope).some((module) =>
-    (module.injectables ?? []).some((marker) =>
+  return injectableFrameworkIn(scope, name) !== undefined;
+}
+
+/** Container that manages a class, from the annotation marking it a bean. */
+export function injectableFrameworkIn(scope: FrameworkScope, name: string): string | undefined {
+  for (const module of ordered(scope)) {
+    const hit = (module.injectables ?? []).some((marker) =>
       scope.caseInsensitive ? marker.toLowerCase() === name.toLowerCase() : marker === name
-    )
-  );
+    );
+    if (hit) return module.name;
+  }
+  return undefined;
+}
+
+/** Fields a constructor-generating annotation promotes to parameters. */
+export function constructorModeIn(
+  scope: FrameworkScope,
+  name: string
+): "all" | "required" | undefined {
+  for (const module of ordered(scope)) {
+    const mode = matchKey(module.constructors, name, scope.caseInsensitive);
+    if (mode !== undefined) return mode;
+  }
+  return undefined;
+}
+
+/** Keyword argument holding a route group's path prefix, if `name` builds one. */
+export function routeGroupIn(scope: FrameworkScope, name: string): string | undefined {
+  for (const module of ordered(scope)) {
+    const key = matchKey(module.routeGroups, name, scope.caseInsensitive);
+    if (key !== undefined) return key;
+  }
+  return undefined;
+}
+
+/** Proxy kind an annotation is delivered through (`transactional`, `async`, ...). */
+export function proxyKindIn(scope: FrameworkScope, name: string): string | undefined {
+  for (const module of ordered(scope)) {
+    const kind = matchKey(module.proxies, name, scope.caseInsensitive);
+    if (kind !== undefined) return kind;
+  }
+  return undefined;
 }
 
 /** Whether an annotation marks an aspect class. */

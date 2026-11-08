@@ -432,46 +432,58 @@ function typeMatchWeight(paramType: string, hint: string): number {
   return WIDENS_TO[hint]?.includes(param) ? 1 : 0;
 }
 
-/** Highest-scoring candidate, or undefined when no argument type distinguishes them. */
-function bestByArgumentTypes(
-  candidates: MethodInfo[],
-  hints: ArgumentTypeHints
-): MethodInfo | undefined {
-  if (!hints.some((hint) => hint !== null)) return undefined;
-  let best: MethodInfo | undefined;
-  let bestScore = 0;
-  for (const candidate of candidates) {
-    let score = 0;
-    for (let i = 0; i < Math.min(candidate.params.length, hints.length); i++) {
-      const hint = hints[i];
-      if (hint === null || hint === undefined) continue;
-      score += typeMatchWeight(candidate.params[i]?.type ?? "", hint);
-    }
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
+/** Argument-type score for one candidate; 0 means this call proves nothing about it. */
+function argumentScore(candidate: MethodInfo, hints: ArgumentTypeHints): number {
+  let score = 0;
+  for (let i = 0; i < Math.min(candidate.params.length, hints.length); i++) {
+    const hint = hints[i];
+    if (hint === null || hint === undefined) continue;
+    score += typeMatchWeight(candidate.params[i]?.type ?? "", hint);
   }
-  return best;
+  return score;
 }
 
 /**
- * Pick the overload that best matches the call site.
+ * Confidence ceiling for an overload tie.
+ *
+ * The call site is proven — it reaches one of these methods — but which one is
+ * not determined by anything in the source, so the edge must not read as fact.
+ */
+export const AMBIGUOUS_OVERLOAD_CONFIDENCE = 0.6;
+
+/**
+ * What an overload pick proves.
+ *
+ * `alternatives` is empty when the call site itself distinguishes the winner.
+ * When it is non-empty the call provably reaches one of the candidates, but
+ * *which* one is not determined by anything in the source, so the target is a
+ * ranked guess rather than a fact.
+ */
+export interface OverloadPick {
+  method: MethodInfo | undefined;
+  alternatives: MethodInfo[];
+}
+
+/**
+ * Pick the overload that best matches the call site, and report rivals.
  *
  * Candidates are grouped by how much the call proves about the callee: a
  * fixed-arity declaration taking exactly this many arguments is the strongest
  * signal, a variadic declaration accepting this many is next, and only then do
  * looser guesses apply. Within a group, argument type hints break same-arity
  * ties (`f(1)` prefers `f(int)` over `f(String)`); when no hint applies the
- * first declaration wins.
+ * first declaration wins and the rest are returned as `alternatives`.
  */
-export function pickOverload(
+export function pickOverloadCandidates(
   methods: MethodInfo[],
   argCount: number,
   argTypes: ArgumentTypeHints = []
-): MethodInfo | undefined {
-  if (methods.length === 0) return undefined;
-  if (methods.length === 1) return methods[0];
+): OverloadPick {
+  if (methods.length === 0) return { method: undefined, alternatives: [] };
+  if (methods.length === 1) {
+    const only = methods[0];
+    if (only) return { method: only, alternatives: [] };
+  }
 
   const groups: Array<(method: MethodInfo) => boolean> = [
     (m) => m.variadic !== true && m.params.length === argCount,
@@ -482,9 +494,36 @@ export function pickOverload(
   for (const inGroup of groups) {
     const pool = methods.filter(inGroup);
     if (pool.length === 0) continue;
-    return bestByArgumentTypes(pool, argTypes) ?? pool[0];
+    return rankPool(pool, argTypes);
   }
-  return methods.slice().sort((a, b) => a.params.length - b.params.length)[0];
+
+  const sorted = methods.slice().sort((a, b) => a.params.length - b.params.length);
+  const shortest = sorted[0]?.params.length ?? 0;
+  return rankPool(
+    sorted.filter((m) => m.params.length === shortest),
+    argTypes
+  );
+}
+
+/** Take the highest-scoring candidates, leading with the first declaration. */
+function rankPool(pool: MethodInfo[], argTypes: ArgumentTypeHints): OverloadPick {
+  const best = pool[0];
+  if (!best) return { method: undefined, alternatives: [] };
+  if (pool.length === 1) return { method: best, alternatives: [] };
+  const scored = pool.map((method) => ({ method, score: argumentScore(method, argTypes) }));
+  const top = Math.max(...scored.map((s) => s.score));
+  const winners = scored.filter((s) => s.score === top).map((s) => s.method);
+  const winner = winners[0] ?? best;
+  return { method: winner, alternatives: winners.slice(1) };
+}
+
+/** Pick the overload that best matches the call site, ignoring rival candidates. */
+export function pickOverload(
+  methods: MethodInfo[],
+  argCount: number,
+  argTypes: ArgumentTypeHints = []
+): MethodInfo | undefined {
+  return pickOverloadCandidates(methods, argCount, argTypes).method;
 }
 
 /** True when a bare name is a Python builtin (external code). */

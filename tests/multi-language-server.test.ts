@@ -109,12 +109,13 @@ describe("Python project via MCP", () => {
       count: number;
       injections: { source: Ref; target: Ref; injectedName?: string; framework?: string }[];
     }>("find_injections");
-    expect(r.count).toBe(2);
+    expect(r.count).toBe(3);
     expect(
       r.injections.map((i) => `${i.source.id}:${i.injectedName} -> ${i.target.id}`).sort()
     ).toEqual([
       "app.service.OrderService:repo -> app.repository.OrderRepository",
-      "module:app.api:service -> app.service.OrderService",
+      "module:app.api#create_order:service -> module:app.api#get_service",
+      "module:app.api#read_order:service -> module:app.api#get_service",
     ]);
   });
 

@@ -16,9 +16,9 @@
 | Languages | Java, Python, TypeScript, JavaScript |
 | Parsing | `LanguageDescriptor` per language: extensions → grammar → resolver → frameworks → fixture |
 | Resolution | One `Resolver` contract, two implementations: `java` (declared types + hierarchy) and `module` (imports and barrels) |
-| Graph | SQLite property graph: 15 node kinds, 13 edge kinds, WAL |
-| Tools | 27 MCP tools |
-| Tests | 32 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
+| Graph | SQLite property graph: 15 node kinds, 14 edge kinds, WAL |
+| Tools | 29 MCP tools |
+| Tests | 43 test files, per-language fixtures, conformance matrix + migration + index-plan + scale checks |
 | Quality gates | Biome lint/format, coverage thresholds, Node 22/24 matrix |
 
 The biggest structural gap is the **per-language entry cost**: a new language needs a
@@ -68,6 +68,16 @@ cannot answer.
   `quart` depending on which one it imported; Quart is a data-only module, FastAPI gained
   `api_route`/`websocket`/`websocket_route`, and a file with no framework import falls back
   to the receiver.
+- **Event and message wiring.** A publisher and its listener are joined only by the
+  framework, so a static graph shows them as unrelated. **done** — an `EMITS` edge now
+  joins a publication to every listener on its channel: Spring `@EventListener` and
+  `@TransactionalEventListener` (with the transaction `phase`), Kafka `send` →
+  `@KafkaListener`, JMS `convertAndSend` → `@JmsListener`, and NestJS `emit` →
+  `@OnEvent`. Confidence is `1` only when both sides resolved a fully-qualified event
+  type, and `0.85` for a literal topic or queue; a run-time-computed destination produces
+  no edge rather than a guess. Still open: Pub/Sub and RabbitMQ, proxy boundaries
+  (`@Transactional`, `@Async`, `@Cacheable`), Spring Data repository derivation,
+  `@Bean` factories, and `@Qualifier`/`@Primary` disambiguation.
 - **Visible failures.** Aggregate resolver `reason` values into a `find_unresolved` tool
   and surface them in `get_node`. Unresolved edges are acceptable; unexplained ones are not.
 - **Optional compiler-assisted mode.** A `tsc` program or `jdtls` bridge behind a flag for

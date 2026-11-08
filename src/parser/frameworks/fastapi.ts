@@ -25,4 +25,7 @@ export const fastapi: FrameworkModule = {
     websocket_route: { kind: "http", httpMethod: "WEBSOCKET" },
   },
   paramMarkers: { "Depends(": "fastapi" },
+  // `router = APIRouter(prefix="/items")` groups every route declared on it;
+  // the decorator path is relative to that prefix.
+  routeGroups: { APIRouter: "prefix" },
 };

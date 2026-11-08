@@ -1,3 +1,4 @@
+import { ownerTypeOfMethodId } from "../parser/methodId.js";
 import type { EdgeKind, GraphNode, NodeKind } from "./schema.js";
 import { annotationNodeId } from "./schema.js";
 import type { GraphStore } from "./store.js";
@@ -24,6 +25,8 @@ export interface CallerInfo {
   /** Properties of the call edge (call site line, resolution, confidence). */
   callSiteLine?: number;
   resolved?: boolean;
+  /** Resolver confidence for the edge, 0..1. Absent when the edge carries none. */
+  confidence?: number;
   /** Which edge kind connected the caller: CALLS | DYNAMIC_DISPATCH | ADVISES. */
   edgeKind?: EdgeKind;
 }
@@ -36,6 +39,51 @@ export interface FlowEdgeInfo {
   controlFlow?: string[];
   /** Compact source text of the enclosing conditions. */
   guards?: string[];
+}
+
+/**
+ * What a run-time proxy does around the symbol being traced.
+ *
+ * Present only on direct-caller rows, because the facts describe the callee and
+ * the call that reaches it, not the rest of the chain.
+ */
+export interface ProxyCallInfo {
+  /** Proxy kinds wrapping the callee: transactional, async, cacheable. */
+  proxy?: string[];
+  /**
+   * Why the annotation is inert: the container cannot override the method
+   * (`private`, `static`, `final`) or subclass the class (`final-type`).
+   */
+  proxyBlocked?: string;
+  /**
+   * True when the call never leaves the object, so Spring's proxy is bypassed
+   * and the annotation does not run. A self-invocation is the classic reason
+   * `@Transactional` and `@Async` silently do nothing.
+   */
+  inert?: true;
+}
+
+/**
+ * Proxy facts for a caller row, or nothing when they do not apply.
+ *
+ * Reported for direct callers only: a proxy wraps one invocation, so a fact
+ * about depth 3 would describe an edge that does not exist.
+ */
+function proxyCallInfo(target: GraphNode, callerId: string, depth: number): ProxyCallInfo {
+  if (depth !== 1) return {};
+  const raw = target.properties.proxies;
+  if (!Array.isArray(raw)) return {};
+  const proxies = raw.filter((value): value is string => typeof value === "string");
+  if (proxies.length === 0) return {};
+  const blocked = target.properties.proxyBlocked;
+  const out: ProxyCallInfo = { proxy: proxies };
+  if (typeof blocked === "string") out.proxyBlocked = blocked;
+  const sameObject =
+    callerId.includes("#") &&
+    target.id.includes("#") &&
+    ownerTypeOfMethodId(callerId) === ownerTypeOfMethodId(target.id);
+  if (sameObject) out.inert = true;
+  return out;
 }
 
 export function nodeToRef(node: GraphNode): SymbolRef {
@@ -59,13 +107,23 @@ export interface DynamicEdgeOptions {
   includeDynamic?: boolean;
   /** Follow ADVISES edges (aspect advice -> advised method). */
   includeAdvice?: boolean;
+  /** Follow EMITS edges (publication -> listener). Default true. */
+  includeEvents?: boolean;
 }
 
-/** Edge kinds a traversal should follow, ordered from most to least certain. */
+/**
+ * Edge kinds a traversal should follow, ordered from most to least certain.
+ *
+ * EMITS is followed by default: a listener reached only through an event is
+ * still called, so omitting the edge turns "what runs on this endpoint" into a
+ * confident false negative. Advice is opt-in because callers of a method do not
+ * usually want the aspects wrapped around it.
+ */
 export function traversalEdgeKinds(opts: DynamicEdgeOptions = {}): EdgeKind[] {
   const kinds: EdgeKind[] = ["CALLS"];
   if (opts.includeDynamic) kinds.push("DYNAMIC_DISPATCH");
   if (opts.includeAdvice) kinds.push("ADVISES");
+  if (opts.includeEvents ?? true) kinds.push("EMITS");
   return kinds;
 }
 
@@ -85,6 +143,10 @@ export interface CallerQueryOptions extends DynamicEdgeOptions {
 /**
  * Find every symbol that calls the given symbol, directly or transitively.
  * Each row includes the edge chain depth so clients can render a call tree.
+ *
+ * DYNAMIC_DISPATCH edges are followed by default: a method reached only through
+ * virtual dispatch is still called, so omitting those edges produces confident
+ * false negatives. Every response echoes the edges that were followed.
  */
 export function getCallers(
   store: GraphStore,
@@ -97,7 +159,15 @@ export function getCallers(
     depth: number;
     callSiteLine?: number;
     edgeKind: EdgeKind;
-  } & FlowEdgeInfo)[];
+    confidence?: number;
+    resolved?: boolean;
+    alternatives?: string[];
+  } & FlowEdgeInfo &
+    ProxyCallInfo)[];
+  edgesFollowed: EdgeKind[];
+  includeDynamic: boolean;
+  includeAdvice: boolean;
+  includeEvents: boolean;
 } | null {
   const target = resolveNode(store, symbol);
   if (!target) return null;
@@ -105,7 +175,11 @@ export function getCallers(
   const transitive = opts.transitive ?? true;
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
-  const kinds = traversalEdgeKinds(opts);
+  const includeDynamic = opts.includeDynamic ?? true;
+  const includeAdvice = opts.includeAdvice ?? false;
+  const includeEvents = opts.includeEvents ?? true;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice, includeEvents });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice, includeEvents };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -127,7 +201,10 @@ export function getCallers(
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
         ...edgeFlow(r.edge_props),
+        ...edgeFacts(r.edge_props),
+        ...proxyCallInfo(target, r.id, 1),
       })),
+      ...policy,
     };
   }
 
@@ -165,7 +242,10 @@ export function getCallers(
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
       ...edgeFlow(r.edge_props),
+      ...edgeFacts(r.edge_props),
+      ...proxyCallInfo(target, r.id, r.depth),
     })),
+    ...policy,
   };
 }
 
@@ -178,6 +258,9 @@ export interface CalleeQueryOptions extends DynamicEdgeOptions {
 
 /**
  * Find every symbol the given symbol calls, directly or transitively.
+ *
+ * DYNAMIC_DISPATCH edges are followed by default for the same reason as
+ * `getCallers`: the virtual target is what actually runs.
  */
 export function getCallees(
   store: GraphStore,
@@ -190,7 +273,14 @@ export function getCallees(
     depth: number;
     callSiteLine?: number;
     edgeKind: EdgeKind;
+    confidence?: number;
+    resolved?: boolean;
+    alternatives?: string[];
   } & FlowEdgeInfo)[];
+  edgesFollowed: EdgeKind[];
+  includeDynamic: boolean;
+  includeAdvice: boolean;
+  includeEvents: boolean;
 } | null {
   const source = resolveNode(store, symbol);
   if (!source) return null;
@@ -198,7 +288,11 @@ export function getCallees(
   const transitive = opts.transitive ?? true;
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 100;
-  const kinds = traversalEdgeKinds(opts);
+  const includeDynamic = opts.includeDynamic ?? true;
+  const includeAdvice = opts.includeAdvice ?? false;
+  const includeEvents = opts.includeEvents ?? true;
+  const kinds = traversalEdgeKinds({ includeDynamic, includeAdvice, includeEvents });
+  const policy = { edgesFollowed: kinds, includeDynamic, includeAdvice, includeEvents };
 
   if (!transitive) {
     const rows = store.raw<RowWithEdge & { edge_kind: EdgeKind }>(
@@ -220,7 +314,9 @@ export function getCallees(
         callSiteLine: edgeLine(r.edge_props),
         edgeKind: r.edge_kind,
         ...edgeFlow(r.edge_props),
+        ...edgeFacts(r.edge_props),
       })),
+      ...policy,
     };
   }
 
@@ -258,7 +354,9 @@ export function getCallees(
       callSiteLine: edgeLine(r.edge_props),
       edgeKind: r.edge_kind,
       ...edgeFlow(r.edge_props),
+      ...edgeFacts(r.edge_props),
     })),
+    ...policy,
   };
 }
 
@@ -272,6 +370,8 @@ export interface PathEntry {
     kind?: EdgeKind;
     callSiteLine?: number;
     resolved?: boolean;
+    confidence?: number;
+    alternatives?: string[];
   }[];
 }
 
@@ -296,23 +396,35 @@ export function tracePath(
 
   const maxDepth = Math.max(1, opts.maxDepth ?? store.maxDepth ?? 10);
   const limit = opts.limit ?? 10;
-  const kinds = sqlKinds(traversalEdgeKinds(opts));
+  const kinds = sqlKinds(
+    traversalEdgeKinds({
+      includeDynamic: opts.includeDynamic ?? true,
+      includeAdvice: opts.includeAdvice ?? false,
+      includeEvents: opts.includeEvents ?? true,
+    })
+  );
 
   // BFS in SQL via recursive CTE that accumulates the path taken.
+  //
+  // Node ids contain both '>' (`Type#<init>`) and '/' (module ids), so the
+  // accumulated path is joined with the ASCII unit separator, which cannot
+  // appear in an id or in an edge kind. Splitting on those characters instead
+  // truncated constructor ids and every edge fact looked up from them.
+  const SEG = "\u001f";
   const rows = store.raw<{ path: string; edge_path: string; depth: number }>(
     `WITH RECURSIVE paths(id, depth, path, edge_path) AS (
-       SELECT e.target, 1, e.source || '/' || e.target,
-              e.source || '>' || e.target || '>' || e.kind
+       SELECT e.target, 1, e.source || '${SEG}' || e.target,
+              e.source || '${SEG}' || e.target || '${SEG}' || e.kind
        FROM edges e
        WHERE e.source = ? AND e.kind IN (${kinds})
        UNION ALL
-       SELECT e.target, p.depth + 1, p.path || '/' || e.target,
-              p.edge_path || '|' || e.source || '>' || e.target || '>' || e.kind
+       SELECT e.target, p.depth + 1, p.path || '${SEG}' || e.target,
+              p.edge_path || '|' || e.source || '${SEG}' || e.target || '${SEG}' || e.kind
        FROM edges e
        JOIN paths p ON e.source = p.id
        WHERE e.kind IN (${kinds})
          AND p.depth < ?
-         AND instr('|' || p.path || '|', '|' || e.target || '|') = 0
+         AND instr('${SEG}' || p.path || '${SEG}', '${SEG}' || e.target || '${SEG}') = 0
      )
      SELECT path, edge_path, depth
      FROM paths
@@ -326,17 +438,17 @@ export function tracePath(
   );
 
   return rows.map((r) => {
-    const ids = r.path.split("/");
+    const ids = r.path.split(SEG);
     const edges = r.edge_path.split("|").map((triple) => {
-      const [src, tgt, kind, ...rest] = triple.split(">");
-      // Method ids may contain '>'? No, node ids use type#method and $field.
-      void rest;
+      const [src, tgt, kind] = triple.split(SEG);
       const edge = {
         source: src ?? "",
         target: tgt ?? "",
         kind: (kind as EdgeKind | undefined) ?? undefined,
         callSiteLine: undefined as number | undefined,
         resolved: undefined as boolean | undefined,
+        confidence: undefined as number | undefined,
+        alternatives: undefined as string[] | undefined,
       };
       const props = store.raw<{ properties: string }>(
         "SELECT properties FROM edges WHERE source = ? AND target = ? AND kind = ? LIMIT 1",
@@ -345,10 +457,19 @@ export function tracePath(
         edge.kind
       );
       const parsed = props[0]
-        ? (JSON.parse(props[0].properties) as { line?: number; resolved?: boolean })
+        ? (JSON.parse(props[0].properties) as {
+            line?: number;
+            resolved?: boolean;
+            confidence?: number;
+            alternatives?: string[];
+          })
         : undefined;
       edge.callSiteLine = parsed?.line;
       edge.resolved = parsed?.resolved;
+      edge.confidence = parsed?.confidence;
+      if (parsed?.alternatives && parsed.alternatives.length > 0) {
+        edge.alternatives = parsed.alternatives.filter((id) => typeof id === "string");
+      }
       return edge;
     });
     return { path: ids, length: r.depth, edges };
@@ -1103,6 +1224,14 @@ export interface WiringEdge {
   /** ROUTES: HTTP verb and path. */
   httpMethod?: string;
   path?: string;
+  /** EMITS: the event class or topic joining publisher to listener. */
+  channel?: string;
+  /** EMITS: `event-class` or `topic`. */
+  channelKind?: string;
+  /** EMITS: transaction phase that gates the listener. */
+  phase?: string;
+  /** EMITS: confidence in the target identity. */
+  confidence?: number;
 }
 
 function wiringEdges(
@@ -1136,6 +1265,10 @@ function wiringEdges(
       mechanism?: string;
       httpMethod?: string;
       path?: string;
+      channel?: string;
+      channelKind?: string;
+      phase?: string;
+      confidence?: number;
     };
     return {
       source: rowToRef({
@@ -1159,6 +1292,10 @@ function wiringEdges(
       ...(props.mechanism ? { mechanism: props.mechanism } : {}),
       ...(props.httpMethod ? { httpMethod: props.httpMethod } : {}),
       ...(props.path ? { path: props.path } : {}),
+      ...(props.channel ? { channel: props.channel } : {}),
+      ...(props.channelKind ? { channelKind: props.channelKind } : {}),
+      ...(props.phase ? { phase: props.phase } : {}),
+      ...(typeof props.confidence === "number" ? { confidence: props.confidence } : {}),
     };
   });
 }
@@ -1185,6 +1322,20 @@ export function findRoutes(
   opts: { symbol?: string; limit?: number } = {}
 ): WiringEdge[] {
   return wiringEdges(store, "ROUTES", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
+}
+
+/**
+ * Publications joined to the listeners that receive them.
+ *
+ * An EMITS edge asserts that a listener is a candidate consumer of a
+ * publication, not that it always runs: a transaction-gated listener only fires
+ * inside a committed transaction, and the `phase` property says which.
+ */
+export function findEventFlows(
+  store: GraphStore,
+  opts: { symbol?: string; limit?: number } = {}
+): WiringEdge[] {
+  return wiringEdges(store, "EMITS", opts.symbol, opts.limit ?? store.defaultLimit ?? 50);
 }
 
 export interface ExternalDependency {
@@ -1283,5 +1434,28 @@ function edgeFlow(props: string | undefined): FlowEdgeInfo {
     out.controlFlow = parsed.controlFlow;
   }
   if (Array.isArray(parsed.guards) && parsed.guards.length > 0) out.guards = parsed.guards;
+  return out;
+}
+
+/**
+ * Extract the resolution facts recorded on an edge. Confidence is only written
+ * for kinds that have a confidence model, so it is omitted rather than defaulted
+ * — an absent value must not be read as certainty. `alternatives` appears only
+ * on an ambiguous call, where the target is the best-ranked candidate.
+ */
+function edgeFacts(props: string | undefined): {
+  confidence?: number;
+  resolved?: boolean;
+  alternatives?: string[];
+} {
+  if (!props) return {};
+  const parsed = JSON.parse(props) as { confidence?: number; resolved?: boolean };
+  const out: { confidence?: number; resolved?: boolean; alternatives?: string[] } = {};
+  if (typeof parsed.confidence === "number") out.confidence = parsed.confidence;
+  if (typeof parsed.resolved === "boolean") out.resolved = parsed.resolved;
+  const alternatives = (parsed as { alternatives?: unknown }).alternatives;
+  if (Array.isArray(alternatives) && alternatives.length > 0) {
+    out.alternatives = alternatives.filter((id): id is string => typeof id === "string");
+  }
   return out;
 }

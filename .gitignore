@@ -29,3 +29,7 @@ coverage/
 
 # OS
 .DS_Store
+
+# Accuracy benchmark: fetched third-party projects and generated reports are never committed
+benchmarks/.cache/
+benchmarks/reports/
