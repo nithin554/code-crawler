@@ -79,7 +79,7 @@ jobs:
           java-version: '21'
 
       - name: Cache pinned benchmark checkouts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: benchmarks/.cache
           key: accuracy-checkouts-${{ hashFiles('benchmarks/manifest.json') }}
